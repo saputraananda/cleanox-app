@@ -50,7 +50,12 @@ const fmtDateTime = (dt) => {
     minute: '2-digit',
   });
 };
-const toISO = (d) => { const s = d.toISOString().split('T')[0]; return s; };
+const toISO = (d) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
 const today = toISO(new Date());
 
 /* Cutoff period: 26 prev month → 25 current month */
@@ -276,6 +281,33 @@ function ColFilterDropdown({ colKey, values, selected, onChange }) {
 }
 
 /* ── Loading Bar ───────────────────────────────────────── */
+/* ── Date Input (DD/MM/YYYY) ───────────────────────────── */
+function DateInput({ value, onChange, className }) {
+  const toDisplay = (iso) => {
+    if (!iso) return '';
+    const [y, m, d] = iso.split('-');
+    return `${d}/${m}/${y}`;
+  };
+  const [display, setDisplay] = useState(() => toDisplay(value));
+  useEffect(() => { setDisplay(toDisplay(value)); }, [value]);
+
+  const handleChange = (e) => {
+    let raw = e.target.value.replace(/[^\d]/g, '');
+    if (raw.length > 4) raw = raw.slice(0, 2) + '/' + raw.slice(2, 4) + '/' + raw.slice(4, 8);
+    else if (raw.length > 2) raw = raw.slice(0, 2) + '/' + raw.slice(2);
+    setDisplay(raw);
+    const match = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (match) onChange(`${match[3]}-${match[2]}-${match[1]}`);
+  };
+
+  const handleBlur = () => { setDisplay(toDisplay(value)); };
+
+  return (
+    <input type="text" value={display} onChange={handleChange} onBlur={handleBlur}
+      placeholder="DD/MM/YYYY" maxLength={10} className={className} />
+  );
+}
+
 function LoadingBar({ visible }) {
   return (
     <div className={`fixed top-0 left-0 right-0 z-50 h-0.5 transition-opacity duration-300 ${visible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
@@ -515,13 +547,11 @@ export default function CleanoxByWaschenPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Tanggal Mulai</label>
-              <input type="date" className="input-field text-sm" value={dateStart} max={dateEnd}
-                onChange={(e) => setDateStart(e.target.value)} />
+              <DateInput value={dateStart} onChange={setDateStart} className="input-field text-sm" />
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Tanggal Akhir</label>
-              <input type="date" className="input-field text-sm" value={dateEnd} min={dateStart}
-                onChange={(e) => setDateEnd(e.target.value)} />
+              <DateInput value={dateEnd} onChange={setDateEnd} className="input-field text-sm" />
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Outlet</label>
