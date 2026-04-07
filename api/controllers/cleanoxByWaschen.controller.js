@@ -73,7 +73,9 @@ export const getData = async (req, res) => {
           GROUP BY 1, 2
       )
       SELECT COUNT(*) AS total, COALESCE(SUM(ppn.nominal_bayar),0) AS total_nominal
-      FROM ppn WHERE 1=1 ${outletConditionPpn}
+      FROM nota_flag nf
+      LEFT JOIN ppn ON ppn.no_nota = nf.no_nota
+      WHERE 1=1 ${outletCondition}
     `;
     statsParams = [...dateParams, ...outletParams];
 
@@ -120,7 +122,7 @@ export const getData = async (req, res) => {
           nf.daftar_item
       FROM nota_flag nf
       LEFT JOIN ppn ON ppn.no_nota = nf.no_nota
-      WHERE 1=1 ${outletConditionPpn}
+      WHERE 1=1 ${outletCondition}
       ORDER BY nf.tgl_terima DESC, nf.no_nota DESC
       LIMIT ? OFFSET ?
     `;
