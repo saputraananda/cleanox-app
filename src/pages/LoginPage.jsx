@@ -6,7 +6,7 @@ import { setAuth } from '../utils/auth.js';
 import cleanoxLogo from '../assets/cleanox.png';
 
 export default function LoginPage() {
-  const [form, setForm] = useState({ email: '', password: '' });
+  const [form, setForm] = useState({ username: '', password: '' });
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -47,7 +47,7 @@ export default function LoginPage() {
         {/* Card */}
         <div className="bg-white rounded-2xl shadow-2xl p-8">
           <h2 className="text-xl font-semibold text-gray-900 mb-1">Masuk ke Akun</h2>
-          <p className="text-sm text-gray-400 mb-6">Gunakan email dan password Anda untuk masuk</p>
+          <p className="text-sm text-gray-400 mb-6">Gunakan username dan password Anda untuk masuk</p>
 
           {error && (
             <div className="flex items-start gap-2 bg-red-50 text-red-700 border border-red-200 rounded-lg p-3 mb-5 text-sm">
@@ -59,16 +59,16 @@ export default function LoginPage() {
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                Email
+                Username
               </label>
               <input
-                type="email"
-                placeholder="nama@email.com"
+                type="text"
+                placeholder="username"
                 className="input-field"
-                value={form.email}
-                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                value={form.username}
+                onChange={(e) => setForm({ ...form, username: e.target.value })}
                 required
-                autoComplete="email"
+                autoComplete="username"
               />
             </div>
 

@@ -61,26 +61,26 @@ export const register = async (req, res) => {
 
 /* ── Login ────────────────────────────────────────────── */
 export const login = async (req, res) => {
-  const { email, password } = req.body;
+  const { username, password } = req.body;
 
-  if (!email || !password) {
-    return res.status(400).json({ message: 'Email dan password wajib diisi' });
+  if (!username || !password) {
+    return res.status(400).json({ message: 'Username dan password wajib diisi' });
   }
 
   try {
     const [rows] = await pool.query(
-      'SELECT id, name, email, username, password_hash, role, avatar FROM users WHERE email = ?',
-      [email]
+      'SELECT id, name, email, username, password_hash, role, avatar FROM users WHERE username = ?',
+      [username]
     );
 
     if (rows.length === 0) {
-      return res.status(401).json({ message: 'Email atau password salah' });
+      return res.status(401).json({ message: 'Username atau password salah' });
     }
 
     const user = rows[0];
     const isValid = await bcrypt.compare(password, user.password_hash);
     if (!isValid) {
-      return res.status(401).json({ message: 'Email atau password salah' });
+      return res.status(401).json({ message: 'Username atau password salah' });
     }
 
     const token = jwt.sign(
