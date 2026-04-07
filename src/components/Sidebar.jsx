@@ -3,6 +3,7 @@ import {
   LayoutDashboard,
   Sparkles,
   Building2,
+  Factory,
   X,
 } from 'lucide-react';
 import cleanoxLogo from '../assets/cleanox.png';
@@ -11,6 +12,7 @@ const NAV_ITEMS = [
   { label: 'Dashboard', icon: LayoutDashboard, to: '/dashboard' },
   { label: 'Cleanox', icon: Sparkles, to: '/cleanox', soon: true },
   { label: 'Cleanox By Waschen', icon: Building2, to: '/cleanox-by-waschen' },
+  { label: 'Production Status', icon: Factory, to: '/cleanox-by-waschen-production' },
 ];
 
 export default function Sidebar({ collapsed, mobileOpen, onMobileClose }) {

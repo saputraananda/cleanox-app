@@ -4,6 +4,7 @@ import LoginPage from './pages/LoginPage.jsx';
 import RegisterPage from './pages/RegisterPage.jsx';
 import DashboardPage from './pages/DashboardPage.jsx';
 import CleanoxByWaschenPage from './pages/CleanoxByWaschenPage.jsx';
+import CleanoxByWaschenProductionPage from './pages/CleanoxByWaschenProductionPage.jsx';
 import Layout from './components/Layout.jsx';
 
 const PrivateRoute = ({ children }) =>
@@ -50,6 +51,14 @@ export default function App() {
         element={
           <PrivateRoute>
             <Layout><CleanoxByWaschenPage /></Layout>
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/cleanox-by-waschen-production"
+        element={
+          <PrivateRoute>
+            <Layout><CleanoxByWaschenProductionPage /></Layout>
           </PrivateRoute>
         }
       />
