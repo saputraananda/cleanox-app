@@ -121,7 +121,7 @@ export const getData = async (req, res) => {
       FROM nota_flag nf
       LEFT JOIN ppn ON ppn.no_nota = nf.no_nota
       WHERE 1=1 ${outletConditionPpn}
-      ORDER BY nf.outlet, nf.tgl_terima, nf.no_nota
+      ORDER BY nf.tgl_terima DESC, nf.no_nota DESC
       LIMIT ? OFFSET ?
     `;
     dataParams = [...dateParams, ...outletParams, limitNum, offset];
@@ -190,7 +190,7 @@ export const getData = async (req, res) => {
       LEFT JOIN nota_flag nf ON ppn.no_nota = nf.no_nota
       LEFT JOIN ni ON ppn.no_nota = ni.no_nota
       WHERE COALESCE(nf.is_cleanox,0) = 1 ${outletConditionPpn}
-      ORDER BY ppn.outlet, ppn.waktu_pembayaran, ppn.no_nota
+      ORDER BY ppn.waktu_pembayaran DESC, ppn.no_nota DESC
       LIMIT ? OFFSET ?
     `;
     dataParams = [...dateParams, ...outletParams, limitNum, offset];

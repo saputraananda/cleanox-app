@@ -19,6 +19,9 @@ import {
   AlertCircle,
   Inbox,
   Clock,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
 } from 'lucide-react';
 import api from '../utils/api.js';
 
@@ -112,12 +115,88 @@ const COLS = [
   { key: 'no_nota',          label: 'No Nota',       align: 'left',   filterable: true  },
   { key: 'customer_nama',    label: 'Customer',      align: 'left',   filterable: true  },
   { key: 'pembuat_nota',     label: 'Pembuat Nota',  align: 'left',   filterable: true  },
-  { key: 'tgl_terima',       label: 'Tgl Terima',    align: 'left',   filterable: false },
-  { key: 'tgl_selesai',      label: 'Tgl Selesai',   align: 'left',   filterable: false },
-  { key: 'waktu_pembayaran', label: 'Waktu Bayar',   align: 'left',   filterable: false },
+  { key: 'tgl_terima',       label: 'Tgl Terima',    align: 'left',   filterable: false, sortable: true },
+  { key: 'tgl_selesai',      label: 'Tgl Selesai',   align: 'left',   filterable: false, sortable: true },
+  { key: 'waktu_pembayaran', label: 'Waktu Bayar',   align: 'left',   filterable: false, sortable: true },
   { key: 'nominal_bayar',    label: 'Nominal',       align: 'right',  filterable: false },
   { key: 'daftar_item',      label: 'Item Layanan',  align: 'left',   filterable: true  },
 ];
+
+/* ── Quick Range Dropdown ─────────────────────────────── */
+function QuickRangeDropdown({ ranges, onSelect, currentLabel }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+
+  const cepat = ranges.filter((r) => ['Hari Ini', 'Kemarin'].includes(r.label));
+  const bulan = ranges.filter((r) => !['Hari Ini', 'Kemarin'].includes(r.label));
+  const byYear = {};
+  bulan.forEach((r) => {
+    const yr = r.label.split(' ')[1];
+    if (!byYear[yr]) byYear[yr] = [];
+    byYear[yr].push(r);
+  });
+
+  const select = (qr) => { setOpen(false); onSelect(qr); };
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 bg-white
+          hover:border-brand-400 hover:text-brand-700 transition-all duration-150"
+      >
+        <Calendar className="w-4 h-4 text-gray-400" />
+        <span className="text-gray-700">{currentLabel || 'Pilih Periode'}</span>
+        <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div className="absolute top-full left-0 z-50 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl w-72 overflow-hidden animate-fade-in">
+          <div className="px-3 pt-3 pb-2">
+            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Cepat</p>
+            <div className="flex gap-1.5">
+              {cepat.map((qr) => (
+                <button key={qr.label} onClick={() => select(qr)}
+                  className="flex-1 py-1.5 text-xs text-gray-700 rounded-lg border border-gray-200
+                    hover:bg-brand-50 hover:border-brand-300 hover:text-brand-700 transition-colors">
+                  {qr.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="border-t border-gray-100 max-h-64 overflow-y-auto p-3 space-y-3">
+            {Object.entries(byYear)
+              .sort(([a], [b]) => Number(b) - Number(a))
+              .map(([yr, items]) => (
+                <div key={yr}>
+                  <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">{yr}</p>
+                  <div className="grid grid-cols-3 gap-1">
+                    {items.map((qr) => (
+                      <button key={qr.label} onClick={() => select(qr)}
+                        className={`py-1.5 text-xs rounded-lg border transition-colors px-1 truncate
+                          ${
+                            currentLabel === qr.label
+                              ? 'bg-brand-700 text-white border-brand-700 font-semibold'
+                              : 'border-gray-200 text-gray-700 hover:bg-brand-50 hover:border-brand-300 hover:text-brand-700'
+                          }`}>
+                        {qr.label.split(' ')[0]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /* ── Column Filter Dropdown ────────────────────────────── */
 function ColFilterDropdown({ colKey, values, selected, onChange }) {
@@ -156,7 +235,7 @@ function ColFilterDropdown({ colKey, values, selected, onChange }) {
       </button>
 
       {open && (
-        <div className="absolute top-full left-0 z-50 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl w-52 overflow-hidden animate-fade-in">
+        <div className="absolute top-full left-0 z-50 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl w-52 overflow-hidden animate-fade-in text-gray-700 normal-case tracking-normal font-normal">
           <div className="p-2 border-b border-gray-100">
             <input
               autoFocus
@@ -229,6 +308,9 @@ export default function CleanoxByWaschenPage() {
 
   // Column filters: Map<colKey, Set<value>>
   const [colFilters, setColFilters] = useState({});
+  const [sortKey, setSortKey] = useState('tgl_terima');
+  const [sortDir, setSortDir] = useState('desc');
+  const [quickLabel, setQuickLabel] = useState('');
 
   const abortRef = useRef(null);
 
@@ -284,7 +366,17 @@ export default function CleanoxByWaschenPage() {
     const r = qr.range();
     setDateStart(r.date_start);
     setDateEnd(r.date_end);
+    setQuickLabel(qr.label);
     setApplied({ date_start: r.date_start, date_end: r.date_end, outlet, date_field: dateField });
+  };
+
+  const toggleSort = (key) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('desc');
+    }
   };
 
   const goPage = (p) => { setPagination((prev) => ({ ...prev, page: p })); fetchData(p, pagination.limit); };
@@ -325,8 +417,18 @@ export default function CleanoxByWaschenPage() {
       }
     });
 
+    // sort
+    if (sortKey) {
+      data = [...data].sort((a, b) => {
+        const av = a[sortKey] ?? '';
+        const bv = b[sortKey] ?? '';
+        const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+        return sortDir === 'asc' ? cmp : -cmp;
+      });
+    }
+
     return data;
-  }, [rows, search, colFilters]);
+  }, [rows, search, colFilters, sortKey, sortDir]);
 
   /* CSV Export */
   const exportCSV = () => {
@@ -388,19 +490,8 @@ export default function CleanoxByWaschenPage() {
           </div>
         </div>
 
-        {/* ── Quick ranges (scrollable on mobile) ─── */}
-        <div className="flex gap-2 overflow-x-auto pb-1 -mx-3 px-3 sm:mx-0 sm:px-0 sm:flex-wrap">
-          {QUICK_RANGES.map((qr) => (
-            <button
-              key={qr.label}
-              onClick={() => applyQuick(qr)}
-              className="flex-shrink-0 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 bg-white
-                hover:border-brand-400 hover:bg-brand-50 hover:text-brand-700 transition-all duration-150"
-            >
-              {qr.label}
-            </button>
-          ))}
-        </div>
+        {/* ── Quick range dropdown ─── */}
+        <QuickRangeDropdown ranges={QUICK_RANGES} onSelect={applyQuick} currentLabel={quickLabel} />
 
         {/* ── Filter card ─── */}
         <div className="card">
@@ -543,6 +634,21 @@ export default function CleanoxByWaschenPage() {
                             selected={colFilters[col.key] || new Set()}
                             onChange={(s) => setColFilter(col.key, s)}
                           />
+                        )}
+                        {col.sortable && (
+                          <button
+                            onClick={() => toggleSort(col.key)}
+                            className={`ml-1 p-0.5 rounded transition-colors ${
+                              sortKey === col.key ? 'text-lime-400' : 'text-white/30 hover:text-white/70'
+                            }`}
+                            title={sortKey === col.key ? (sortDir === 'asc' ? 'Urutkan Terbesar' : 'Urutkan Terkecil') : 'Urutkan'}
+                          >
+                            {sortKey === col.key
+                              ? sortDir === 'asc'
+                                ? <ArrowUp className="w-3 h-3" />
+                                : <ArrowDown className="w-3 h-3" />
+                              : <ArrowUpDown className="w-3 h-3" />}
+                          </button>
                         )}
                       </div>
                     </th>
