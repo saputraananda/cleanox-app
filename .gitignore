@@ -1,12 +1,12 @@
 # Dependencies
 node_modules/
 
-# Build output
-dist/
+# Build output (dist di-commit agar Hostinger Passenger bisa serve React)
 dist-ssr/
 
 # Environment variables (NEVER commit secrets)
 .env
+.env.prod
 .env.local
 .env.*.local
 
