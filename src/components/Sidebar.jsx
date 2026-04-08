@@ -7,15 +7,18 @@ import {
   X,
 } from 'lucide-react';
 import cleanoxLogo from '../assets/cleanox.png';
+import { getUser } from '../utils/auth.js';
 
 const NAV_ITEMS = [
-  { label: 'Dashboard', icon: LayoutDashboard, to: '/dashboard' },
-  { label: 'Cleanox', icon: Sparkles, to: '/cleanox', soon: true },
-  { label: 'Cleanox By Waschen', icon: Building2, to: '/cleanox-by-waschen' },
-  { label: 'Production Status', icon: Factory, to: '/cleanox-by-waschen-production' },
+  { label: 'Beranda',          icon: LayoutDashboard, to: '/dashboard',                      roles: ['admin', 'cleanox', 'frontliner'] },
+  { label: 'Cleanox',            icon: Sparkles,        to: '/cleanox',        soon: true,     roles: ['admin'] },
+  { label: 'Cleanox By Waschen', icon: Building2,       to: '/cleanox-by-waschen',              roles: ['admin'] },
+  { label: 'Status Produksi',  icon: Factory,         to: '/cleanox-by-waschen-production',   roles: ['admin', 'cleanox', 'frontliner'] },
 ];
 
 export default function Sidebar({ collapsed, mobileOpen, onMobileClose }) {
+  const user = getUser();
+  const visibleItems = NAV_ITEMS.filter((item) => !item.roles || item.roles.includes(user?.role));
   return (
     <aside
       className={`
@@ -55,7 +58,7 @@ export default function Sidebar({ collapsed, mobileOpen, onMobileClose }) {
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto p-3 space-y-0.5">
-        {NAV_ITEMS.map((item) => (
+        {visibleItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}

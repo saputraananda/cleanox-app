@@ -22,7 +22,7 @@ export const getData = async (req, res) => {
     date_start,
     date_end,
     outlet,
-    date_field = 'tgl_terima', // 'tgl_terima' | 'waktu_pembayaran'
+    date_field = 'tgl_terima', // 'tgl_terima' | 'tgl_selesai'
     page = 1,
     limit = 25,
   } = req.query;
@@ -35,176 +35,61 @@ export const getData = async (req, res) => {
   const limitNum = Math.min(200, Math.max(1, parseInt(limit, 10)));
   const offset = (pageNum - 1) * limitNum;
 
-  const dateFieldSafe = date_field === 'waktu_pembayaran' ? 'waktu_pembayaran' : 'tgl_terima';
-  const outletCondition = outlet ? 'AND nf.outlet = ?' : '';
-  const outletConditionPpn = outlet ? 'AND ppn.outlet = ?' : '';
+  const dateFieldSafe     = date_field === 'tgl_selesai' ? 'tgl_selesai' : 'tgl_terima';
+  const outletConditionStats = outlet ? 'AND nf.outlet = ?' : '';
+  const outletConditionData  = outlet ? 'AND rtr.outlet = ?' : '';
   const outletParams = outlet ? [outlet] : [];
-  const dateParams = [date_start, date_end];
+  const dateParams   = [date_start, date_end];
 
-  /* ── Queries by date_field ────────────────────────────── */
-  let statsQuery, statsParams, dataQuery, dataParams;
-
-  if (dateFieldSafe === 'tgl_terima') {
-    // Filter by tgl_terima: find cleanox notas in period, then look up payments
-    statsQuery = `
-      WITH nota_flag AS (
-          SELECT
-              rtr.no_nota    COLLATE utf8mb4_unicode_ci AS no_nota,
-              MAX(rtr.outlet) COLLATE utf8mb4_unicode_ci AS outlet,
-              MAX(CASE
-                  WHEN LOWER(COALESCE(rtr.nama_item,'')) LIKE '%cleanox%'
-                    OR LOWER(COALESCE(rtr.nama_item,'')) LIKE '%karpet%'
-                  THEN 1 ELSE 0
-              END) AS is_cleanox
-          FROM rekap_transaksi_reguler rtr
-          WHERE DATE(rtr.tgl_terima) BETWEEN DATE(?) AND DATE(?)
-          GROUP BY 1
-          HAVING is_cleanox = 1
-      ),
-      ppn AS (
-          SELECT
-              nf.outlet,
-              nf.no_nota,
-              SUM(rtrp.nominal_bayar) AS nominal_bayar
-          FROM nota_flag nf
-          JOIN rekap_transaksi_reguler_pembayaran rtrp
-            ON rtrp.no_nota COLLATE utf8mb4_unicode_ci = nf.no_nota
-          WHERE rtrp.jenis_bayar <> 'e-money'
-          GROUP BY 1, 2
-      )
-      SELECT COUNT(*) AS total, COALESCE(SUM(ppn.nominal_bayar),0) AS total_nominal
-      FROM nota_flag nf
-      LEFT JOIN ppn ON ppn.no_nota = nf.no_nota
-      WHERE 1=1 ${outletCondition}
-    `;
-    statsParams = [...dateParams, ...outletParams];
-
-    dataQuery = `
-      WITH nota_flag AS (
-          SELECT
-              rtr.no_nota    COLLATE utf8mb4_unicode_ci AS no_nota,
-              MAX(rtr.outlet) COLLATE utf8mb4_unicode_ci AS outlet,
-              MAX(rtr.customer_nama)  AS customer_nama,
-              MAX(rtr.tgl_terima)     AS tgl_terima,
-              MAX(rtr.tgl_selesai)    AS tgl_selesai,
-              MAX(rtr.pembuat_nota)   AS pembuat_nota,
-              GROUP_CONCAT(DISTINCT rtr.nama_item ORDER BY rtr.nama_item SEPARATOR ', ') AS daftar_item,
-              MAX(CASE
-                  WHEN LOWER(COALESCE(rtr.nama_item,'')) LIKE '%cleanox%'
-                    OR LOWER(COALESCE(rtr.nama_item,'')) LIKE '%karpet%'
-                  THEN 1 ELSE 0
-              END) AS is_cleanox
-          FROM rekap_transaksi_reguler rtr
-          WHERE DATE(rtr.tgl_terima) BETWEEN DATE(?) AND DATE(?)
-          GROUP BY 1
-          HAVING is_cleanox = 1
-      ),
-      ppn AS (
-          SELECT
-              nf.no_nota,
-              MIN(rtrp.waktu_pembayaran) AS waktu_pembayaran,
-              SUM(rtrp.nominal_bayar)    AS nominal_bayar
-          FROM nota_flag nf
-          JOIN rekap_transaksi_reguler_pembayaran rtrp
-            ON rtrp.no_nota COLLATE utf8mb4_unicode_ci = nf.no_nota
-          WHERE rtrp.jenis_bayar <> 'e-money'
-          GROUP BY 1
-      )
+  const statsQuery = `
+    SELECT COUNT(*) AS total, COALESCE(SUM(total_tagihan), 0) AS total_nominal
+    FROM (
       SELECT
-          nf.outlet,
-          nf.no_nota,
-          nf.customer_nama,
-          nf.pembuat_nota,
-          nf.tgl_terima,
-          nf.tgl_selesai,
-          ppn.waktu_pembayaran,
-          ppn.nominal_bayar,
-          nf.daftar_item
-      FROM nota_flag nf
-      LEFT JOIN ppn ON ppn.no_nota = nf.no_nota
-      WHERE 1=1 ${outletCondition}
-      ORDER BY nf.tgl_terima DESC, nf.no_nota DESC
-      LIMIT ? OFFSET ?
-    `;
-    dataParams = [...dateParams, ...outletParams, limitNum, offset];
-  } else {
-    // Filter by waktu_pembayaran (original behaviour)
-    statsQuery = `
-      WITH ppn AS (
-          SELECT
-              rtrp.outlet   COLLATE utf8mb4_unicode_ci AS outlet,
-              rtrp.no_nota  COLLATE utf8mb4_unicode_ci AS no_nota,
-              SUM(rtrp.nominal_bayar) AS nominal_bayar
-          FROM rekap_transaksi_reguler_pembayaran rtrp
-          WHERE DATE(rtrp.waktu_pembayaran) BETWEEN DATE(?) AND DATE(?)
-            AND rtrp.jenis_bayar <> 'e-money'
-          GROUP BY 1, 2
-      ),
-      nota_flag AS (
-          SELECT rtr.no_nota COLLATE utf8mb4_unicode_ci AS no_nota,
-              MAX(CASE
-                  WHEN LOWER(COALESCE(rtr.nama_item,'')) LIKE '%cleanox%'
-                    OR LOWER(COALESCE(rtr.nama_item,'')) LIKE '%karpet%'
-                  THEN 1 ELSE 0
-              END) AS is_cleanox
-          FROM rekap_transaksi_reguler rtr GROUP BY 1
-      )
-      SELECT COUNT(*) AS total, COALESCE(SUM(ppn.nominal_bayar),0) AS total_nominal
-      FROM ppn LEFT JOIN nota_flag nf ON ppn.no_nota = nf.no_nota
-      WHERE COALESCE(nf.is_cleanox,0) = 1 ${outletConditionPpn}
-    `;
-    statsParams = [...dateParams, ...outletParams];
+        no_nota,
+        MAX(outlet)        COLLATE utf8mb4_unicode_ci AS outlet,
+        MAX(total_tagihan) AS total_tagihan
+      FROM rekap_transaksi_reguler
+      WHERE DATE(${dateFieldSafe}) BETWEEN DATE(?) AND DATE(?)
+        AND (LOWER(COALESCE(nama_item,'')) LIKE '%cleanox%'
+          OR LOWER(COALESCE(nama_item,'')) LIKE '%karpet%')
+      GROUP BY no_nota
+    ) nf
+    WHERE 1=1 ${outletConditionStats}
+  `;
 
-    dataQuery = `
-      WITH ppn AS (
-          SELECT
-              rtrp.outlet   COLLATE utf8mb4_unicode_ci AS outlet,
-              rtrp.no_nota  COLLATE utf8mb4_unicode_ci AS no_nota,
-              MIN(rtrp.waktu_pembayaran) AS waktu_pembayaran,
-              SUM(rtrp.nominal_bayar)    AS nominal_bayar
-          FROM rekap_transaksi_reguler_pembayaran rtrp
-          WHERE DATE(rtrp.waktu_pembayaran) BETWEEN DATE(?) AND DATE(?)
-            AND rtrp.jenis_bayar <> 'e-money'
-          GROUP BY 1, 2
-      ),
-      nota_flag AS (
-          SELECT rtr.no_nota COLLATE utf8mb4_unicode_ci AS no_nota,
-              MAX(CASE
-                  WHEN LOWER(COALESCE(rtr.nama_item,'')) LIKE '%cleanox%'
-                    OR LOWER(COALESCE(rtr.nama_item,'')) LIKE '%karpet%'
-                  THEN 1 ELSE 0
-              END) AS is_cleanox
-          FROM rekap_transaksi_reguler rtr GROUP BY 1
-      ),
-      ni AS (
-          SELECT rtr.no_nota COLLATE utf8mb4_unicode_ci AS no_nota,
-              MAX(rtr.customer_nama)  AS customer_nama,
-              MAX(rtr.tgl_terima)     AS tgl_terima,
-              MAX(rtr.tgl_selesai)    AS tgl_selesai,
-              MAX(rtr.pembuat_nota)   AS pembuat_nota,
-              GROUP_CONCAT(DISTINCT rtr.nama_item ORDER BY rtr.nama_item SEPARATOR ', ') AS daftar_item
-          FROM rekap_transaksi_reguler rtr GROUP BY 1
-      )
-      SELECT ppn.outlet, ppn.no_nota, ni.customer_nama, ni.pembuat_nota,
-             ni.tgl_terima, ni.tgl_selesai, ppn.waktu_pembayaran,
-             ppn.nominal_bayar, ni.daftar_item
-      FROM ppn
-      LEFT JOIN nota_flag nf ON ppn.no_nota = nf.no_nota
-      LEFT JOIN ni ON ppn.no_nota = ni.no_nota
-      WHERE COALESCE(nf.is_cleanox,0) = 1 ${outletConditionPpn}
-      ORDER BY ppn.waktu_pembayaran DESC, ppn.no_nota DESC
-      LIMIT ? OFFSET ?
-    `;
-    dataParams = [...dateParams, ...outletParams, limitNum, offset];
-  }
+  const dataQuery = `
+    WITH nota_flag AS (
+      SELECT DISTINCT no_nota COLLATE utf8mb4_unicode_ci AS no_nota
+      FROM rekap_transaksi_reguler
+      WHERE DATE(${dateFieldSafe}) BETWEEN DATE(?) AND DATE(?)
+        AND (LOWER(COALESCE(nama_item,'')) LIKE '%cleanox%'
+          OR LOWER(COALESCE(nama_item,'')) LIKE '%karpet%')
+    )
+    SELECT
+      rtr.outlet,
+      rtr.no_nota,
+      MAX(rtr.customer_nama)  AS customer_nama,
+      MAX(rtr.pembuat_nota)   AS pembuat_nota,
+      MAX(rtr.tgl_terima)     AS tgl_terima,
+      MAX(rtr.tgl_selesai)    AS tgl_selesai,
+      MAX(rtr.total_tagihan)  AS nominal_bayar,
+      GROUP_CONCAT(DISTINCT rtr.nama_item ORDER BY rtr.nama_item SEPARATOR ', ') AS daftar_item
+    FROM nota_flag nf
+    JOIN rekap_transaksi_reguler rtr
+      ON rtr.no_nota COLLATE utf8mb4_unicode_ci = nf.no_nota
+    WHERE 1=1 ${outletConditionData}
+    GROUP BY rtr.outlet, rtr.no_nota
+    ORDER BY MAX(rtr.${dateFieldSafe}) DESC, rtr.no_nota DESC
+    LIMIT ? OFFSET ?
+  `;
 
   try {
     const [statsResult, dataResult] = await Promise.all([
-      smartlinkPool.query(statsQuery, statsParams),
-      smartlinkPool.query(dataQuery, dataParams),
+      smartlinkPool.query(statsQuery, [...dateParams, ...outletParams]),
+      smartlinkPool.query(dataQuery,  [...dateParams, ...outletParams, limitNum, offset]),
     ]);
 
-    const total = Number(statsResult[0][0]?.total || 0);
+    const total        = Number(statsResult[0][0]?.total        || 0);
     const totalNominal = Number(statsResult[0][0]?.total_nominal || 0);
 
     return res.json({
@@ -212,8 +97,8 @@ export const getData = async (req, res) => {
       stats: { total, totalNominal },
       pagination: {
         total,
-        page: pageNum,
-        limit: limitNum,
+        page:       pageNum,
+        limit:      limitNum,
         totalPages: Math.ceil(total / limitNum),
       },
     });

@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { isAuthenticated } from './utils/auth.js';
+import { isAuthenticated, getUser } from './utils/auth.js';
 import LoginPage from './pages/LoginPage.jsx';
 import RegisterPage from './pages/RegisterPage.jsx';
 import DashboardPage from './pages/DashboardPage.jsx';
@@ -7,8 +7,14 @@ import CleanoxByWaschenPage from './pages/CleanoxByWaschenPage.jsx';
 import CleanoxByWaschenProductionPage from './pages/CleanoxByWaschenProductionPage.jsx';
 import Layout from './components/Layout.jsx';
 
-const PrivateRoute = ({ children }) =>
-  isAuthenticated() ? children : <Navigate to="/login" replace />;
+const PrivateRoute = ({ children, roles }) => {
+  if (!isAuthenticated()) return <Navigate to="/login" replace />;
+  if (roles) {
+    const user = getUser();
+    if (!roles.includes(user?.role)) return <Navigate to="/dashboard" replace />;
+  }
+  return children;
+};
 
 const PublicRoute = ({ children }) =>
   !isAuthenticated() ? children : <Navigate to="/dashboard" replace />;
@@ -36,7 +42,7 @@ export default function App() {
       <Route
         path="/cleanox"
         element={
-          <PrivateRoute>
+          <PrivateRoute roles={['admin']}>
             <Layout>
               <div className="p-8 text-center">
                 <p className="text-2xl font-bold text-gray-700">Cleanox</p>
@@ -49,7 +55,7 @@ export default function App() {
       <Route
         path="/cleanox-by-waschen"
         element={
-          <PrivateRoute>
+          <PrivateRoute roles={['admin']}>
             <Layout><CleanoxByWaschenPage /></Layout>
           </PrivateRoute>
         }

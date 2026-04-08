@@ -122,7 +122,6 @@ const COLS = [
   { key: 'pembuat_nota',     label: 'Pembuat Nota',  align: 'left',   filterable: true  },
   { key: 'tgl_terima',       label: 'Tgl Terima',    align: 'left',   filterable: false, sortable: true },
   { key: 'tgl_selesai',      label: 'Tgl Selesai',   align: 'left',   filterable: false, sortable: true },
-  { key: 'waktu_pembayaran', label: 'Waktu Bayar',   align: 'left',   filterable: false, sortable: true },
   { key: 'nominal_bayar',    label: 'Nominal',       align: 'right',  filterable: false },
   { key: 'daftar_item',      label: 'Item Layanan',  align: 'left',   filterable: true  },
 ];
@@ -465,7 +464,7 @@ export default function CleanoxByWaschenPage() {
   /* CSV Export */
   const exportCSV = () => {
     if (!filtered.length) return;
-    const headers = ['No','Outlet','No Nota','Customer','Pembuat Nota','Tgl Terima','Tgl Selesai','Waktu Bayar','Nominal (IDR)','Item Layanan'];
+    const headers = ['No','Outlet','No Nota','Customer','Pembuat Nota','Tgl Terima','Tgl Selesai','Nominal (IDR)','Item Layanan'];
     const dataRows = filtered.map((r, i) => [
       i + 1,
       r.outlet || '',
@@ -474,7 +473,6 @@ export default function CleanoxByWaschenPage() {
       r.pembuat_nota || '',
       fmtDate(r.tgl_terima),
       fmtDate(r.tgl_selesai),
-      fmtDateTime(r.waktu_pembayaran),
       r.nominal_bayar || 0,
       `"${(r.daftar_item || '').replace(/"/g, '""')}"`,
     ]);
@@ -539,7 +537,7 @@ export default function CleanoxByWaschenPage() {
                 className="ml-1.5 text-xs border border-gray-200 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-brand-400 bg-white"
               >
                 <option value="tgl_terima">Tgl Terima</option>
-                <option value="waktu_pembayaran">Waktu Bayar</option>
+                <option value="tgl_selesai">Tgl Selesai</option>
               </select>
             </span>
           </div>
@@ -731,7 +729,6 @@ export default function CleanoxByWaschenPage() {
                       <td className="px-3 sm:px-4 py-2.5 text-gray-500 whitespace-nowrap text-xs">{row.pembuat_nota || '—'}</td>
                       <td className="px-3 sm:px-4 py-2.5 text-gray-500 whitespace-nowrap text-xs">{fmtDate(row.tgl_terima)}</td>
                       <td className="px-3 sm:px-4 py-2.5 text-gray-500 whitespace-nowrap text-xs">{fmtDate(row.tgl_selesai)}</td>
-                      <td className="px-3 sm:px-4 py-2.5 text-gray-500 whitespace-nowrap text-xs">{fmtDateTime(row.waktu_pembayaran)}</td>
                       <td className="px-3 sm:px-4 py-2.5 text-right font-bold text-lime-700 whitespace-nowrap tabular-nums text-xs">{fmtCurrency(row.nominal_bayar)}</td>
                       <td className="px-3 sm:px-4 py-2.5 text-gray-400 text-xs max-w-[180px]">
                         <div className="truncate" title={row.daftar_item}>{row.daftar_item || '—'}</div>

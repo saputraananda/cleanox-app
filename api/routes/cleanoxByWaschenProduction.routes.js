@@ -4,7 +4,9 @@ import { authenticate } from '../middleware/auth.middleware.js';
 import {
   getOutlets,
   getData,
-  updateStatus,
+  getEmployees,
+  getTracking,
+  updateTracking,
   subscribeEvents,
 } from '../controllers/cleanoxByWaschenProduction.controller.js';
 
@@ -27,7 +29,9 @@ router.get('/events', authenticateSSE, subscribeEvents);
 router.use(authenticate);
 
 router.get('/outlets', getOutlets);
+router.get('/employees', getEmployees);
+router.get('/tracking', getTracking);
 router.get('/', getData);
-router.patch('/:no_nota/status', updateStatus);
+router.post('/tracking', updateTracking);
 
 export default router;

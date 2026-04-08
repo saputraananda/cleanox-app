@@ -18,9 +18,16 @@ import {
   Inbox,
   Clock,
   Loader2,
+  MapPin,
+  Truck,
+  Waves,
+  Package,
+  Navigation,
+  Check,
+  User,
 } from 'lucide-react';
 import api from '../utils/api.js';
-import { getToken } from '../utils/auth.js';
+import { getToken, getUser } from '../utils/auth.js';
 
 /* ── Helpers ───────────────────────────────────────────── */
 const fmtDate = (dt) => {
@@ -106,11 +113,11 @@ const COLS = [
   { key: 'outlet',       label: 'Outlet',           align: 'left',   filterable: true  },
   { key: 'no_nota',      label: 'No Nota',          align: 'left',   filterable: true  },
   { key: 'customer_nama',label: 'Customer',          align: 'left',   filterable: true  },
+  { key: 'nama_item',    label: 'Nama Item',        align: 'left',   filterable: true  },
   { key: 'tgl_terima',   label: 'Tgl Terima',       align: 'left',   filterable: false },
   { key: 'tgl_selesai',  label: 'Tgl Selesai',      align: 'left',   filterable: false },
   { key: 'status',       label: 'Status',           align: 'center', filterable: true  },
-  { key: 'updated_by',   label: 'Diupdate Oleh',    align: 'left',   filterable: true  },
-  { key: 'updated_at',   label: 'Terakhir Update',  align: 'left',   filterable: false },
+  { key: 'lacak',        label: 'Lacak',            align: 'center', filterable: false, w: 'w-20' },
 ];
 
 /* ── Quick Range Dropdown ─────────────────────────────── */
@@ -308,57 +315,384 @@ function StatusBadge({ status }) {
   );
 }
 
-/* ── Inline Status Select ─────────────────────────────── */
-function StatusSelect({ row, onUpdate }) {
-  const [loading, setLoading] = useState(false);
-  const [current, setCurrent] = useState(row.status || '');
+/* ── Stage config for tracking modal ──────────────────── */
+const STAGES = [
+  { key: 'Pickup',       label: 'Pickup',         icon: Truck,       color: 'blue',   byCol: 'pickup_by',      atCol: 'pickup_at'      },
+  { key: 'Cuci Jemur',   label: 'Cuci & Jemur',   icon: Waves,       color: 'amber',  byCol: 'cuci_jemur_by',  atCol: 'cuci_jemur_at'  },
+  { key: 'Packing',      label: 'Packing',        icon: Package,     color: 'purple', byCol: 'packing_by',     atCol: 'packing_at'     },
+  { key: 'Pengantaran',  label: 'Pengantaran',    icon: Navigation,  color: 'green',  byCol: 'pengantaran_by', atCol: 'pengantaran_at' },
+];
+
+const STAGE_COLORS = {
+  blue:   { line: 'bg-blue-500',   dot: 'bg-blue-500',   dotBorder: 'border-blue-200',   bg: 'bg-blue-50',   text: 'text-blue-700'   },
+  amber:  { line: 'bg-amber-500',  dot: 'bg-amber-500',  dotBorder: 'border-amber-200',  bg: 'bg-amber-50',  text: 'text-amber-700'  },
+  purple: { line: 'bg-purple-500', dot: 'bg-purple-500', dotBorder: 'border-purple-200', bg: 'bg-purple-50', text: 'text-purple-700' },
+  green:  { line: 'bg-green-500',  dot: 'bg-green-500',  dotBorder: 'border-green-200',  bg: 'bg-green-50',  text: 'text-green-700'  },
+};
+
+/* ── Multi-select Employee Picker ─────────────────────── */
+function EmployeePicker({ employees, selected, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const ref = useRef(null);
 
   useEffect(() => {
-    setCurrent(row.status || '');
-  }, [row.status]);
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
 
-  const handleChange = async (e) => {
-    const newStatus = e.target.value;
-    if (!newStatus || newStatus === current) return;
+  const filtered = q
+    ? employees.filter((e) => e.name.toLowerCase().includes(q.toLowerCase()))
+    : employees;
+
+  const toggle = (name) => {
+    const next = selected.includes(name)
+      ? selected.filter((n) => n !== name)
+      : [...selected, name];
+    onChange(next);
+  };
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center gap-1 flex-wrap min-h-[32px] px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white hover:border-brand-300 transition-colors text-left"
+      >
+        {selected.length === 0 && <span className="text-gray-400">Pilih pegawai...</span>}
+        {selected.map((n) => (
+          <span key={n} className="inline-flex items-center gap-0.5 bg-brand-100 text-brand-700 px-1.5 py-0.5 rounded text-[10px] font-medium">
+            {n}
+            <button type="button" onClick={(e) => { e.stopPropagation(); toggle(n); }} className="hover:text-red-500">
+              <X className="w-2.5 h-2.5" />
+            </button>
+          </span>
+        ))}
+        <ChevronDown className="w-3 h-3 text-gray-400 ml-auto flex-shrink-0" />
+      </button>
+      {open && (
+        <div className="absolute top-full left-0 z-50 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl w-full max-h-48 overflow-hidden">
+          <div className="p-1.5 border-b border-gray-100">
+            <input
+              autoFocus
+              type="text"
+              placeholder="Cari pegawai..."
+              className="w-full px-2 py-1 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-brand-500"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+          </div>
+          <div className="max-h-36 overflow-y-auto">
+            {filtered.map((emp) => (
+              <button
+                key={emp.id}
+                type="button"
+                onClick={() => toggle(emp.name)}
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-gray-50 text-left"
+              >
+                {selected.includes(emp.name)
+                  ? <CheckSquare className="w-3.5 h-3.5 text-brand-600 flex-shrink-0" />
+                  : <Square className="w-3.5 h-3.5 text-gray-300 flex-shrink-0" />}
+                <span>{emp.name}</span>
+              </button>
+            ))}
+            {filtered.length === 0 && (
+              <p className="px-3 py-2 text-xs text-gray-400">Tidak ditemukan</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Tracking Modal (JNE-style) ───────────────────────── */
+function TrackingModal({ show, onClose, row, readOnly }) {
+  const [tracking, setTracking] = useState(null);
+  const [employees, setEmployees] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(null); // stage key being saved
+  const [stageForm, setStageForm] = useState({});
+
+  // Fetch tracking data + employees on open
+  useEffect(() => {
+    if (!show || !row) return;
     setLoading(true);
+    setStageForm({});
+
+    const fetchAll = async () => {
+      try {
+        const [trackRes, empRes] = await Promise.all([
+          api.get('/cleanox-by-waschen-production/tracking', {
+            params: { no_nota: row.no_nota, nama_item: row.nama_item },
+          }),
+          !readOnly ? api.get('/cleanox-by-waschen-production/employees') : Promise.resolve({ data: { employees: [] } }),
+        ]);
+        setTracking(trackRes.data.tracking);
+        setEmployees(empRes.data.employees || []);
+
+        // Init form with existing data
+        const form = {};
+        for (const stage of STAGES) {
+          const byVal = trackRes.data.tracking[stage.byCol];
+          const atVal = trackRes.data.tracking[stage.atCol];
+          form[stage.key] = {
+            employees: Array.isArray(byVal) ? byVal : [],
+            timestamp: atVal ? atVal.slice(0, 16) : '', // datetime-local format
+          };
+        }
+        setStageForm(form);
+      } catch {
+        setTracking(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchAll();
+  }, [show, row, readOnly]);
+
+  const handleSaveStage = async (stageKey) => {
+    const form = stageForm[stageKey];
+    if (!form || form.employees.length === 0) return alert('Pilih minimal 1 pegawai');
+
+    setSaving(stageKey);
     try {
-      await api.patch(`/cleanox-by-waschen-production/${encodeURIComponent(row.no_nota)}/status`, {
-        status: newStatus,
+      await api.post('/cleanox-by-waschen-production/tracking', {
+        no_nota: row.no_nota,
+        nama_item: row.nama_item,
+        stage: stageKey,
+        employee_names: form.employees,
+        timestamp: form.timestamp || undefined,
       });
-      setCurrent(newStatus);
-      onUpdate(row.no_nota, newStatus);
+      // Refresh tracking
+      const { data } = await api.get('/cleanox-by-waschen-production/tracking', {
+        params: { no_nota: row.no_nota, nama_item: row.nama_item },
+      });
+      setTracking(data.tracking);
+      const byVal = data.tracking[STAGES.find((s) => s.key === stageKey).byCol];
+      const atVal = data.tracking[STAGES.find((s) => s.key === stageKey).atCol];
+      setStageForm((prev) => ({
+        ...prev,
+        [stageKey]: {
+          employees: Array.isArray(byVal) ? byVal : [],
+          timestamp: atVal ? atVal.slice(0, 16) : '',
+        },
+      }));
     } catch (err) {
-      alert(err.response?.data?.message || 'Gagal mengupdate status');
+      alert(err.response?.data?.message || 'Gagal menyimpan');
     } finally {
-      setLoading(false);
+      setSaving(null);
     }
   };
 
-  const s = current ? STATUS_STYLE[current] : null;
+  const updateFormField = (stageKey, field, value) => {
+    setStageForm((prev) => ({
+      ...prev,
+      [stageKey]: { ...prev[stageKey], [field]: value },
+    }));
+  };
+
+  if (!show) return null;
+
+  // Determine current active stage index
+  const currentStageIdx = tracking
+    ? STAGES.reduce((acc, stage, idx) => (tracking[stage.atCol] ? idx : acc), -1)
+    : -1;
 
   return (
-    <div className="relative flex items-center gap-1.5">
-      {loading && <Loader2 className="w-3.5 h-3.5 animate-spin text-brand-500 flex-shrink-0" />}
-      <select
-        value={current}
-        onChange={handleChange}
-        disabled={loading}
-        className={`text-[11px] font-semibold rounded-full px-2 py-0.5 border appearance-none cursor-pointer
-          focus:outline-none focus:ring-1 focus:ring-brand-400 disabled:opacity-60 disabled:cursor-not-allowed
-          ${s ? `${s.bg} ${s.text} ${s.border}` : 'bg-gray-100 text-gray-500 border-gray-200'}
-        `}
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col animate-fade-in"
+        onClick={(e) => e.stopPropagation()}
       >
-        <option value="">— Pilih —</option>
-        {VALID_STATUSES.map((st) => (
-          <option key={st} value={st}>{st}</option>
-        ))}
-      </select>
+        {/* Header */}
+        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+          <div>
+            <h2 className="text-base font-bold text-gray-900 flex items-center gap-2">
+              <MapPin className="w-4 h-4 text-brand-600" />
+              Lacak Progres
+            </h2>
+            <p className="text-xs text-gray-400 mt-0.5">Tracking pengerjaan item</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors">
+            <X className="w-4 h-4 text-gray-400" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="w-6 h-6 animate-spin text-brand-500" />
+            </div>
+          ) : !tracking ? (
+            <p className="text-center text-gray-400 py-8">Data tracking tidak ditemukan</p>
+          ) : (
+            <>
+              {/* Info card */}
+              <div className="bg-gray-50 rounded-xl p-4 space-y-2 text-xs">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <span className="text-gray-400">No Nota</span>
+                    <p className="font-mono font-semibold text-gray-800">{tracking.no_nota}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-400">Outlet</span>
+                    <p className="font-semibold text-gray-800">{tracking.outlet || '—'}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-400">Customer</span>
+                    <p className="font-semibold text-gray-800">{tracking.customer_nama || '—'}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-400">Alamat</span>
+                    <p className="font-semibold text-gray-800">{tracking.alamat_customer || '—'}</p>
+                  </div>
+                </div>
+                <div className="pt-1 border-t border-gray-200">
+                  <span className="text-gray-400">Nama Item</span>
+                  <p className="font-semibold text-gray-800">{tracking.nama_item}</p>
+                </div>
+              </div>
+
+              {/* Timeline */}
+              <div className="relative pl-4">
+                {STAGES.map((stage, idx) => {
+                  const sc = STAGE_COLORS[stage.color];
+                  const filled = !!tracking[stage.atCol];
+                  const isActive = idx === currentStageIdx + 1 && !readOnly;
+                  const Icon = stage.icon;
+                  const form = stageForm[stage.key] || { employees: [], timestamp: '' };
+
+                  const byVal = tracking[stage.byCol];
+                  const byNames = Array.isArray(byVal) ? byVal : [];
+                  const atVal = tracking[stage.atCol];
+
+                  return (
+                    <div key={stage.key} className="relative pb-6 last:pb-0">
+                      {/* Vertical line */}
+                      {idx < STAGES.length - 1 && (
+                        <div
+                          className={`absolute left-[11px] top-8 w-0.5 h-[calc(100%-16px)] ${
+                            filled ? sc.line : 'bg-gray-200'
+                          }`}
+                        />
+                      )}
+
+                      {/* Dot */}
+                      <div className="flex items-start gap-3">
+                        <div
+                          className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 border-2 ${
+                            filled
+                              ? `${sc.dot} border-white text-white shadow-sm`
+                              : `bg-white ${sc.dotBorder}`
+                          }`}
+                        >
+                          {filled ? (
+                            <Check className="w-3 h-3" />
+                          ) : (
+                            <Icon className={`w-3 h-3 ${sc.text} opacity-50`} />
+                          )}
+                        </div>
+
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className={`text-sm font-semibold ${filled ? sc.text : 'text-gray-400'}`}>
+                              {stage.label}
+                            </span>
+                            {filled && (
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${sc.bg} ${sc.text}`}>
+                                Selesai
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Filled info */}
+                          {filled && (
+                            <div className={`mt-1.5 rounded-lg p-2.5 ${sc.bg} space-y-1`}>
+                              <div className="flex items-center gap-1.5 text-xs">
+                                <User className="w-3 h-3 flex-shrink-0" />
+                                <span className={`font-medium ${sc.text}`}>{byNames.join(', ') || '—'}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5 text-xs">
+                                <Clock className="w-3 h-3 flex-shrink-0" />
+                                <span className={sc.text}>{fmtDateTime(atVal)}</span>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Editable form (only for the next unfilled stage, if not readOnly) */}
+                          {!filled && isActive && (
+                            <div className="mt-2 space-y-2 bg-white border border-gray-200 rounded-lg p-3">
+                              <div>
+                                <label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider mb-1 block">
+                                  Dikerjakan Oleh
+                                </label>
+                                <EmployeePicker
+                                  employees={employees}
+                                  selected={form.employees}
+                                  onChange={(v) => updateFormField(stage.key, 'employees', v)}
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider mb-1 block">
+                                  Waktu
+                                </label>
+                                <input
+                                  type="datetime-local"
+                                  className="w-full px-2 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-brand-500"
+                                  value={form.timestamp}
+                                  onChange={(e) => updateFormField(stage.key, 'timestamp', e.target.value)}
+                                />
+                                <p className="text-[10px] text-gray-400 mt-0.5">Kosongkan untuk waktu sekarang</p>
+                              </div>
+                              <button
+                                onClick={() => handleSaveStage(stage.key)}
+                                disabled={saving === stage.key}
+                                className="w-full py-1.5 text-xs font-semibold rounded-lg bg-brand-700 text-white hover:bg-brand-800 disabled:opacity-60 transition-colors flex items-center justify-center gap-1.5"
+                              >
+                                {saving === stage.key ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <Check className="w-3.5 h-3.5" />
+                                )}
+                                Simpan {stage.label}
+                              </button>
+                            </div>
+                          )}
+
+                          {/* Pending state */}
+                          {!filled && !isActive && (
+                            <p className="mt-1 text-xs text-gray-300 italic">Menunggu...</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Completed banner */}
+              {currentStageIdx === STAGES.length - 1 && (
+                <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
+                  <Check className="w-5 h-5 text-green-600 mx-auto mb-1" />
+                  <p className="text-sm font-semibold text-green-700">Semua proses selesai!</p>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
 
 /* ── Main Component ────────────────────────────────────── */
 export default function CleanoxByWaschenProductionPage() {
+  const user = getUser();
+  const isReadOnly = user?.role === 'frontliner';
+
   const [dateStart, setDateStart] = useState(DEFAULT_START);
   const [dateEnd, setDateEnd]     = useState(DEFAULT_END);
   const [outlet, setOutlet]       = useState('');
@@ -380,6 +714,9 @@ export default function CleanoxByWaschenProductionPage() {
   const [error,      setError]      = useState('');
   const [colFilters, setColFilters] = useState({});
   const [quickLabel, setQuickLabel] = useState('');
+
+  // Tracking modal
+  const [trackingRow, setTrackingRow] = useState(null);
 
   const abortRef = useRef(null);
 
@@ -435,26 +772,17 @@ export default function CleanoxByWaschenProductionPage() {
     const es = new EventSource(`/api/cleanox-by-waschen-production/events?token=${encodeURIComponent(token)}`);
     es.onmessage = (e) => {
       try {
-        const { no_nota, status, updated_by, updated_at } = JSON.parse(e.data);
+        const payload = JSON.parse(e.data);
         setRows((prev) =>
           prev.map((r) =>
-            r.no_nota === no_nota ? { ...r, status, updated_by, updated_at } : r
+            r.no_nota === payload.no_nota && r.nama_item === payload.nama_item
+              ? { ...r, status: payload.status, updated_at: payload.updated_at }
+              : r
           )
         );
       } catch {}
     };
     return () => es.close();
-  }, []);
-
-  /* Handle inline status update — sync row state client-side */
-  const handleStatusUpdate = useCallback((no_nota, newStatus) => {
-    setRows((prev) =>
-      prev.map((r) =>
-        r.no_nota === no_nota
-          ? { ...r, status: newStatus, updated_at: new Date().toISOString() }
-          : r
-      )
-    );
   }, []);
 
   const applyFilter = () => setApplied({ date_start: dateStart, date_end: dateEnd, outlet, date_field: dateField });
@@ -491,8 +819,8 @@ export default function CleanoxByWaschenProductionPage() {
         (r.no_nota        || '').toLowerCase().includes(q) ||
         (r.customer_nama  || '').toLowerCase().includes(q) ||
         (r.outlet         || '').toLowerCase().includes(q) ||
-        (r.status         || '').toLowerCase().includes(q) ||
-        (r.updated_by     || '').toLowerCase().includes(q)
+        (r.nama_item      || '').toLowerCase().includes(q) ||
+        (r.status         || '').toLowerCase().includes(q)
       );
     }
 
@@ -520,6 +848,12 @@ export default function CleanoxByWaschenProductionPage() {
   return (
     <>
       <LoadingBar visible={loading} />
+      <TrackingModal
+        show={!!trackingRow}
+        onClose={() => setTrackingRow(null)}
+        row={trackingRow}
+        readOnly={isReadOnly}
+      />
       <div className="p-3 sm:p-5 space-y-4 max-w-[1400px] mx-auto">
 
         {/* ── Page header ─── */}
@@ -527,7 +861,7 @@ export default function CleanoxByWaschenProductionPage() {
           <div>
             <h1 className="text-lg sm:text-xl font-bold text-gray-900">Production Status</h1>
             <p className="text-xs sm:text-sm text-gray-400 mt-0.5">
-              Tracking status produksi Cleanox &amp; Karpet — update status langsung dari tabel
+              Tracking status produksi per item Cleanox &amp; Karpet — klik Lacak untuk detail progres
             </p>
           </div>
           <button
@@ -615,7 +949,7 @@ export default function CleanoxByWaschenProductionPage() {
         {/* ── Stats ─── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {[
-            { icon: FileText, label: 'Total Nota', value: loading ? null : stats.total.toLocaleString('id-ID'), color: 'text-brand-600', bg: 'bg-brand-50' },
+            { icon: FileText, label: 'Total Item', value: loading ? null : stats.total.toLocaleString('id-ID'), color: 'text-brand-600', bg: 'bg-brand-50' },
             { icon: Calendar, label: 'Periode', value: `${fmtDate(applied.date_start)} – ${fmtDate(applied.date_end)}`, color: 'text-teal-600', bg: 'bg-teal-50' },
           ].map((s) => (
             <div key={s.label} className="card flex items-center gap-3 sm:gap-4">
@@ -650,7 +984,7 @@ export default function CleanoxByWaschenProductionPage() {
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
                 type="text"
-                placeholder="Cari nota, customer, status…"
+                placeholder="Cari nota, customer, item…"
                 className="input-field pl-9 text-xs sm:text-sm"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -670,7 +1004,7 @@ export default function CleanoxByWaschenProductionPage() {
 
           {/* Table */}
           <div className="overflow-x-auto">
-            <table className="w-full text-xs sm:text-sm min-w-[900px]">
+            <table className="w-full text-xs sm:text-sm min-w-[1000px]">
               <thead>
                 <tr className="bg-gradient-to-r from-brand-900 to-brand-800 border-b border-brand-700">
                   {COLS.map((col) => (
@@ -731,7 +1065,7 @@ export default function CleanoxByWaschenProductionPage() {
                   const rowNum = (pagination.page - 1) * pagination.limit + idx + 1;
                   return (
                     <tr
-                      key={`${row.no_nota}-${idx}`}
+                      key={`${row.no_nota}-${row.nama_item}-${idx}`}
                       className="border-b border-gray-50 hover:bg-brand-50/30 transition-colors even:bg-slate-50/30"
                     >
                       <td className="px-3 sm:px-4 py-2.5 text-center text-xs text-gray-400 tabular-nums">{rowNum}</td>
@@ -740,13 +1074,22 @@ export default function CleanoxByWaschenProductionPage() {
                       </td>
                       <td className="px-3 sm:px-4 py-2.5 font-mono text-xs text-gray-700 whitespace-nowrap">{row.no_nota || '—'}</td>
                       <td className="px-3 sm:px-4 py-2.5 font-medium text-gray-900 whitespace-nowrap text-xs">{row.customer_nama || '—'}</td>
+                      <td className="px-3 sm:px-4 py-2.5 text-gray-700 text-xs max-w-[200px] truncate" title={row.nama_item}>{row.nama_item || '—'}</td>
                       <td className="px-3 sm:px-4 py-2.5 text-gray-500 whitespace-nowrap text-xs">{fmtDate(row.tgl_terima)}</td>
                       <td className="px-3 sm:px-4 py-2.5 text-gray-500 whitespace-nowrap text-xs">{fmtDate(row.tgl_selesai)}</td>
                       <td className="px-3 sm:px-4 py-2.5 text-center">
-                        <StatusSelect row={row} onUpdate={handleStatusUpdate} />
+                        <StatusBadge status={row.status} />
                       </td>
-                      <td className="px-3 sm:px-4 py-2.5 text-gray-500 text-xs whitespace-nowrap">{row.updated_by || '—'}</td>
-                      <td className="px-3 sm:px-4 py-2.5 text-gray-400 text-xs whitespace-nowrap">{fmtDateTime(row.updated_at)}</td>
+                      <td className="px-3 sm:px-4 py-2.5 text-center">
+                        <button
+                          onClick={() => setTrackingRow(row)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg
+                            bg-brand-700 text-white hover:bg-brand-800 transition-colors shadow-sm"
+                        >
+                          <MapPin className="w-3 h-3" />
+                          Lacak
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}

@@ -13,6 +13,11 @@ export const subscribeEvents = (req, res) => {
   req.on('close', () => sseClients.delete(res));
 };
 
+const broadcast = (payload) => {
+  const msg = `data: ${JSON.stringify(payload)}\n\n`;
+  for (const client of sseClients) client.write(msg);
+};
+
 /* ── Get distinct outlets ─────────────────────────────── */
 export const getOutlets = async (_req, res) => {
   try {
@@ -29,7 +34,20 @@ export const getOutlets = async (_req, res) => {
   }
 };
 
-/* ── Get production data (status tracking) ────────────── */
+/* ── Get employees (for tracking modal) ───────────────── */
+export const getEmployees = async (_req, res) => {
+  try {
+    const [rows] = await cleanoxPool.query(
+      `SELECT id, name FROM mst_employee WHERE status = 'active' ORDER BY name`
+    );
+    return res.json({ employees: rows });
+  } catch (err) {
+    console.error('[production/getEmployees]', err.message);
+    return res.status(500).json({ message: 'Gagal mengambil data karyawan' });
+  }
+};
+
+/* ── Get production data — per ITEM (not per nota) ────── */
 export const getData = async (req, res) => {
   const {
     date_start,
@@ -48,71 +66,49 @@ export const getData = async (req, res) => {
   const limitNum = Math.min(200, Math.max(1, parseInt(limit, 10)));
   const offset   = (pageNum - 1) * limitNum;
 
-  const dateFieldSafe  = date_field === 'tgl_selesai' ? 'tgl_selesai' : 'tgl_terima';
-  const outletWhere    = outlet ? 'AND nf.outlet = ?' : '';
-  const outletParams   = outlet ? [outlet] : [];
-  const dateParams     = [date_start, date_end];
+  const dateFieldSafe = date_field === 'tgl_selesai' ? 'tgl_selesai' : 'tgl_terima';
+  const outletWhere   = outlet ? 'AND outlet = ?' : '';
+  const outletParams  = outlet ? [outlet] : [];
+  const dateParams    = [date_start, date_end];
 
-  const statsQuery = `
-    WITH nota_flag AS (
-        SELECT
-            no_nota    COLLATE utf8mb4_unicode_ci AS no_nota,
-            MAX(outlet) COLLATE utf8mb4_unicode_ci AS outlet,
-            MAX(CASE
-                WHEN LOWER(COALESCE(nama_item,'')) LIKE '%cleanox%'
-                  OR LOWER(COALESCE(nama_item,'')) LIKE '%karpet%'
-                THEN 1 ELSE 0
-            END) AS is_cleanox
-        FROM rekap_transaksi_reguler
-        WHERE DATE(${dateFieldSafe}) BETWEEN DATE(?) AND DATE(?)
-        GROUP BY 1
-        HAVING is_cleanox = 1
-    )
-    SELECT COUNT(*) AS total
-    FROM nota_flag nf
-    WHERE 1=1 ${outletWhere}
+  const baseWhere = `
+    DATE(${dateFieldSafe}) BETWEEN DATE(?) AND DATE(?)
+    AND (LOWER(COALESCE(nama_item,'')) LIKE '%cleanox%'
+      OR LOWER(COALESCE(nama_item,'')) LIKE '%karpet%')
+    ${outletWhere}
   `;
 
+  const statsQuery = `SELECT COUNT(*) AS total FROM rekap_transaksi_reguler WHERE ${baseWhere}`;
+
   const dataQuery = `
-    WITH nota_flag AS (
-        SELECT
-            no_nota    COLLATE utf8mb4_unicode_ci AS no_nota,
-            MAX(outlet)        COLLATE utf8mb4_unicode_ci AS outlet,
-            MAX(customer_nama)  AS customer_nama,
-            MAX(tgl_terima)     AS tgl_terima,
-            MAX(tgl_selesai)    AS tgl_selesai,
-            MAX(status)         AS status,
-            MAX(updated_by)     AS updated_by,
-            MAX(updated_at)     AS updated_at,
-            MAX(CASE
-                WHEN LOWER(COALESCE(nama_item,'')) LIKE '%cleanox%'
-                  OR LOWER(COALESCE(nama_item,'')) LIKE '%karpet%'
-                THEN 1 ELSE 0
-            END) AS is_cleanox
-        FROM rekap_transaksi_reguler
-        WHERE DATE(${dateFieldSafe}) BETWEEN DATE(?) AND DATE(?)
-        GROUP BY 1
-        HAVING is_cleanox = 1
-    )
     SELECT
-        nf.outlet,
-        nf.no_nota,
-        nf.customer_nama,
-        nf.tgl_terima,
-        nf.tgl_selesai,
-        nf.status,
-        nf.updated_by,
-        nf.updated_at
-    FROM nota_flag nf
-    WHERE 1=1 ${outletWhere}
-    ORDER BY nf.tgl_terima DESC, nf.no_nota DESC
+      outlet,
+      no_nota,
+      customer_nama,
+      nama_item,
+      jumlah,
+      satuan_item,
+      tgl_terima,
+      tgl_selesai,
+      status,
+      pickup_by,    pickup_at,
+      cuci_jemur_by, cuci_jemur_at,
+      packing_by,   packing_at,
+      pengantaran_by, pengantaran_at,
+      updated_by,
+      updated_at
+    FROM rekap_transaksi_reguler
+    WHERE ${baseWhere}
+    ORDER BY ${dateFieldSafe} DESC, no_nota DESC, nama_item
     LIMIT ? OFFSET ?
   `;
 
+  const params = [...dateParams, ...outletParams];
+
   try {
     const [statsResult, dataResult] = await Promise.all([
-      cleanoxPool.query(statsQuery, [...dateParams, ...outletParams]),
-      cleanoxPool.query(dataQuery,  [...dateParams, ...outletParams, limitNum, offset]),
+      cleanoxPool.query(statsQuery, params),
+      cleanoxPool.query(dataQuery,  [...params, limitNum, offset]),
     ]);
 
     const total = Number(statsResult[0][0]?.total || 0);
@@ -133,43 +129,107 @@ export const getData = async (req, res) => {
   }
 };
 
-/* ── Update status ────────────────────────────────────── */
-export const updateStatus = async (req, res) => {
-  const { no_nota } = req.params;
-  const { status } = req.body;
-
-  const VALID_STATUSES = ['Pickup', 'Cuci Jemur', 'Packing', 'Pengantaran'];
-  if (!status || !VALID_STATUSES.includes(status)) {
-    return res.status(400).json({ message: 'Status tidak valid' });
+/* ── Get tracking detail for one item row ─────────────── */
+export const getTracking = async (req, res) => {
+  const { no_nota, nama_item } = req.query;
+  if (!no_nota || !nama_item) {
+    return res.status(400).json({ message: 'no_nota dan nama_item wajib diisi' });
   }
 
   try {
-    const [[employee]] = await cleanoxPool.query(
-      'SELECT name FROM mst_employee WHERE id = ? LIMIT 1',
-      [req.user?.id]
+    const [rows] = await cleanoxPool.query(
+      `SELECT
+        no_nota, outlet, customer_nama, alamat_customer, nama_item,
+        jumlah, satuan_item,
+        tgl_terima, tgl_selesai, status,
+        pickup_by,    pickup_at,
+        cuci_jemur_by, cuci_jemur_at,
+        packing_by,   packing_at,
+        pengantaran_by, pengantaran_at,
+        updated_by, updated_at
+      FROM rekap_transaksi_reguler
+      WHERE no_nota = ? AND nama_item = ?
+      LIMIT 1`,
+      [no_nota, nama_item]
     );
-    const updated_by = employee?.name || req.user?.name || 'unknown';
 
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Data tidak ditemukan' });
+    }
+
+    const row = rows[0];
+    // Parse JSON fields safely
+    const parseJson = (v) => {
+      if (!v) return [];
+      if (Array.isArray(v)) return v;
+      try { return JSON.parse(v); } catch { return []; }
+    };
+    row.pickup_by      = parseJson(row.pickup_by);
+    row.cuci_jemur_by  = parseJson(row.cuci_jemur_by);
+    row.packing_by     = parseJson(row.packing_by);
+    row.pengantaran_by = parseJson(row.pengantaran_by);
+
+    return res.json({ tracking: row });
+  } catch (err) {
+    console.error('[production/getTracking]', err.message);
+    return res.status(500).json({ message: 'Gagal mengambil data tracking' });
+  }
+};
+
+/* ── Update tracking stage ────────────────────────────── */
+const STAGE_COLUMNS = {
+  Pickup:      { by: 'pickup_by',      at: 'pickup_at'      },
+  'Cuci Jemur': { by: 'cuci_jemur_by', at: 'cuci_jemur_at'  },
+  Packing:     { by: 'packing_by',     at: 'packing_at'     },
+  Pengantaran: { by: 'pengantaran_by', at: 'pengantaran_at' },
+};
+
+const VALID_STATUSES = ['Pickup', 'Cuci Jemur', 'Packing', 'Pengantaran'];
+
+export const updateTracking = async (req, res) => {
+  const { no_nota, nama_item, stage, employee_names, timestamp } = req.body;
+
+  if (!no_nota || !nama_item || !stage) {
+    return res.status(400).json({ message: 'no_nota, nama_item, dan stage wajib diisi' });
+  }
+  if (!STAGE_COLUMNS[stage]) {
+    return res.status(400).json({ message: 'Stage tidak valid' });
+  }
+  if (!Array.isArray(employee_names) || employee_names.length === 0) {
+    return res.status(400).json({ message: 'employee_names wajib diisi (array)' });
+  }
+
+  const col = STAGE_COLUMNS[stage];
+  const ts = timestamp || new Date().toISOString().slice(0, 19).replace('T', ' ');
+
+  // Determine new overall status = latest stage that is filled
+  const stageIdx = VALID_STATUSES.indexOf(stage);
+  const newStatus = stage;
+
+  try {
     const [result] = await cleanoxPool.query(
       `UPDATE rekap_transaksi_reguler
-       SET status = ?, updated_by = ?, updated_at = NOW()
-       WHERE no_nota = ?`,
-      [status, updated_by, no_nota]
+       SET ${col.by} = ?, ${col.at} = ?,
+           status = ?, updated_by = ?, updated_at = NOW()
+       WHERE no_nota = ? AND nama_item = ?`,
+      [JSON.stringify(employee_names), ts, newStatus, employee_names.join(', '), no_nota, nama_item]
     );
 
     if (result.affectedRows === 0) {
-      return res.status(404).json({ message: 'Nota tidak ditemukan' });
+      return res.status(404).json({ message: 'Data tidak ditemukan' });
     }
 
-    const updated_at = new Date().toISOString();
-    const payload = { no_nota, status, updated_by, updated_at };
-    for (const client of sseClients) {
-      client.write(`data: ${JSON.stringify(payload)}\n\n`);
-    }
+    const payload = {
+      no_nota, nama_item, stage,
+      employee_names, timestamp: ts,
+      status: newStatus,
+      updated_at: new Date().toISOString(),
+    };
+    broadcast(payload);
 
-    return res.json({ message: 'Status berhasil diupdate', ...payload });
+    return res.json({ message: 'Tracking berhasil diupdate', ...payload });
   } catch (err) {
-    console.error('[production/updateStatus]', err.message);
-    return res.status(500).json({ message: 'Gagal mengupdate status', error: err.message });
+    console.error('[production/updateTracking]', err.message);
+    return res.status(500).json({ message: 'Gagal mengupdate tracking', error: err.message });
   }
 };
