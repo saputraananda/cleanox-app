@@ -25,6 +25,8 @@ import {
   Navigation,
   Check,
   User,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import api from '../utils/api.js';
 import { getToken, getUser } from '../utils/auth.js';
@@ -114,8 +116,8 @@ const COLS = [
   { key: 'no_nota',      label: 'No Nota',          align: 'left',   filterable: true  },
   { key: 'customer_nama',label: 'Customer',          align: 'left',   filterable: true  },
   { key: 'nama_item',    label: 'Nama Item',        align: 'left',   filterable: true  },
-  { key: 'tgl_terima',   label: 'Tgl Terima',       align: 'left',   filterable: false },
-  { key: 'tgl_selesai',  label: 'Tgl Selesai',      align: 'left',   filterable: false },
+  { key: 'tgl_terima',   label: 'Tgl Terima',       align: 'left',   filterable: false, sortable: true },
+  { key: 'tgl_selesai',  label: 'Tgl Selesai',      align: 'left',   filterable: false, sortable: true },
   { key: 'status',       label: 'Status',           align: 'center', filterable: true  },
   { key: 'lacak',        label: 'Lacak',            align: 'center', filterable: false, w: 'w-20' },
 ];
@@ -188,79 +190,6 @@ function QuickRangeDropdown({ ranges, onSelect, currentLabel }) {
                   </div>
                 </div>
               ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ── Column Filter Dropdown ────────────────────────────── */
-function ColFilterDropdown({ colKey, values, selected, onChange }) {
-  const [open, setOpen] = useState(false);
-  const [q, setQ] = useState('');
-  const ref = useRef(null);
-
-  useEffect(() => {
-    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
-
-  const filtered = q ? values.filter((v) => String(v).toLowerCase().includes(q.toLowerCase())) : values;
-  const allSelected = selected.size === 0 || selected.size === values.length;
-
-  const toggle = (v) => {
-    const next = new Set(selected);
-    if (next.has(v)) next.delete(v); else next.add(v);
-    onChange(next);
-  };
-  const toggleAll = () => onChange(new Set());
-
-  return (
-    <div className="relative inline-block" ref={ref}>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className={`ml-1 p-0.5 rounded transition-colors ${
-          selected.size > 0 ? 'text-lime-500 bg-lime-50' : 'text-gray-300 hover:text-gray-500'
-        }`}
-        title="Filter kolom"
-      >
-        <ChevronDown className="w-3 h-3" />
-      </button>
-
-      {open && (
-        <div className="absolute top-full left-0 z-50 mt-1 bg-white border border-gray-200 rounded-xl shadow-xl w-52 overflow-hidden animate-fade-in text-gray-700 normal-case tracking-normal font-normal">
-          <div className="p-2 border-b border-gray-100">
-            <input
-              autoFocus
-              type="text"
-              placeholder="Cari…"
-              className="w-full px-2 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-brand-500"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-            />
-          </div>
-          <div className="max-h-48 overflow-y-auto">
-            <button
-              onClick={toggleAll}
-              className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-gray-50 text-gray-600 font-medium border-b border-gray-50"
-            >
-              {allSelected ? <CheckSquare className="w-3.5 h-3.5 text-brand-600" /> : <Square className="w-3.5 h-3.5 text-gray-300" />}
-              Semua
-            </button>
-            {filtered.map((v) => (
-              <button
-                key={v}
-                onClick={() => toggle(v)}
-                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-gray-50 text-left"
-              >
-                {selected.has(v)
-                  ? <CheckSquare className="w-3.5 h-3.5 text-brand-600 flex-shrink-0" />
-                  : <Square className="w-3.5 h-3.5 text-gray-300 flex-shrink-0" />}
-                <span className="truncate">{v || '(kosong)'}</span>
-              </button>
-            ))}
           </div>
         </div>
       )}
@@ -704,6 +633,8 @@ export default function CleanoxByWaschenProductionPage() {
     date_end:   DEFAULT_END,
     outlet:     '',
     date_field: 'tgl_terima',
+    sort_key:   '',
+    sort_dir:   'desc',
   });
 
   const [outlets,    setOutlets]    = useState([]);
@@ -740,7 +671,8 @@ export default function CleanoxByWaschenProductionPage() {
       date_start: f.date_start,
       date_end:   f.date_end,
       date_field: f.date_field || 'tgl_terima',
-      ...(f.outlet && { outlet: f.outlet }),
+      ...(f.outlet    && { outlet:    f.outlet }),
+      ...(f.sort_key  && { sort_key:  f.sort_key, sort_dir: f.sort_dir || 'asc' }),
       page,
       limit,
     });
@@ -785,31 +717,30 @@ export default function CleanoxByWaschenProductionPage() {
     return () => es.close();
   }, []);
 
-  const applyFilter = () => setApplied({ date_start: dateStart, date_end: dateEnd, outlet, date_field: dateField });
+  const applyFilter = () => setApplied((prev) => ({ date_start: dateStart, date_end: dateEnd, outlet, date_field: dateField, sort_key: prev.sort_key, sort_dir: prev.sort_dir }));
 
   const applyQuick = (qr) => {
     const r = qr.range();
     setDateStart(r.date_start);
     setDateEnd(r.date_end);
     setQuickLabel(qr.label);
-    setApplied({ date_start: r.date_start, date_end: r.date_end, outlet, date_field: dateField });
+    setApplied((prev) => ({ date_start: r.date_start, date_end: r.date_end, outlet, date_field: dateField, sort_key: prev.sort_key, sort_dir: prev.sort_dir }));
   };
 
   const goPage = (p) => { setPagination((prev) => ({ ...prev, page: p })); fetchData(p, pagination.limit); };
   const changeLimit = (l) => { setPagination((prev) => ({ ...prev, limit: l, page: 1 })); fetchData(1, l); };
 
-  /* Column filter unique values */
-  const colUniqueValues = useMemo(() => {
-    const map = {};
-    COLS.filter((c) => c.filterable).forEach((c) => {
-      map[c.key] = [...new Set(rows.map((r) => r[c.key] ?? '').filter(Boolean))].sort();
-    });
-    return map;
-  }, [rows]);
-
   const setColFilter = (key, set) => setColFilters((prev) => ({ ...prev, [key]: set }));
 
-  /* Client-side filtering + search */
+  const toggleSort = (key) => {
+    setApplied((prev) => ({
+      ...prev,
+      sort_dir: prev.sort_key === key ? (prev.sort_dir === 'asc' ? 'desc' : 'asc') : 'asc',
+      sort_key: key,
+    }));
+  };
+
+  /* Client-side filtering + search + status filter from legend */
   const filtered = useMemo(() => {
     let data = rows;
 
@@ -824,12 +755,10 @@ export default function CleanoxByWaschenProductionPage() {
       );
     }
 
-    COLS.filter((c) => c.filterable).forEach((c) => {
-      const sel = colFilters[c.key];
-      if (sel && sel.size > 0) {
-        data = data.filter((r) => sel.has(r[c.key] ?? ''));
-      }
-    });
+    const statusSel = colFilters['status'];
+    if (statusSel && statusSel.size > 0) {
+      data = data.filter((r) => statusSel.has(r.status ?? ''));
+    }
 
     return data;
   }, [rows, search, colFilters]);
@@ -971,9 +900,36 @@ export default function CleanoxByWaschenProductionPage() {
         {/* ── Status legend ─── */}
         <div className="flex flex-wrap gap-2 items-center">
           <span className="text-xs text-gray-400 font-medium">Status:</span>
-          {VALID_STATUSES.map((st) => (
-            <StatusBadge key={st} status={st} />
-          ))}
+          {VALID_STATUSES.map((st) => {
+            const statusFilter = colFilters['status'] || new Set();
+            const isActive = statusFilter.has(st);
+            return (
+              <button
+                key={st}
+                type="button"
+                title={`Filter: ${st}`}
+                onClick={() => {
+                  const next = new Set(statusFilter);
+                  if (next.has(st)) next.delete(st); else next.add(st);
+                  setColFilter('status', next);
+                }}
+                className={`transition-all duration-150 rounded-full ${
+                  isActive ? 'ring-2 ring-offset-1 ring-gray-400 scale-105' : 'opacity-70 hover:opacity-100'
+                }`}
+              >
+                <StatusBadge status={st} />
+              </button>
+            );
+          })}
+          {(colFilters['status']?.size > 0) && (
+            <button
+              type="button"
+              onClick={() => setColFilter('status', new Set())}
+              className="text-xs text-gray-400 hover:text-gray-600 underline"
+            >
+              reset
+            </button>
+          )}
         </div>
 
         {/* ── Table card ─── */}
@@ -1010,19 +966,24 @@ export default function CleanoxByWaschenProductionPage() {
                   {COLS.map((col) => (
                     <th
                       key={col.key}
+                      onClick={col.sortable ? () => toggleSort(col.key) : undefined}
                       className={`px-3 sm:px-4 py-3 text-[11px] font-semibold text-white/90 uppercase tracking-wider whitespace-nowrap
                         ${col.align === 'right' ? 'text-right' : col.align === 'center' ? 'text-center' : 'text-left'}
-                        ${col.w || ''}`}
+                        ${col.w || ''}
+                        ${col.sortable ? 'cursor-pointer select-none hover:bg-brand-700/50' : ''}`}
                     >
                       <div className={`flex items-center gap-0.5 ${col.align === 'center' ? 'justify-center' : ''}`}>
                         {col.label}
-                        {col.filterable && (
-                          <ColFilterDropdown
-                            colKey={col.key}
-                            values={colUniqueValues[col.key] || []}
-                            selected={colFilters[col.key] || new Set()}
-                            onChange={(s) => setColFilter(col.key, s)}
-                          />
+                        {col.sortable && (
+                          <span className="ml-0.5">
+                            {applied.sort_key === col.key ? (
+                              applied.sort_dir === 'asc'
+                                ? <ArrowUp className="w-3 h-3 text-lime-400" />
+                                : <ArrowDown className="w-3 h-3 text-lime-400" />
+                            ) : (
+                              <ArrowUp className="w-3 h-3 text-white/30" />
+                            )}
+                          </span>
                         )}
                       </div>
                     </th>
@@ -1084,7 +1045,7 @@ export default function CleanoxByWaschenProductionPage() {
                         <button
                           onClick={() => setTrackingRow(row)}
                           className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg
-                            bg-brand-700 text-white hover:bg-brand-800 transition-colors shadow-sm"
+                            bg-lime-500 text-white hover:bg-lime-600 transition-colors shadow-sm"
                         >
                           <MapPin className="w-3 h-3" />
                           Lacak

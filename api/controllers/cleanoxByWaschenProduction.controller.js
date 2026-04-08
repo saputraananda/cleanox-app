@@ -54,6 +54,8 @@ export const getData = async (req, res) => {
     date_end,
     outlet,
     date_field = 'tgl_terima',
+    sort_key,
+    sort_dir,
     page  = 1,
     limit = 25,
   } = req.query;
@@ -67,6 +69,9 @@ export const getData = async (req, res) => {
   const offset   = (pageNum - 1) * limitNum;
 
   const dateFieldSafe = date_field === 'tgl_selesai' ? 'tgl_selesai' : 'tgl_terima';
+  const SORT_WHITELIST = ['tgl_terima', 'tgl_selesai'];
+  const sortFieldSafe  = SORT_WHITELIST.includes(sort_key) ? sort_key : dateFieldSafe;
+  const sortDirSafe    = sort_dir === 'asc' ? 'ASC' : 'DESC';
   const outletWhere   = outlet ? 'AND outlet = ?' : '';
   const outletParams  = outlet ? [outlet] : [];
   const dateParams    = [date_start, date_end];
@@ -99,7 +104,7 @@ export const getData = async (req, res) => {
       updated_at
     FROM rekap_transaksi_reguler
     WHERE ${baseWhere}
-    ORDER BY ${dateFieldSafe} DESC, no_nota DESC, nama_item
+    ORDER BY ${sortFieldSafe} ${sortDirSafe}, no_nota DESC, nama_item
     LIMIT ? OFFSET ?
   `;
 
