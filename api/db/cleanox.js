@@ -11,6 +11,7 @@ const cleanoxPool = mysql.createPool({
   database: process.env.DB_NAME_CLEANOX,
   waitForConnections: true,
   connectionLimit: 10,
+  timezone: '+07:00',
   ssl: { rejectUnauthorized: false },
 });
 

@@ -101,6 +101,15 @@ const buildQuickRanges = () => {
 const QUICK_RANGES = buildQuickRanges();
 const PAGE_SIZES = [10, 25, 50, 100];
 
+const OUTLET_META = {
+  'Waschen Laundry Raffles Hills':  { short: 'Raffles',    color: 'bg-purple-100 text-purple-700' },
+  'Waschen Laundry Legenda Wisata': { short: 'Legenda',    color: 'bg-amber-100 text-amber-700'   },
+  'Waschen Laundry Canadian':       { short: 'Canadian',   color: 'bg-green-100 text-green-700'   },
+  'Waschen Citra Grand':            { short: 'Citra Grand',color: 'bg-pink-100 text-pink-700'     },
+  'Waschen Laundry Kota Wisata':    { short: 'Kota Wisata',color: 'bg-blue-100 text-blue-700'     },
+};
+const outletMeta = (name) => OUTLET_META[name] || { short: name, color: 'bg-brand-100 text-brand-700' };
+
 const VALID_STATUSES = ['Pickup', 'Cuci Jemur', 'Packing', 'Pengantaran'];
 
 const STATUS_STYLE = {
@@ -116,6 +125,7 @@ const COLS = [
   { key: 'no_nota',      label: 'No Nota',          align: 'left',   filterable: true  },
   { key: 'customer_nama',label: 'Customer',          align: 'left',   filterable: true  },
   { key: 'nama_item',    label: 'Nama Item',        align: 'left',   filterable: true  },
+  { key: 'jumlah',       label: 'Ukuran',           align: 'right',  filterable: false },
   { key: 'tgl_terima',   label: 'Tgl Terima',       align: 'left',   filterable: false, sortable: true },
   { key: 'tgl_selesai',  label: 'Tgl Selesai',      align: 'left',   filterable: false, sortable: true },
   { key: 'status',       label: 'Status',           align: 'center', filterable: true  },
@@ -354,7 +364,7 @@ function TrackingModal({ show, onClose, row, readOnly }) {
       try {
         const [trackRes, empRes] = await Promise.all([
           api.get('/cleanox-by-waschen-production/tracking', {
-            params: { no_nota: row.no_nota, nama_item: row.nama_item },
+            params: { id: row.id },
           }),
           !readOnly ? api.get('/cleanox-by-waschen-production/employees') : Promise.resolve({ data: { employees: [] } }),
         ]);
@@ -388,15 +398,14 @@ function TrackingModal({ show, onClose, row, readOnly }) {
     setSaving(stageKey);
     try {
       await api.post('/cleanox-by-waschen-production/tracking', {
-        no_nota: row.no_nota,
-        nama_item: row.nama_item,
+        id: row.id,
         stage: stageKey,
         employee_names: form.employees,
         timestamp: form.timestamp || undefined,
       });
       // Refresh tracking
       const { data } = await api.get('/cleanox-by-waschen-production/tracking', {
-        params: { no_nota: row.no_nota, nama_item: row.nama_item },
+        params: { id: row.id },
       });
       setTracking(data.tracking);
       const byVal = data.tracking[STAGES.find((s) => s.key === stageKey).byCol];
@@ -707,7 +716,7 @@ export default function CleanoxByWaschenProductionPage() {
         const payload = JSON.parse(e.data);
         setRows((prev) =>
           prev.map((r) =>
-            r.no_nota === payload.no_nota && r.nama_item === payload.nama_item
+            r.id === payload.id
               ? { ...r, status: payload.status, updated_at: payload.updated_at }
               : r
           )
@@ -1026,16 +1035,19 @@ export default function CleanoxByWaschenProductionPage() {
                   const rowNum = (pagination.page - 1) * pagination.limit + idx + 1;
                   return (
                     <tr
-                      key={`${row.no_nota}-${row.nama_item}-${idx}`}
+                      key={row.id}
                       className="border-b border-gray-50 hover:bg-brand-50/30 transition-colors even:bg-slate-50/30"
                     >
                       <td className="px-3 sm:px-4 py-2.5 text-center text-xs text-gray-400 tabular-nums">{rowNum}</td>
                       <td className="px-3 sm:px-4 py-2.5">
-                        <span className="badge bg-brand-100 text-brand-700 font-semibold text-[11px]">{row.outlet || '—'}</span>
+                        <span className={`badge font-semibold text-[11px] ${outletMeta(row.outlet).color}`} title={row.outlet}>{row.outlet ? outletMeta(row.outlet).short : '—'}</span>
                       </td>
                       <td className="px-3 sm:px-4 py-2.5 font-mono text-xs text-gray-700 whitespace-nowrap">{row.no_nota || '—'}</td>
                       <td className="px-3 sm:px-4 py-2.5 font-medium text-gray-900 whitespace-nowrap text-xs">{row.customer_nama || '—'}</td>
                       <td className="px-3 sm:px-4 py-2.5 text-gray-700 text-xs max-w-[200px] truncate" title={row.nama_item}>{row.nama_item || '—'}</td>
+                      <td className="px-3 sm:px-4 py-2.5 text-right tabular-nums text-xs text-gray-700 whitespace-nowrap">
+                        {row.jumlah != null ? <><span className="font-semibold">{Number(row.jumlah).toLocaleString('id-ID')}</span><span className="text-gray-400 ml-1">{row.satuan_item || ''}</span></> : '—'}
+                      </td>
                       <td className="px-3 sm:px-4 py-2.5 text-gray-500 whitespace-nowrap text-xs">{fmtDate(row.tgl_terima)}</td>
                       <td className="px-3 sm:px-4 py-2.5 text-gray-500 whitespace-nowrap text-xs">{fmtDate(row.tgl_selesai)}</td>
                       <td className="px-3 sm:px-4 py-2.5 text-center">

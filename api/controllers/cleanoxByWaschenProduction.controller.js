@@ -87,6 +87,7 @@ export const getData = async (req, res) => {
 
   const dataQuery = `
     SELECT
+      id,
       outlet,
       no_nota,
       customer_nama,
@@ -136,15 +137,15 @@ export const getData = async (req, res) => {
 
 /* ── Get tracking detail for one item row ─────────────── */
 export const getTracking = async (req, res) => {
-  const { no_nota, nama_item } = req.query;
-  if (!no_nota || !nama_item) {
-    return res.status(400).json({ message: 'no_nota dan nama_item wajib diisi' });
+  const { id } = req.query;
+  if (!id) {
+    return res.status(400).json({ message: 'id wajib diisi' });
   }
 
   try {
     const [rows] = await cleanoxPool.query(
       `SELECT
-        no_nota, outlet, customer_nama, alamat_customer, nama_item,
+        id, no_nota, outlet, customer_nama, alamat_customer, nama_item,
         jumlah, satuan_item,
         tgl_terima, tgl_selesai, status,
         pickup_by,    pickup_at,
@@ -153,9 +154,8 @@ export const getTracking = async (req, res) => {
         pengantaran_by, pengantaran_at,
         updated_by, updated_at
       FROM rekap_transaksi_reguler
-      WHERE no_nota = ? AND nama_item = ?
-      LIMIT 1`,
-      [no_nota, nama_item]
+      WHERE id = ?`,
+      [id]
     );
 
     if (rows.length === 0) {
@@ -192,10 +192,10 @@ const STAGE_COLUMNS = {
 const VALID_STATUSES = ['Pickup', 'Cuci Jemur', 'Packing', 'Pengantaran'];
 
 export const updateTracking = async (req, res) => {
-  const { no_nota, nama_item, stage, employee_names, timestamp } = req.body;
+  const { id, stage, employee_names, timestamp } = req.body;
 
-  if (!no_nota || !nama_item || !stage) {
-    return res.status(400).json({ message: 'no_nota, nama_item, dan stage wajib diisi' });
+  if (!id || !stage) {
+    return res.status(400).json({ message: 'id dan stage wajib diisi' });
   }
   if (!STAGE_COLUMNS[stage]) {
     return res.status(400).json({ message: 'Stage tidak valid' });
@@ -205,7 +205,7 @@ export const updateTracking = async (req, res) => {
   }
 
   const col = STAGE_COLUMNS[stage];
-  const ts = timestamp || new Date().toISOString().slice(0, 19).replace('T', ' ');
+  const ts = timestamp || new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ');
 
   // Determine new overall status = latest stage that is filled
   const stageIdx = VALID_STATUSES.indexOf(stage);
@@ -216,16 +216,22 @@ export const updateTracking = async (req, res) => {
       `UPDATE rekap_transaksi_reguler
        SET ${col.by} = ?, ${col.at} = ?,
            status = ?, updated_by = ?, updated_at = NOW()
-       WHERE no_nota = ? AND nama_item = ?`,
-      [JSON.stringify(employee_names), ts, newStatus, employee_names.join(', '), no_nota, nama_item]
+       WHERE id = ?`,
+      [JSON.stringify(employee_names), ts, newStatus, employee_names.join(', '), id]
     );
 
     if (result.affectedRows === 0) {
       return res.status(404).json({ message: 'Data tidak ditemukan' });
     }
 
+    // Fetch updated row to get no_nota/nama_item for SSE payload
+    const [[updatedRow]] = await cleanoxPool.query(
+      `SELECT id, no_nota, nama_item FROM rekap_transaksi_reguler WHERE id = ?`,
+      [id]
+    );
+
     const payload = {
-      no_nota, nama_item, stage,
+      id, no_nota: updatedRow?.no_nota, nama_item: updatedRow?.nama_item, stage,
       employee_names, timestamp: ts,
       status: newStatus,
       updated_at: new Date().toISOString(),
