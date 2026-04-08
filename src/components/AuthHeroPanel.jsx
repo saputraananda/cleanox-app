@@ -11,11 +11,11 @@ import team6 from '../assets/CleanoxTeam6.webp';
 const SLIDES = [
   { img: team0, caption: 'Tim profesional kami siap memberikan pelayanan terbaik' },
   { img: team1, caption: 'Kualitas premium, kepuasan pelanggan adalah prioritas kami' },
-  { img: team2, caption: 'Solusi laundry modern dengan teknologi terkini' },
-  { img: team3, caption: 'Melayani dengan sepenuh hati setiap hari' },
-  { img: team4, caption: 'Standar kebersihan tertinggi untuk Anda' },
+  { img: team4, caption: 'Melayani dengan sepenuh hati' },
+  { img: team3, caption: 'Solusi laundry modern dengan teknologi terkini' },
+  { img: team2, caption: 'Standar kebersihan tertinggi untuk Anda' },
   { img: team5, caption: 'Dipercaya oleh ribuan pelanggan setia' },
-  { img: team6, caption: 'Bersama kami, pakaian Anda selalu terjaga' },
+  { img: team6, caption: 'Bersama kami, kebersihan Anda selalu terjaga' },
 ];
 
 export default function AuthHeroPanel() {
@@ -71,7 +71,7 @@ export default function AuthHeroPanel() {
         <div className="space-y-5">
           <div>
             <span className="inline-block text-[10px] font-semibold text-white/40 uppercase tracking-[0.25em] mb-3">
-              Foto-Foto Momen Tim Cleanox
+              Tim Cleanox Alora
             </span>
             <h2 className="text-white text-2xl xl:text-3xl font-bold leading-snug max-w-[300px] drop-shadow-sm">
               {SLIDES[current].caption}

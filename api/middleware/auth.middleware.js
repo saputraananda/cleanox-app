@@ -15,3 +15,10 @@ export const authenticate = (req, res, next) => {
     return res.status(401).json({ message: 'Unauthorized: token invalid or expired' });
   }
 };
+
+export const requireAdmin = (req, res, next) => {
+  if (req.user?.role !== 'admin') {
+    return res.status(403).json({ message: 'Forbidden: hanya admin yang diizinkan' });
+  }
+  next();
+};

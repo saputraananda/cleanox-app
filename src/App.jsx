@@ -5,6 +5,7 @@ import RegisterPage from './pages/RegisterPage.jsx';
 import DashboardPage from './pages/DashboardPage.jsx';
 import CleanoxByWaschenPage from './pages/CleanoxByWaschenPage.jsx';
 import CleanoxByWaschenProductionPage from './pages/CleanoxByWaschenProductionPage.jsx';
+import UserManagementPage from './pages/UserManagementPage.jsx';
 import Layout from './components/Layout.jsx';
 
 const PrivateRoute = ({ children, roles }) => {
@@ -65,6 +66,14 @@ export default function App() {
         element={
           <PrivateRoute>
             <Layout><CleanoxByWaschenProductionPage /></Layout>
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/users"
+        element={
+          <PrivateRoute roles={['admin']}>
+            <Layout><UserManagementPage /></Layout>
           </PrivateRoute>
         }
       />

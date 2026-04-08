@@ -4,16 +4,18 @@ import {
   Sparkles,
   Building2,
   Factory,
+  Users,
   X,
 } from 'lucide-react';
 import cleanoxLogo from '../assets/cleanox.png';
 import { getUser } from '../utils/auth.js';
 
 const NAV_ITEMS = [
-  { label: 'Beranda',          icon: LayoutDashboard, to: '/dashboard',                      roles: ['admin', 'cleanox', 'frontliner'] },
-  { label: 'Cleanox',            icon: Sparkles,        to: '/cleanox',        soon: true,     roles: ['admin'] },
-  { label: 'Cleanox By Waschen', icon: Building2,       to: '/cleanox-by-waschen',              roles: ['admin'] },
-  { label: 'Status Produksi',  icon: Factory,         to: '/cleanox-by-waschen-production',   roles: ['admin', 'cleanox', 'frontliner'] },
+  { label: 'Beranda',            icon: LayoutDashboard, to: '/dashboard',                     roles: ['admin', 'cleanox', 'frontliner'] },
+  { label: 'Cleanox',            icon: Sparkles,        to: '/cleanox',        soon: true,    roles: [] },
+  { label: 'Cleanox By Waschen', icon: Building2,       to: '/cleanox-by-waschen',             roles: [] },
+  { label: 'Status Produksi',    icon: Factory,         to: '/cleanox-by-waschen-production',  roles: ['admin', 'cleanox', 'frontliner'] },
+  { label: 'Manajemen User',     icon: Users,           to: '/users',                          roles: ['admin'] },
 ];
 
 export default function Sidebar({ collapsed, mobileOpen, onMobileClose }) {

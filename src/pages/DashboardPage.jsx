@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { Sparkles, Building2, ChevronRight, Calendar } from 'lucide-react';
+import { Sparkles, Building2, ChevronRight, Calendar, Factory, Users } from 'lucide-react';
 import { getUser } from '../utils/auth.js';
 
 const MENU_CARDS = [
@@ -12,6 +12,7 @@ const MENU_CARDS = [
     ring: 'ring-purple-200',
     soon: true,
     to: '/cleanox',
+    roles: [],
   },
   {
     id: 'cleanox-by-waschen',
@@ -22,6 +23,29 @@ const MENU_CARDS = [
     ring: 'ring-blue-200',
     soon: false,
     to: '/cleanox-by-waschen',
+    roles: [],
+  },
+  {
+    id: 'status-produksi',
+    title: 'Status Produksi',
+    description: 'Pantau dan perbarui status pengerjaan order cleanox secara real-time.',
+    icon: Factory,
+    gradient: 'from-emerald-500 to-teal-600',
+    ring: 'ring-emerald-200',
+    soon: false,
+    to: '/cleanox-by-waschen-production',
+    roles: ['admin', 'cleanox', 'frontliner'],
+  },
+  {
+    id: 'users',
+    title: 'Manajemen User',
+    description: 'Tambah, edit, dan kelola akun serta role seluruh pengguna sistem.',
+    icon: Users,
+    gradient: 'from-orange-400 to-rose-500',
+    ring: 'ring-orange-200',
+    soon: false,
+    to: '/users',
+    roles: ['admin'],
   },
 ];
 
@@ -35,6 +59,10 @@ export default function DashboardPage() {
     month: 'long',
     year: 'numeric',
   });
+
+  const visibleCards = MENU_CARDS.filter(
+    (item) => item.roles.length > 0 && item.roles.includes(user?.role)
+  );
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -59,7 +87,7 @@ export default function DashboardPage() {
       {/* Menu cards */}
       <h2 className="text-base font-semibold text-gray-900 mb-4">Menu Utama</h2>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-        {MENU_CARDS.map((item) => (
+        {visibleCards.map((item) => (
           <button
             key={item.id}
             onClick={() => navigate(item.to)}
