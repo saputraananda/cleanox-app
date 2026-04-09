@@ -153,6 +153,8 @@ export const getTracking = async (req, res) => {
         packing_by,   packing_at,
         pengantaran_by, pengantaran_at,
         catatan_by_cleanox,
+        pickup_evidance_file, pickup_evidance_path,
+        packing_evidance_file, packing_evidance_path,
         updated_by, updated_at
       FROM rekap_transaksi_reguler
       WHERE id = ?`,

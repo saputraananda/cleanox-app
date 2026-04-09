@@ -28,6 +28,12 @@ import {
   ArrowUp,
   ArrowDown,
   Pencil,
+  Upload,
+  Camera,
+  Download,
+  Trash2,
+  Image,
+  Eye,
 } from 'lucide-react';
 import api from '../utils/api.js';
 import { getToken, getUser } from '../utils/auth.js';
@@ -347,6 +353,404 @@ function EmployeePicker({ employees, selected, onChange }) {
   );
 }
 
+/* ── Image compression helper (canvas) ────────────────── */
+async function compressImageFile(file, maxSizeMB = 2) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new window.Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let { width, height } = img;
+        const MAX_DIM = 2048;
+        if (width > MAX_DIM || height > MAX_DIM) {
+          const ratio = Math.min(MAX_DIM / width, MAX_DIM / height);
+          width = Math.round(width * ratio);
+          height = Math.round(height * ratio);
+        }
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+
+        let quality = 0.85;
+        const maxBytes = maxSizeMB * 1024 * 1024;
+        const tryCompress = () => {
+          canvas.toBlob(
+            (blob) => {
+              if (blob.size <= maxBytes || quality <= 0.3) {
+                resolve(new File([blob], file.name.replace(/\.\w+$/, '.jpg'), { type: 'image/jpeg' }));
+              } else {
+                quality -= 0.1;
+                tryCompress();
+              }
+            },
+            'image/jpeg',
+            quality,
+          );
+        };
+        tryCompress();
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+/* ── Camera Modal (getUserMedia live stream) ────────────── */
+function CameraModal({ show, onCapture, onClose }) {
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const streamRef = useRef(null);
+  const [ready, setReady] = useState(false);
+  const [facingMode, setFacingMode] = useState('environment');
+  const [captured, setCaptured] = useState(null); // blob URL of captured frame
+  const [capturedBlob, setCapturedBlob] = useState(null);
+
+  const startStream = useCallback(async (facing) => {
+    // Stop previous stream
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    setReady(false);
+    setCaptured(null);
+    setCapturedBlob(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: facing, width: { ideal: 1920 }, height: { ideal: 1080 } },
+        audio: false,
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current.play();
+          setReady(true);
+        };
+      }
+    } catch (err) {
+      alert('Tidak bisa mengakses kamera: ' + (err.message || err));
+      onClose();
+    }
+  }, [onClose]);
+
+  useEffect(() => {
+    if (show) startStream(facingMode);
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+    };
+  }, [show]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleFlip = () => {
+    const next = facingMode === 'environment' ? 'user' : 'environment';
+    setFacingMode(next);
+    startStream(next);
+  };
+
+  const handleCapture = () => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return;
+
+    const MAX_DIM = 2048;
+    let w = video.videoWidth;
+    let h = video.videoHeight;
+    if (w > MAX_DIM || h > MAX_DIM) {
+      const ratio = Math.min(MAX_DIM / w, MAX_DIM / h);
+      w = Math.round(w * ratio);
+      h = Math.round(h * ratio);
+    }
+    canvas.width = w;
+    canvas.height = h;
+    canvas.getContext('2d').drawImage(video, 0, 0, w, h);
+
+    // Compress to ≤ 2 MB
+    const MAX_BYTES = 2 * 1024 * 1024;
+    let quality = 0.85;
+    const tryCompress = () => {
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        if (blob.size <= MAX_BYTES || quality <= 0.3) {
+          const url = URL.createObjectURL(blob);
+          setCaptured(url);
+          setCapturedBlob(blob);
+        } else {
+          quality -= 0.1;
+          tryCompress();
+        }
+      }, 'image/jpeg', quality);
+    };
+    tryCompress();
+  };
+
+  const handleRetake = () => {
+    if (captured) URL.revokeObjectURL(captured);
+    setCaptured(null);
+    setCapturedBlob(null);
+  };
+
+  const handleUse = () => {
+    if (!capturedBlob) return;
+    const file = new File([capturedBlob], `foto_${Date.now()}.jpg`, { type: 'image/jpeg' });
+    onCapture(file);
+    if (captured) URL.revokeObjectURL(captured);
+    setCaptured(null);
+    setCapturedBlob(null);
+  };
+
+  if (!show) return null;
+
+  return (
+    <div className="fixed inset-0 z-[200] flex flex-col bg-black" onClick={(e) => e.stopPropagation()}>
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 bg-black/80 flex-shrink-0">
+        <button onClick={onClose} className="flex items-center gap-1.5 text-white/70 hover:text-white text-sm transition-colors">
+          <X className="w-4 h-4" /> Batal
+        </button>
+        <p className="text-white text-sm font-semibold">Ambil Foto</p>
+        <button onClick={handleFlip} className="text-white/70 hover:text-white text-sm transition-colors" title="Flip kamera">
+          🔄
+        </button>
+      </div>
+
+      {/* Viewfinder */}
+      <div className="flex-1 relative flex items-center justify-center bg-black overflow-hidden">
+        <canvas ref={canvasRef} className="hidden" />
+
+        {!captured ? (
+          <>
+            <video
+              ref={videoRef}
+              playsInline
+              muted
+              className="max-h-full max-w-full object-contain"
+            />
+            {!ready && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <Loader2 className="w-8 h-8 text-white animate-spin" />
+              </div>
+            )}
+            {/* Focus frame overlay */}
+            {ready && (
+              <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                <div className="w-48 h-48 border-2 border-white/40 rounded-xl" />
+              </div>
+            )}
+          </>
+        ) : (
+          <img src={captured} alt="Captured" className="max-h-full max-w-full object-contain" />
+        )}
+      </div>
+
+      {/* Controls */}
+      <div className="flex-shrink-0 bg-black/80 px-6 py-5">
+        {!captured ? (
+          <div className="flex items-center justify-center">
+            <button
+              onClick={handleCapture}
+              disabled={!ready}
+              className="w-16 h-16 rounded-full bg-white border-4 border-white/30 shadow-lg disabled:opacity-40 active:scale-95 transition-transform flex items-center justify-center"
+            >
+              <div className="w-12 h-12 rounded-full bg-white" />
+            </button>
+          </div>
+        ) : (
+          <div className="flex gap-3">
+            <button
+              onClick={handleRetake}
+              className="flex-1 py-3 rounded-xl border border-white/30 text-white text-sm font-medium hover:bg-white/10 transition-colors"
+            >
+              Foto Ulang
+            </button>
+            <button
+              onClick={handleUse}
+              className="flex-1 py-3 rounded-xl bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 transition-colors"
+            >
+              Gunakan Foto
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Evidance Upload Section (Pickup / Packing) ─────── */
+function EvidanceSection({ itemId, stage, evidancePath, evidanceFile, userRole, onUploaded }) {
+  const [uploading, setUploading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const [showPreview, setShowPreview] = useState(false);
+  const [showCamera, setShowCamera] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const canUpload = userRole === 'cleanox' || userRole === 'admin';
+  const hasFile = !!evidancePath;
+  const isImage = evidanceFile && /\.(jpe?g|png|gif|webp)$/i.test(evidanceFile);
+
+  const doUpload = async (file) => {
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      if (/^image\//.test(file.type)) {
+        file = await compressImageFile(file, 2);
+        if (file.size > 5 * 1024 * 1024) return alert('File masih terlalu besar setelah dikompresi (> 5 MB)');
+      } else {
+        return alert('Ukuran file melebihi 5 MB');
+      }
+    } else if (/^image\//.test(file.type)) {
+      file = await compressImageFile(file, 2);
+    }
+
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('id', itemId);
+      formData.append('stage', stage);
+      const { data } = await api.post('/evidance/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      onUploaded(stage, data.filename, data.filepath);
+    } catch (err) {
+      alert(err.response?.data?.message || 'Gagal upload file');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleFileSelect = (e) => {
+    if (e.target.files?.[0]) doUpload(e.target.files[0]);
+    e.target.value = '';
+  };
+
+  const handleCameraCapture = (file) => {
+    setShowCamera(false);
+    doUpload(file);
+  };
+
+  const handleDelete = async () => {
+    if (!confirm('Hapus evidance ini?')) return;
+    setDeleting(true);
+    try {
+      await api.delete('/evidance/delete', { data: { id: itemId, stage } });
+      onUploaded(stage, null, null);
+    } catch (err) {
+      alert(err.response?.data?.message || 'Gagal menghapus');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  // Strip leading /api if stored with prefix (data lama di DB mungkin masih ada /api)
+  const apiPath = evidancePath?.replace(/^\/api\//, '/');
+
+  const handlePreview = async () => {
+    if (!apiPath) return;
+    try {
+      const resp = await api.get(apiPath, { responseType: 'blob' });
+      const url = URL.createObjectURL(resp.data);
+      setPreview(url);
+      setShowPreview(true);
+    } catch {
+      alert('Gagal memuat preview');
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!apiPath) return;
+    try {
+      const resp = await api.get(apiPath, { responseType: 'blob' });
+      const url = URL.createObjectURL(resp.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = evidanceFile || 'evidance';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      alert('Gagal mendownload file');
+    }
+  };
+
+  const stageLabel = stage === 'pickup' ? 'Pickup' : 'Packing';
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+        Evidance {stageLabel}
+      </p>
+
+      {hasFile ? (
+        <div className="border border-gray-200 rounded-lg p-2.5 space-y-2 bg-gray-50">
+          <div className="flex items-center gap-2">
+            {isImage ? <Image className="w-4 h-4 text-blue-500 flex-shrink-0" /> : <FileText className="w-4 h-4 text-orange-500 flex-shrink-0" />}
+            <span className="text-xs text-gray-700 truncate flex-1" title={evidanceFile}>{evidanceFile}</span>
+          </div>
+          <div className="flex gap-1.5">
+            {isImage && (
+              <button onClick={handlePreview} className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded border border-gray-200 bg-white text-gray-600 hover:border-blue-300 hover:text-blue-600 transition-colors">
+                <Eye className="w-3 h-3" /> Preview
+              </button>
+            )}
+            <button onClick={handleDownload} className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded border border-gray-200 bg-white text-gray-600 hover:border-green-300 hover:text-green-600 transition-colors">
+              <Download className="w-3 h-3" /> Download
+            </button>
+            {canUpload && (
+              <button onClick={handleDelete} disabled={deleting} className="flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded border border-red-200 bg-white text-red-500 hover:bg-red-50 disabled:opacity-50 transition-colors ml-auto">
+                {deleting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                Hapus
+              </button>
+            )}
+          </div>
+        </div>
+      ) : canUpload ? (
+        <div className="flex gap-2">
+          <input ref={fileInputRef} type="file" accept="image/*,.pdf,.doc,.docx" className="hidden" onChange={handleFileSelect} />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium rounded-lg border border-dashed border-gray-300 bg-white text-gray-600 hover:border-brand-400 hover:text-brand-700 hover:bg-brand-50 disabled:opacity-50 transition-colors"
+          >
+            {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+            Upload File
+          </button>
+          <button
+            onClick={() => setShowCamera(true)}
+            disabled={uploading}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium rounded-lg border border-dashed border-amber-300 bg-white text-amber-600 hover:border-amber-400 hover:bg-amber-50 disabled:opacity-50 transition-colors"
+          >
+            <Camera className="w-3.5 h-3.5" />
+            Ambil Foto
+          </button>
+        </div>
+      ) : (
+        <p className="text-xs text-gray-400 italic">Belum ada evidance</p>
+      )}
+
+      {/* Fullscreen image preview */}
+      {showPreview && preview && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+          onClick={() => { setShowPreview(false); URL.revokeObjectURL(preview); setPreview(null); }}>
+          <div className="relative max-w-3xl max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+            <button onClick={() => { setShowPreview(false); URL.revokeObjectURL(preview); setPreview(null); }}
+              className="absolute -top-3 -right-3 w-8 h-8 rounded-full bg-white shadow-lg flex items-center justify-center hover:bg-gray-100 transition-colors z-10">
+              <X className="w-4 h-4 text-gray-600" />
+            </button>
+            <img src={preview} alt="Preview" className="max-w-full max-h-[85vh] rounded-xl shadow-2xl object-contain" />
+          </div>
+        </div>
+      )}
+
+      {/* Live camera modal */}
+      <CameraModal show={showCamera} onCapture={handleCameraCapture} onClose={() => setShowCamera(false)} />
+    </div>
+  );
+}
+
 /* ── Tracking Modal (JNE-style) ───────────────────────── */
 function TrackingModal({ show, onClose, row, userRole }) {
   const [tracking, setTracking] = useState(null);
@@ -452,6 +856,12 @@ function TrackingModal({ show, onClose, row, userRole }) {
       ...prev,
       [stageKey]: { ...prev[stageKey], [field]: value },
     }));
+  };
+
+  const handleEvidanceUploaded = (stage, filename, filepath) => {
+    const fileCol = stage === 'pickup' ? 'pickup_evidance_file' : 'packing_evidance_file';
+    const pathCol = stage === 'pickup' ? 'pickup_evidance_path' : 'packing_evidance_path';
+    setTracking((prev) => ({ ...prev, [fileCol]: filename, [pathCol]: filepath }));
   };
 
   if (!show) return null;
@@ -686,6 +1096,20 @@ function TrackingModal({ show, onClose, row, userRole }) {
                           {/* Pending state */}
                           {!filled && !isActive && (
                             <p className="mt-1 text-xs text-gray-300 italic">Menunggu...</p>
+                          )}
+
+                          {/* Evidance section for Pickup & Packing (show when stage is filled) */}
+                          {(stage.key === 'Pickup' || stage.key === 'Packing') && filled && (
+                            <div className="mt-2">
+                              <EvidanceSection
+                                itemId={row.id}
+                                stage={stage.key === 'Pickup' ? 'pickup' : 'packing'}
+                                evidancePath={tracking[stage.key === 'Pickup' ? 'pickup_evidance_path' : 'packing_evidance_path']}
+                                evidanceFile={tracking[stage.key === 'Pickup' ? 'pickup_evidance_file' : 'packing_evidance_file']}
+                                userRole={userRole}
+                                onUploaded={handleEvidanceUploaded}
+                              />
+                            </div>
                           )}
                         </div>
                       </div>
