@@ -34,7 +34,7 @@ export const getOutlets = async (_req, res) => {
   }
 };
 
-/* ── Get employees (for tracking modal) ───────────────── */
+/* ── Get employees (for tracking modal) — only role 'cleanox' ── */
 export const getEmployees = async (_req, res) => {
   try {
     const [rows] = await cleanoxPool.query(
@@ -152,6 +152,7 @@ export const getTracking = async (req, res) => {
         cuci_jemur_by, cuci_jemur_at,
         packing_by,   packing_at,
         pengantaran_by, pengantaran_at,
+        catatan_by_cleanox,
         updated_by, updated_at
       FROM rekap_transaksi_reguler
       WHERE id = ?`,
@@ -242,5 +243,34 @@ export const updateTracking = async (req, res) => {
   } catch (err) {
     console.error('[production/updateTracking]', err.message);
     return res.status(500).json({ message: 'Gagal mengupdate tracking', error: err.message });
+  }
+};
+/* ── Update / delete catatan_by_cleanox ───────────────── */
+export const updateCatatan = async (req, res) => {
+  const { id, catatan } = req.body;
+
+  if (!id) {
+    return res.status(400).json({ message: 'id wajib diisi' });
+  }
+
+  // catatan can be empty string (to clear/delete)
+  const catatanValue = catatan !== undefined ? catatan : null;
+
+  try {
+    const [result] = await cleanoxPool.query(
+      `UPDATE rekap_transaksi_reguler
+       SET catatan_by_cleanox = ?, updated_at = NOW()
+       WHERE id = ?`,
+      [catatanValue || null, id]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'Data tidak ditemukan' });
+    }
+
+    return res.json({ message: 'Catatan berhasil diupdate', catatan: catatanValue || null });
+  } catch (err) {
+    console.error('[production/updateCatatan]', err.message);
+    return res.status(500).json({ message: 'Gagal mengupdate catatan', error: err.message });
   }
 };

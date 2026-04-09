@@ -7,6 +7,7 @@ import {
   getEmployees,
   getTracking,
   updateTracking,
+  updateCatatan,
   subscribeEvents,
 } from '../controllers/cleanoxByWaschenProduction.controller.js';
 
@@ -33,5 +34,6 @@ router.get('/employees', getEmployees);
 router.get('/tracking', getTracking);
 router.get('/', getData);
 router.post('/tracking', updateTracking);
+router.patch('/catatan', updateCatatan);
 
 export default router;

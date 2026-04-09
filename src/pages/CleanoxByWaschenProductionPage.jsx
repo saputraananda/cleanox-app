@@ -27,6 +27,7 @@ import {
   User,
   ArrowUp,
   ArrowDown,
+  Pencil,
 } from 'lucide-react';
 import api from '../utils/api.js';
 import { getToken, getUser } from '../utils/auth.js';
@@ -347,18 +348,23 @@ function EmployeePicker({ employees, selected, onChange }) {
 }
 
 /* ── Tracking Modal (JNE-style) ───────────────────────── */
-function TrackingModal({ show, onClose, row, readOnly }) {
+function TrackingModal({ show, onClose, row, userRole }) {
   const [tracking, setTracking] = useState(null);
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(null); // stage key being saved
   const [stageForm, setStageForm] = useState({});
+  const [catatan, setCatatan] = useState('');
+  const [savingCatatan, setSavingCatatan] = useState(false);
+  const [editingStage, setEditingStage] = useState(null); // stage key admin is overriding
 
   // Fetch tracking data + employees on open
   useEffect(() => {
     if (!show || !row) return;
     setLoading(true);
     setStageForm({});
+    setCatatan('');
+    setEditingStage(null);
 
     const fetchAll = async () => {
       try {
@@ -366,10 +372,11 @@ function TrackingModal({ show, onClose, row, readOnly }) {
           api.get('/cleanox-by-waschen-production/tracking', {
             params: { id: row.id },
           }),
-          !readOnly ? api.get('/cleanox-by-waschen-production/employees') : Promise.resolve({ data: { employees: [] } }),
+          (userRole === 'cleanox' || userRole === 'admin') ? api.get('/cleanox-by-waschen-production/employees') : Promise.resolve({ data: { employees: [] } }),
         ]);
         setTracking(trackRes.data.tracking);
         setEmployees(empRes.data.employees || []);
+        setCatatan(trackRes.data.tracking?.catatan_by_cleanox || '');
 
         // Init form with existing data
         const form = {};
@@ -389,7 +396,22 @@ function TrackingModal({ show, onClose, row, readOnly }) {
       }
     };
     fetchAll();
-  }, [show, row, readOnly]);
+  }, [show, row, userRole]);
+
+  const handleSaveCatatan = async () => {
+    setSavingCatatan(true);
+    try {
+      await api.patch('/cleanox-by-waschen-production/catatan', {
+        id: row.id,
+        catatan: catatan.trim() || null,
+      });
+      setTracking((prev) => ({ ...prev, catatan_by_cleanox: catatan.trim() || null }));
+    } catch (err) {
+      alert(err.response?.data?.message || 'Gagal menyimpan catatan');
+    } finally {
+      setSavingCatatan(false);
+    }
+  };
 
   const handleSaveStage = async (stageKey) => {
     const form = stageForm[stageKey];
@@ -417,6 +439,7 @@ function TrackingModal({ show, onClose, row, readOnly }) {
           timestamp: atVal ? atVal.slice(0, 16) : '',
         },
       }));
+      setEditingStage(null); // close admin override form after save
     } catch (err) {
       alert(err.response?.data?.message || 'Gagal menyimpan');
     } finally {
@@ -432,6 +455,10 @@ function TrackingModal({ show, onClose, row, readOnly }) {
   };
 
   if (!show) return null;
+
+  // Permission flags
+  const canFillNext = userRole === 'cleanox' || userRole === 'admin';
+  const canEditFilled = userRole === 'admin';
 
   // Determine current active stage index
   const currentStageIdx = tracking
@@ -499,7 +526,8 @@ function TrackingModal({ show, onClose, row, readOnly }) {
                 {STAGES.map((stage, idx) => {
                   const sc = STAGE_COLORS[stage.color];
                   const filled = !!tracking[stage.atCol];
-                  const isActive = idx === currentStageIdx + 1 && !readOnly;
+                  const isActive = idx === currentStageIdx + 1 && canFillNext;
+                  const isEditing = filled && canEditFilled && editingStage === stage.key;
                   const Icon = stage.icon;
                   const form = stageForm[stage.key] || { employees: [], timestamp: '' };
 
@@ -547,15 +575,70 @@ function TrackingModal({ show, onClose, row, readOnly }) {
                           </div>
 
                           {/* Filled info */}
-                          {filled && (
+                          {filled && !isEditing && (
                             <div className={`mt-1.5 rounded-lg p-2.5 ${sc.bg} space-y-1`}>
                               <div className="flex items-center gap-1.5 text-xs">
                                 <User className="w-3 h-3 flex-shrink-0" />
                                 <span className={`font-medium ${sc.text}`}>{byNames.join(', ') || '—'}</span>
                               </div>
-                              <div className="flex items-center gap-1.5 text-xs">
-                                <Clock className="w-3 h-3 flex-shrink-0" />
-                                <span className={sc.text}>{fmtDateTime(atVal)}</span>
+                              <div className="flex items-center justify-between gap-1.5">
+                                <div className="flex items-center gap-1.5 text-xs">
+                                  <Clock className="w-3 h-3 flex-shrink-0" />
+                                  <span className={sc.text}>{fmtDateTime(atVal)}</span>
+                                </div>
+                                {canEditFilled && (
+                                  <button
+                                    onClick={() => setEditingStage(stage.key)}
+                                    title="Koreksi (Admin)"
+                                    className="ml-auto flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded border border-gray-300 text-gray-500 hover:border-brand-400 hover:text-brand-600 transition-colors"
+                                  >
+                                    <Pencil className="w-2.5 h-2.5" /> Koreksi
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Admin override form for already-filled stage */}
+                          {isEditing && (
+                            <div className="mt-2 space-y-2 bg-white border border-amber-200 rounded-lg p-3">
+                              <p className="text-[10px] font-semibold text-amber-600 uppercase tracking-wider">Koreksi Data (Admin)</p>
+                              <div>
+                                <label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider mb-1 block">
+                                  Dikerjakan Oleh
+                                </label>
+                                <EmployeePicker
+                                  employees={employees}
+                                  selected={form.employees}
+                                  onChange={(v) => updateFormField(stage.key, 'employees', v)}
+                                />
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider mb-1 block">
+                                  Waktu
+                                </label>
+                                <input
+                                  type="datetime-local"
+                                  className="w-full px-2 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-brand-500"
+                                  value={form.timestamp}
+                                  onChange={(e) => updateFormField(stage.key, 'timestamp', e.target.value)}
+                                />
+                              </div>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => handleSaveStage(stage.key)}
+                                  disabled={saving === stage.key}
+                                  className="flex-1 py-1.5 text-xs font-semibold rounded-lg bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-60 transition-colors flex items-center justify-center gap-1.5"
+                                >
+                                  {saving === stage.key ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                                  Simpan Koreksi
+                                </button>
+                                <button
+                                  onClick={() => setEditingStage(null)}
+                                  className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 transition-colors"
+                                >
+                                  Batal
+                                </button>
                               </div>
                             </div>
                           )}
@@ -618,6 +701,61 @@ function TrackingModal({ show, onClose, row, readOnly }) {
                   <p className="text-sm font-semibold text-green-700">Semua proses selesai!</p>
                 </div>
               )}
+
+              {/* Catatan Cleanox */}
+              <div className="border-t border-gray-100 pt-4 space-y-2">
+                <label className="text-xs font-semibold text-gray-600 uppercase tracking-wider block">
+                  Catatan Dari Team Cleanox (Opsional)
+                </label>
+                {userRole === 'frontliner' ? (
+                  /* Read-only view for frontliner */
+                  <div className={`px-3 py-2.5 text-xs rounded-lg border ${tracking?.catatan_by_cleanox ? 'bg-gray-50 border-gray-200 text-gray-800' : 'bg-gray-50 border-gray-200 text-gray-400 italic'}`}>
+                    {tracking?.catatan_by_cleanox || 'Catatan Kosong'}
+                  </div>
+                ) : (
+                  /* Editable for cleanox, admin, and others */
+                  <>
+                    <textarea
+                      rows={3}
+                      className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none"
+                      placeholder="Tambahkan catatan..."
+                      value={catatan}
+                      onChange={(e) => setCatatan(e.target.value)}
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleSaveCatatan}
+                        disabled={savingCatatan}
+                        className="flex-1 py-1.5 text-xs font-semibold rounded-lg bg-brand-700 text-white hover:bg-brand-800 disabled:opacity-60 transition-colors flex items-center justify-center gap-1.5"
+                      >
+                        {savingCatatan ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                        Simpan Catatan
+                      </button>
+                      {tracking?.catatan_by_cleanox && (
+                        <button
+                          onClick={async () => {
+                            setCatatan('');
+                            setSavingCatatan(true);
+                            try {
+                              await api.patch('/cleanox-by-waschen-production/catatan', { id: row.id, catatan: null });
+                              setTracking((prev) => ({ ...prev, catatan_by_cleanox: null }));
+                            } catch (err) {
+                              alert(err.response?.data?.message || 'Gagal menghapus catatan');
+                            } finally {
+                              setSavingCatatan(false);
+                            }
+                          }}
+                          disabled={savingCatatan}
+                          title="Hapus catatan"
+                          className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-60 transition-colors"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
             </>
           )}
         </div>
@@ -629,7 +767,6 @@ function TrackingModal({ show, onClose, row, readOnly }) {
 /* ── Main Component ────────────────────────────────────── */
 export default function CleanoxByWaschenProductionPage() {
   const user = getUser();
-  const isReadOnly = user?.role === 'frontliner';
 
   const [dateStart, setDateStart] = useState(DEFAULT_START);
   const [dateEnd, setDateEnd]     = useState(DEFAULT_END);
@@ -790,7 +927,7 @@ export default function CleanoxByWaschenProductionPage() {
         show={!!trackingRow}
         onClose={() => setTrackingRow(null)}
         row={trackingRow}
-        readOnly={isReadOnly}
+        userRole={user?.role}
       />
       <div className="p-3 sm:p-5 space-y-4 max-w-[1400px] mx-auto">
 
