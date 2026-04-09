@@ -8,8 +8,8 @@ export default function Header({ onMenuToggle }) {
   const navigate = useNavigate();
   const user = getUser();
 
-  const handleLogout = () => {
-    clearAuth();
+  const handleLogout = async () => {
+    await clearAuth();
     navigate('/login');
   };
 

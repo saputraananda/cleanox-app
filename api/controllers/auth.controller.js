@@ -29,7 +29,7 @@ export const register = async (req, res) => {
     // Insert ke tabel users
     const [userResult] = await conn.query(
       'INSERT INTO users (name, email, username, password_hash, role) VALUES (?, ?, ?, ?, ?)',
-      [name, email, username || null, passwordHash, 'admin']
+      [name, email, username || null, passwordHash, 'employee']
     );
     const userId = userResult.insertId;
 
@@ -89,6 +89,19 @@ export const login = async (req, res) => {
       { expiresIn: '7d' }
     );
 
+    // Record audit log
+    const ip = req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress || null;
+    const ua = req.headers['user-agent'] || null;
+    try {
+      await pool.query(
+        `INSERT INTO tr_audit_login (user_id, username, role, login_at, ip_address, user_agent, session_token)
+         VALUES (?, ?, ?, NOW(), ?, ?, ?)`,
+        [user.id, user.username, user.role, ip, ua, token.slice(-32)]
+      );
+    } catch (auditErr) {
+      console.warn('[audit_login] Gagal mencatat audit (non-critical):', auditErr.message);
+    }
+
     return res.json({
       token,
       user: {
@@ -124,7 +137,7 @@ export const getMe = async (req, res) => {
 };
 
 /* ── CRUD Users (admin only) ──────────────────────────── */
-const ALLOWED_ROLES = ['admin', 'cleanox', 'frontliner'];
+const ALLOWED_ROLES = ['admin', 'cleanox', 'frontliner', 'employee'];
 
 export const getUsers = async (req, res) => {
   try {
@@ -291,5 +304,66 @@ export const deleteUser = async (req, res) => {
     return res.status(500).json({ message: 'Terjadi kesalahan server' });
   } finally {
     conn.release();
+  }
+};
+
+/* ── Logout (record audit) ───────────────────────────── */
+export const logout = async (req, res) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (token) {
+      await pool.query(
+        `UPDATE tr_audit_login SET logout_at = NOW()
+         WHERE user_id = ? AND session_token = ? AND logout_at IS NULL
+         ORDER BY login_at DESC LIMIT 1`,
+        [req.user.id, token.slice(-32)]
+      );
+    }
+  } catch (err) {
+    console.warn('[logout_audit] non-critical:', err.message);
+  }
+  return res.json({ message: 'Logout berhasil' });
+};
+
+/* ── Get Audit Login Log (admin only) ────────────────── */
+export const getAuditLog = async (req, res) => {
+  const { date_start, date_end, page = 1, limit = 50 } = req.query;
+
+  const pageNum  = Math.max(1, parseInt(page, 10));
+  const limitNum = Math.min(200, Math.max(1, parseInt(limit, 10)));
+  const offset   = (pageNum - 1) * limitNum;
+
+  const dateWhere = date_start && date_end
+    ? `WHERE DATE(login_at) BETWEEN DATE(?) AND DATE(?)`
+    : '';
+  const dateParams = date_start && date_end ? [date_start, date_end] : [];
+
+  try {
+    const [[{ total }]] = await pool.query(
+      `SELECT COUNT(*) AS total FROM tr_audit_login ${dateWhere}`,
+      dateParams
+    );
+
+    const [rows] = await pool.query(
+      `SELECT id, user_id, username, role, login_at, logout_at, ip_address, user_agent
+       FROM tr_audit_login
+       ${dateWhere}
+       ORDER BY login_at DESC
+       LIMIT ? OFFSET ?`,
+      [...dateParams, limitNum, offset]
+    );
+
+    return res.json({
+      data: rows,
+      pagination: {
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil(total / limitNum),
+      },
+    });
+  } catch (err) {
+    console.error('[getAuditLog]', err.message);
+    return res.status(500).json({ message: 'Terjadi kesalahan server' });
   }
 };

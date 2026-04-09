@@ -5,6 +5,8 @@ import {
   Building2,
   Factory,
   Users,
+  Activity,
+  TrendingUp,
   X,
 } from 'lucide-react';
 import cleanoxLogo from '../assets/cleanox.png';
@@ -16,6 +18,8 @@ const NAV_ITEMS = [
   { label: 'Cleanox By Waschen', icon: Building2,       to: '/cleanox-by-waschen',             roles: [] },
   { label: 'Status Produksi',    icon: Factory,         to: '/cleanox-by-waschen-production',  roles: ['admin', 'cleanox', 'frontliner'] },
   { label: 'Manajemen User',     icon: Users,           to: '/users',                          roles: ['admin'] },
+  { label: 'Audit Login',         icon: Activity,        to: '/audit-login',                    roles: ['admin'] },
+  { label: 'KPI Produksi',        icon: TrendingUp,      to: '/kpi-produksi',                   roles: ['admin'] },
 ];
 
 export default function Sidebar({ collapsed, mobileOpen, onMobileClose }) {

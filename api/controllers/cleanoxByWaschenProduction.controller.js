@@ -38,7 +38,7 @@ export const getOutlets = async (_req, res) => {
 export const getEmployees = async (_req, res) => {
   try {
     const [rows] = await cleanoxPool.query(
-      `SELECT id, name FROM mst_employee WHERE status = 'active' ORDER BY name`
+      `SELECT id, name FROM users WHERE role = 'cleanox' and name <> 'Tim Produksi Cleanox' ORDER BY name`
     );
     return res.json({ employees: rows });
   } catch (err) {

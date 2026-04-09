@@ -6,6 +6,8 @@ import DashboardPage from './pages/DashboardPage.jsx';
 import CleanoxByWaschenPage from './pages/CleanoxByWaschenPage.jsx';
 import CleanoxByWaschenProductionPage from './pages/CleanoxByWaschenProductionPage.jsx';
 import UserManagementPage from './pages/UserManagementPage.jsx';
+import AuditLoginPage from './pages/AuditLoginPage.jsx';
+import KpiProduksiPage from './pages/KpiProduksiPage.jsx';
 import Layout from './components/Layout.jsx';
 
 const PrivateRoute = ({ children, roles }) => {
@@ -74,6 +76,22 @@ export default function App() {
         element={
           <PrivateRoute roles={['admin']}>
             <Layout><UserManagementPage /></Layout>
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/audit-login"
+        element={
+          <PrivateRoute roles={['admin']}>
+            <Layout><AuditLoginPage /></Layout>
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/kpi-produksi"
+        element={
+          <PrivateRoute roles={['admin']}>
+            <Layout><KpiProduksiPage /></Layout>
           </PrivateRoute>
         }
       />

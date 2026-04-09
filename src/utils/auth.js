@@ -17,7 +17,18 @@ export const getUser = () => {
   }
 };
 
-export const clearAuth = () => {
+export const clearAuth = async () => {
+  const token = localStorage.getItem(TOKEN_KEY);
+  if (token) {
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch {
+      // non-critical — continue clearing
+    }
+  }
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
 };
