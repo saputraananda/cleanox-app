@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Search,
   Filter,
@@ -1197,6 +1197,7 @@ export default function CleanoxByWaschenProductionPage() {
   const [outlet, setOutlet]       = useState('');
   const [dateField, setDateField] = useState('tgl_terima');
   const [search, setSearch]       = useState('');
+  const [statusFilter, setStatusFilter] = useState(new Set());
 
   const [applied, setApplied] = useState({
     date_start: DEFAULT_START,
@@ -1206,6 +1207,7 @@ export default function CleanoxByWaschenProductionPage() {
     sort_key:   '',
     sort_dir:   'desc',
     search:     '',
+    status:     '',
   });
 
   const [outlets,    setOutlets]    = useState([]);
@@ -1214,7 +1216,6 @@ export default function CleanoxByWaschenProductionPage() {
   const [pagination, setPagination] = useState({ total: 0, page: 1, limit: 25, totalPages: 0 });
   const [loading,    setLoading]    = useState(false);
   const [error,      setError]      = useState('');
-  const [colFilters, setColFilters] = useState({});
   const [quickLabel, setQuickLabel] = useState('');
 
   // Tracking modal
@@ -1245,6 +1246,7 @@ export default function CleanoxByWaschenProductionPage() {
       ...(f.outlet    && { outlet:    f.outlet }),
       ...(f.sort_key  && { sort_key:  f.sort_key, sort_dir: f.sort_dir || 'asc' }),
       ...(f.search    && { search:    f.search }),
+      ...(f.status    && { status:    f.status }),
       page,
       limit,
     });
@@ -1254,7 +1256,6 @@ export default function CleanoxByWaschenProductionPage() {
       setRows(data.data);
       setStats(data.stats);
       setPagination(data.pagination);
-      setColFilters({});
     } catch (err) {
       if (err.name !== 'CanceledError' && err.name !== 'AbortError') {
         setError(err.response?.data?.message || 'Gagal memuat data. Coba lagi.');
@@ -1297,6 +1298,14 @@ export default function CleanoxByWaschenProductionPage() {
     return () => clearTimeout(t);
   }, [search]);
 
+  const updateStatusFilter = (next) => {
+    setStatusFilter(next);
+    setApplied((prev) => ({
+      ...prev,
+      status: next.size > 0 ? Array.from(next).join(',') : '',
+    }));
+  };
+
   const applyFilter = () => setApplied((prev) => ({
     date_start: dateStart,
     date_end:   dateEnd,
@@ -1305,6 +1314,7 @@ export default function CleanoxByWaschenProductionPage() {
     sort_key:   prev.sort_key,
     sort_dir:   prev.sort_dir,
     search:     search.trim(),
+    status:     prev.status,
   }));
 
   const applyQuick = (qr) => {
@@ -1320,13 +1330,12 @@ export default function CleanoxByWaschenProductionPage() {
       sort_key:   prev.sort_key,
       sort_dir:   prev.sort_dir,
       search:     search.trim(),
+      status:     prev.status,
     }));
   };
 
   const goPage = (p) => { setPagination((prev) => ({ ...prev, page: p })); fetchData(p, pagination.limit); };
   const changeLimit = (l) => { setPagination((prev) => ({ ...prev, limit: l, page: 1 })); fetchData(1, l); };
-
-  const setColFilter = (key, set) => setColFilters((prev) => ({ ...prev, [key]: set }));
 
   const toggleSort = (key) => {
     setApplied((prev) => ({
@@ -1336,17 +1345,7 @@ export default function CleanoxByWaschenProductionPage() {
     }));
   };
 
-  /* Client-side status filter from legend */
-  const filtered = useMemo(() => {
-    let data = rows;
-
-    const statusSel = colFilters['status'];
-    if (statusSel && statusSel.size > 0) {
-      data = data.filter((r) => statusSel.has(r.status ?? ''));
-    }
-
-    return data;
-  }, [rows, colFilters]);
+  const filtered = rows;
 
   /* Page buttons */
   const pageButtons = () => {
@@ -1357,7 +1356,7 @@ export default function CleanoxByWaschenProductionPage() {
     return [1, '…', cur - 1, cur, cur + 1, '…', total];
   };
 
-  const activeColFiltersCount = Object.values(colFilters).filter((s) => s && s.size > 0).length;
+  const activeColFiltersCount = statusFilter.size;
 
   return (
     <>
@@ -1451,7 +1450,7 @@ export default function CleanoxByWaschenProductionPage() {
                 <span className="inline-flex items-center gap-1 badge bg-lime-100 text-lime-700">
                   <Filter className="w-3 h-3" />
                   {activeColFiltersCount} filter kolom aktif
-                  <button onClick={() => setColFilters({})} className="hover:text-lime-900">
+                  <button onClick={() => updateStatusFilter(new Set())} className="hover:text-lime-900">
                     <X className="w-3 h-3" />
                   </button>
                 </span>
@@ -1486,7 +1485,6 @@ export default function CleanoxByWaschenProductionPage() {
         <div className="flex flex-wrap gap-2 items-center">
           <span className="text-xs text-gray-400 font-medium">Status:</span>
           {VALID_STATUSES.map((st) => {
-            const statusFilter = colFilters['status'] || new Set();
             const isActive = statusFilter.has(st);
             return (
               <button
@@ -1496,7 +1494,7 @@ export default function CleanoxByWaschenProductionPage() {
                 onClick={() => {
                   const next = new Set(statusFilter);
                   if (next.has(st)) next.delete(st); else next.add(st);
-                  setColFilter('status', next);
+                  updateStatusFilter(next);
                 }}
                 className={`transition-all duration-150 rounded-full ${
                   isActive ? 'ring-2 ring-offset-1 ring-gray-400 scale-105' : 'opacity-70 hover:opacity-100'
@@ -1506,10 +1504,10 @@ export default function CleanoxByWaschenProductionPage() {
               </button>
             );
           })}
-          {(colFilters['status']?.size > 0) && (
+          {(statusFilter.size > 0) && (
             <button
               type="button"
-              onClick={() => setColFilter('status', new Set())}
+              onClick={() => updateStatusFilter(new Set())}
               className="text-xs text-gray-400 hover:text-gray-600 underline"
             >
               reset

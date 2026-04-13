@@ -1,7 +1,7 @@
 import cleanoxPool from '../db/cleanox.js';
 
 const TRANSAKSI_TABLE = process.env.NODE_ENV === 'development'
-  ? 'rekap_transaksi_reguler'
+  ? 'rekap_transaksi_reguler_dev'
   : 'rekap_transaksi_reguler';
 
 /* ── SSE client store ─────────────────────────────────── */
@@ -21,6 +21,8 @@ const broadcast = (payload) => {
   const msg = `data: ${JSON.stringify(payload)}\n\n`;
   for (const client of sseClients) client.write(msg);
 };
+
+const STATUS_VALUES = ['Pickup', 'Cuci Jemur', 'Packing', 'Pengantaran'];
 
 /* ── Get distinct outlets ─────────────────────────────── */
 export const getOutlets = async (_req, res) => {
@@ -63,6 +65,7 @@ export const getData = async (req, res) => {
     page  = 1,
     limit = 25,
     search,
+    status,
   } = req.query;
 
   if (!date_start || !date_end) {
@@ -91,6 +94,13 @@ export const getData = async (req, res) => {
     )`
     : '';
   const searchParams  = searchTerm ? Array(5).fill(`%${searchTerm}%`) : [];
+  const statusList = typeof status === 'string'
+    ? status.split(',').map((s) => s.trim()).filter((s) => STATUS_VALUES.includes(s))
+    : [];
+  const statusWhere = statusList.length
+    ? `AND status IN (${statusList.map(() => '?').join(', ')})`
+    : '';
+  const statusParams = statusList;
 
   const baseWhere = `
     DATE(${dateFieldSafe}) BETWEEN DATE(?) AND DATE(?)
@@ -98,6 +108,7 @@ export const getData = async (req, res) => {
       OR LOWER(COALESCE(nama_item,'')) LIKE '%karpet%') 
     ${outletWhere}
     ${searchWhere}
+    ${statusWhere}
   `;
 
   const statsQuery = `SELECT COUNT(*) AS total FROM ${TRANSAKSI_TABLE} WHERE ${baseWhere}`;
@@ -126,7 +137,7 @@ export const getData = async (req, res) => {
     LIMIT ? OFFSET ?
   `;
 
-  const params = [...dateParams, ...outletParams, ...searchParams];
+  const params = [...dateParams, ...outletParams, ...searchParams, ...statusParams];
 
   try {
     const [statsResult, dataResult] = await Promise.all([
@@ -209,7 +220,7 @@ const STAGE_COLUMNS = {
   Pengantaran: { by: 'pengantaran_by', at: 'pengantaran_at' },
 };
 
-const VALID_STATUSES = ['Pickup', 'Cuci Jemur', 'Packing', 'Pengantaran'];
+const VALID_STATUSES = STATUS_VALUES;
 
 export const updateTracking = async (req, res) => {
   const { id, stage, employee_names, timestamp } = req.body;
