@@ -1,7 +1,7 @@
 import cleanoxPool from '../db/cleanox.js';
 
 const TRANSAKSI_TABLE = process.env.NODE_ENV === 'development'
-  ? 'rekap_transaksi_reguler_dev'
+  ? 'rekap_transaksi_reguler'
   : 'rekap_transaksi_reguler';
 
 /* ── SSE client store ─────────────────────────────────── */
@@ -23,6 +23,7 @@ const broadcast = (payload) => {
 };
 
 const STATUS_VALUES = ['Pickup', 'Cuci Jemur', 'Packing', 'Pengantaran'];
+const FILTER_STATUS_VALUES = [...STATUS_VALUES, 'Tertunda'];
 
 /* ── Get distinct outlets ─────────────────────────────── */
 export const getOutlets = async (_req, res) => {
@@ -94,13 +95,24 @@ export const getData = async (req, res) => {
     )`
     : '';
   const searchParams  = searchTerm ? Array(5).fill(`%${searchTerm}%`) : [];
-  const statusList = typeof status === 'string'
-    ? status.split(',').map((s) => s.trim()).filter((s) => STATUS_VALUES.includes(s))
+  const statusTokens = typeof status === 'string'
+    ? status.split(',').map((s) => s.trim()).filter((s) => FILTER_STATUS_VALUES.includes(s))
     : [];
-  const statusWhere = statusList.length
-    ? `AND status IN (${statusList.map(() => '?').join(', ')})`
-    : '';
-  const statusParams = statusList;
+  const includeHold = statusTokens.includes('Tertunda');
+  const statusList = statusTokens.filter((s) => STATUS_VALUES.includes(s));
+  let statusWhere = '';
+  const statusParams = [];
+  if (statusTokens.length > 0) {
+    if (includeHold && statusList.length > 0) {
+      statusWhere = `AND ((status IN (${statusList.map(() => '?').join(', ')})) OR COALESCE(on_hold, 0) = 1 OR status = 'Tertunda')`;
+      statusParams.push(...statusList);
+    } else if (includeHold) {
+      statusWhere = "AND (COALESCE(on_hold, 0) = 1 OR status = 'Tertunda')";
+    } else if (statusList.length > 0) {
+      statusWhere = `AND status IN (${statusList.map(() => '?').join(', ')}) AND COALESCE(on_hold, 0) = 0`;
+      statusParams.push(...statusList);
+    }
+  }
 
   const baseWhere = `
     DATE(${dateFieldSafe}) BETWEEN DATE(?) AND DATE(?)
@@ -120,6 +132,9 @@ export const getData = async (req, res) => {
       no_nota,
       customer_nama,
       nama_item,
+      keterangan,
+      on_hold,
+      isContinue,
       jumlah,
       satuan_item,
       tgl_terima,
@@ -127,6 +142,7 @@ export const getData = async (req, res) => {
       status,
       pickup_by,    pickup_at,
       cuci_jemur_by, cuci_jemur_at,
+      cuci_jemur_deadline_at,
       packing_by,   packing_at,
       pengantaran_by, pengantaran_at,
       updated_by,
@@ -174,10 +190,14 @@ export const getTracking = async (req, res) => {
     const [rows] = await cleanoxPool.query(
       `SELECT
         id, no_nota, outlet, customer_nama, alamat_customer, nama_item,
+        keterangan,
+        on_hold,
+        isContinue, continue_by, catatan_cuci_jemur,
         jumlah, satuan_item,
         tgl_terima, tgl_selesai, status,
         pickup_by,    pickup_at,
         cuci_jemur_by, cuci_jemur_at,
+        cuci_jemur_deadline_at,
         packing_by,   packing_at,
         pengantaran_by, pengantaran_at,
         catatan_by_cleanox,
@@ -238,17 +258,44 @@ export const updateTracking = async (req, res) => {
   const col = STAGE_COLUMNS[stage];
   const ts = timestamp || new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ');
 
-  // Determine new overall status = latest stage that is filled
-  const stageIdx = VALID_STATUSES.indexOf(stage);
   const newStatus = stage;
 
   try {
+    const [[currentRow]] = await cleanoxPool.query(
+      `SELECT id, isContinue FROM ${TRANSAKSI_TABLE} WHERE id = ?`,
+      [id]
+    );
+
+    if (!currentRow) {
+      return res.status(404).json({ message: 'Data tidak ditemukan' });
+    }
+
+    const isProduksi = ['cleanox', 'produksi'].includes(req.user?.role);
+    const isRejected = currentRow.isContinue === 0 || currentRow.isContinue === '0';
+    if (isProduksi && isRejected) {
+      return res.status(403).json({ message: 'Item dibatalkan frontliner. Tim produksi tidak dapat melanjutkan progres.' });
+    }
+
+    const setClauses = [
+      `${col.by} = ?`,
+      `${col.at} = ?`,
+      'status = ?',
+      'updated_by = ?',
+      'updated_at = NOW()',
+    ];
+    const updateParams = [JSON.stringify(employee_names), ts, newStatus, employee_names.join(', ')];
+
+    // Deadline tahap Cuci Jemur = 10 hari dari timestamp saat disimpan.
+    if (stage === 'Cuci Jemur') {
+      setClauses.push('cuci_jemur_deadline_at = DATE_ADD(?, INTERVAL 10 DAY)');
+      updateParams.push(ts);
+    }
+
     const [result] = await cleanoxPool.query(
       `UPDATE ${TRANSAKSI_TABLE}
-       SET ${col.by} = ?, ${col.at} = ?,
-           status = ?, updated_by = ?, updated_at = NOW()
+       SET ${setClauses.join(', ')}
        WHERE id = ?`,
-      [JSON.stringify(employee_names), ts, newStatus, employee_names.join(', '), id]
+      [...updateParams, id]
     );
 
     if (result.affectedRows === 0) {
@@ -257,12 +304,17 @@ export const updateTracking = async (req, res) => {
 
     // Fetch updated row to get no_nota/nama_item for SSE payload
     const [[updatedRow]] = await cleanoxPool.query(
-      `SELECT id, no_nota, nama_item FROM ${TRANSAKSI_TABLE} WHERE id = ?`,
+      `SELECT id, no_nota, nama_item, on_hold, isContinue, continue_by, catatan_cuci_jemur, cuci_jemur_deadline_at FROM ${TRANSAKSI_TABLE} WHERE id = ?`,
       [id]
     );
 
     const payload = {
       id, no_nota: updatedRow?.no_nota, nama_item: updatedRow?.nama_item, stage,
+      on_hold: updatedRow?.on_hold ?? 0,
+      isContinue: updatedRow?.isContinue ?? null,
+      continue_by: updatedRow?.continue_by || null,
+      catatan_cuci_jemur: updatedRow?.catatan_cuci_jemur || null,
+      cuci_jemur_deadline_at: updatedRow?.cuci_jemur_deadline_at || null,
       employee_names, timestamp: ts,
       status: newStatus,
       updated_at: new Date().toISOString(),
@@ -302,5 +354,124 @@ export const updateCatatan = async (req, res) => {
   } catch (err) {
     console.error('[production/updateCatatan]', err.message);
     return res.status(500).json({ message: 'Gagal mengupdate catatan', error: err.message });
+  }
+};
+
+/* ── On-hold request from Cleanox (Cuci Jemur) ───────── */
+export const requestOnHold = async (req, res) => {
+  const { id } = req.body;
+  if (!id) {
+    return res.status(400).json({ message: 'id wajib diisi' });
+  }
+
+  if (!['cleanox', 'admin'].includes(req.user?.role)) {
+    return res.status(403).json({ message: 'Hanya cleanox/admin yang bisa mengajukan on hold' });
+  }
+
+  try {
+    const [result] = await cleanoxPool.query(
+      `UPDATE ${TRANSAKSI_TABLE}
+       SET on_hold = 1,
+           isContinue = NULL,
+           continue_by = NULL,
+           catatan_cuci_jemur = NULL,
+           updated_by = ?,
+           updated_at = NOW()
+       WHERE id = ?`,
+      [req.user?.name || req.user?.username || 'system', id]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'Data tidak ditemukan' });
+    }
+
+    const [[updatedRow]] = await cleanoxPool.query(
+      `SELECT id, no_nota, nama_item, on_hold, isContinue, cuci_jemur_deadline_at FROM ${TRANSAKSI_TABLE} WHERE id = ?`,
+      [id]
+    );
+
+    const payload = {
+      id,
+      no_nota: updatedRow?.no_nota,
+      nama_item: updatedRow?.nama_item,
+      on_hold: updatedRow?.on_hold ?? 1,
+      isContinue: updatedRow?.isContinue ?? null,
+      cuci_jemur_deadline_at: updatedRow?.cuci_jemur_deadline_at || null,
+      status: updatedRow?.on_hold ? 'Tertunda' : updatedRow?.status,
+      updated_at: new Date().toISOString(),
+    };
+    broadcast(payload);
+
+    return res.json({ message: 'Item di-hold', ...payload });
+  } catch (err) {
+    console.error('[production/requestOnHold]', err.message);
+    return res.status(500).json({ message: 'Gagal mengajukan on hold', error: err.message });
+  }
+};
+
+/* ── Frontliner decision (Lanjut/Batal) ─────────────── */
+export const decideCuciJemur = async (req, res) => {
+  const { id, decision, catatan } = req.body;
+  if (!id || !decision) {
+    return res.status(400).json({ message: 'id dan decision wajib diisi' });
+  }
+  if (!['lanjut', 'batal'].includes(String(decision).toLowerCase())) {
+    return res.status(400).json({ message: 'decision harus lanjut atau batal' });
+  }
+  if (!['frontliner', 'admin'].includes(req.user?.role)) {
+    return res.status(403).json({ message: 'Hanya frontliner/admin yang bisa melakukan keputusan' });
+  }
+
+  const isContinue = String(decision).toLowerCase() === 'lanjut' ? 1 : 0;
+  const statusValue = 'Cuci Jemur';
+
+  try {
+    const [result] = await cleanoxPool.query(
+      `UPDATE ${TRANSAKSI_TABLE}
+       SET on_hold = 0,
+           isContinue = ?,
+           continue_by = ?,
+           catatan_cuci_jemur = ?,
+           status = ?,
+           updated_by = ?,
+           updated_at = NOW()
+       WHERE id = ?`,
+      [
+        isContinue,
+        req.user?.name || req.user?.username || 'frontliner',
+        catatan || null,
+        statusValue,
+        req.user?.name || req.user?.username || 'frontliner',
+        id,
+      ]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'Data tidak ditemukan' });
+    }
+
+    const [[updatedRow]] = await cleanoxPool.query(
+      `SELECT id, no_nota, nama_item, on_hold, isContinue, continue_by, catatan_cuci_jemur, cuci_jemur_deadline_at FROM ${TRANSAKSI_TABLE} WHERE id = ?`,
+      [id]
+    );
+
+    const payload = {
+      id,
+      no_nota: updatedRow?.no_nota,
+      nama_item: updatedRow?.nama_item,
+      on_hold: updatedRow?.on_hold ?? 0,
+      isContinue: updatedRow?.isContinue ?? isContinue,
+      continue_by: updatedRow?.continue_by || null,
+      catatan_cuci_jemur: updatedRow?.catatan_cuci_jemur || null,
+      cuci_jemur_deadline_at: updatedRow?.cuci_jemur_deadline_at || null,
+      status: updatedRow?.on_hold ? 'Tertunda' : statusValue,
+      updated_at: new Date().toISOString(),
+    };
+    broadcast(payload);
+
+    return res.json({ message: 'Keputusan tersimpan', ...payload });
+  } catch (err) {
+    console.error('[production/decideCuciJemur]', err.message);
+    return res.status(500).json({ message: 'Gagal menyimpan keputusan', error: err.message });
   }
 };

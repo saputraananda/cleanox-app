@@ -57,6 +57,13 @@ const fmtDateTime = (dt) => {
     minute: '2-digit',
   });
 };
+const plusDays = (dt, days) => {
+  if (!dt) return null;
+  const d = new Date(dt);
+  if (Number.isNaN(d.getTime())) return null;
+  d.setDate(d.getDate() + days);
+  return d;
+};
 const toISO = (d) => {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -109,34 +116,36 @@ const QUICK_RANGES = buildQuickRanges();
 const PAGE_SIZES = [10, 25, 50, 100];
 
 const OUTLET_META = {
-  'Waschen Laundry Raffles Hills':  { short: 'Raffles',    color: 'bg-purple-100 text-purple-700' },
-  'Waschen Laundry Legenda Wisata': { short: 'Legenda',    color: 'bg-amber-100 text-amber-700'   },
-  'Waschen Laundry Canadian':       { short: 'Canadian',   color: 'bg-green-100 text-green-700'   },
-  'Waschen Citra Grand':            { short: 'Citra Grand',color: 'bg-pink-100 text-pink-700'     },
-  'Waschen Laundry Kota Wisata':    { short: 'Kota Wisata',color: 'bg-blue-100 text-blue-700'     },
+  'Waschen Laundry Raffles Hills': { short: 'Raffles', color: 'bg-purple-100 text-purple-700' },
+  'Waschen Laundry Legenda Wisata': { short: 'Legenda', color: 'bg-amber-100 text-amber-700' },
+  'Waschen Laundry Canadian': { short: 'Canadian', color: 'bg-green-100 text-green-700' },
+  'Waschen Citra Grand': { short: 'Citra Grand', color: 'bg-pink-100 text-pink-700' },
+  'Waschen Laundry Kota Wisata': { short: 'Kota Wisata', color: 'bg-blue-100 text-blue-700' },
 };
 const outletMeta = (name) => OUTLET_META[name] || { short: name, color: 'bg-brand-100 text-brand-700' };
 
-const VALID_STATUSES = ['Pickup', 'Cuci Jemur', 'Packing', 'Pengantaran'];
+const VALID_STATUSES = ['Pickup', 'Cuci Jemur', 'Packing', 'Pengantaran', 'Tertunda'];
 
 const STATUS_STYLE = {
-  'Pickup':      { bg: 'bg-blue-100',   text: 'text-blue-700',   border: 'border-blue-200'   },
-  'Cuci Jemur': { bg: 'bg-amber-100',  text: 'text-amber-700',  border: 'border-amber-200'  },
-  'Packing':    { bg: 'bg-purple-100', text: 'text-purple-700', border: 'border-purple-200' },
-  'Pengantaran':{ bg: 'bg-green-100',  text: 'text-green-700',  border: 'border-green-200'  },
+  'Pickup': { bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-blue-200' },
+  'Cuci Jemur': { bg: 'bg-amber-100', text: 'text-amber-700', border: 'border-amber-200' },
+  'Packing': { bg: 'bg-purple-100', text: 'text-purple-700', border: 'border-purple-200' },
+  'Pengantaran': { bg: 'bg-green-100', text: 'text-green-700', border: 'border-green-200' },
+  'Dibatalkan': { bg: 'bg-rose-100', text: 'text-rose-700', border: 'border-rose-200' },
+  'Tertunda': { bg: 'bg-rose-100', text: 'text-rose-700', border: 'border-rose-200' },
 };
 
 const COLS = [
-  { key: 'no',           label: 'No',              align: 'center', filterable: false, w: 'w-10' },
-  { key: 'outlet',       label: 'Outlet',           align: 'left',   filterable: true  },
-  { key: 'no_nota',      label: 'No Nota',          align: 'left',   filterable: true  },
-  { key: 'customer_nama',label: 'Customer',          align: 'left',   filterable: true  },
-  { key: 'nama_item',    label: 'Nama Item',        align: 'left',   filterable: true  },
-  { key: 'jumlah',       label: 'Ukuran',           align: 'right',  filterable: false },
-  { key: 'tgl_terima',   label: 'Tgl Terima',       align: 'left',   filterable: false, sortable: true },
-  { key: 'tgl_selesai',  label: 'Tgl Selesai',      align: 'left',   filterable: false, sortable: true },
-  { key: 'status',       label: 'Status',           align: 'center', filterable: true  },
-  { key: 'lacak',        label: 'Lacak',            align: 'center', filterable: false, w: 'w-20' },
+  { key: 'no', label: 'No', align: 'center', filterable: false, w: 'w-10' },
+  { key: 'outlet', label: 'Outlet', align: 'left', filterable: true },
+  { key: 'no_nota', label: 'No Nota', align: 'left', filterable: true },
+  { key: 'customer_nama', label: 'Customer', align: 'left', filterable: true },
+  { key: 'nama_item', label: 'Nama Item', align: 'left', filterable: true },
+  { key: 'jumlah', label: 'Ukuran', align: 'right', filterable: false },
+  { key: 'tgl_terima', label: 'Tgl Terima', align: 'left', filterable: false, sortable: true },
+  { key: 'tgl_selesai', label: 'Tgl Selesai', align: 'left', filterable: false, sortable: true },
+  { key: 'status', label: 'Status', align: 'center', filterable: true },
+  { key: 'lacak', label: 'Lacak', align: 'center', filterable: false, w: 'w-20' },
 ];
 
 /* ── Quick Range Dropdown ─────────────────────────────── */
@@ -261,19 +270,25 @@ function StatusBadge({ status }) {
   );
 }
 
+const displayStatus = (row) => {
+  if (row?.on_hold) return 'Tertunda';
+  if (row?.isContinue === 0 || row?.isContinue === '0') return 'Dibatalkan';
+  return row?.status || '—';
+};
+
 /* ── Stage config for tracking modal ──────────────────── */
 const STAGES = [
-  { key: 'Pickup',       label: 'Pickup',         icon: Truck,       color: 'blue',   byCol: 'pickup_by',      atCol: 'pickup_at'      },
-  { key: 'Cuci Jemur',   label: 'Cuci & Jemur',   icon: Waves,       color: 'amber',  byCol: 'cuci_jemur_by',  atCol: 'cuci_jemur_at'  },
-  { key: 'Packing',      label: 'Packing',        icon: Package,     color: 'purple', byCol: 'packing_by',     atCol: 'packing_at'     },
-  { key: 'Pengantaran',  label: 'Pengantaran',    icon: Navigation,  color: 'green',  byCol: 'pengantaran_by', atCol: 'pengantaran_at' },
+  { key: 'Pickup', label: 'Pickup', icon: Truck, color: 'blue', byCol: 'pickup_by', atCol: 'pickup_at' },
+  { key: 'Cuci Jemur', label: 'Cuci & Jemur', icon: Waves, color: 'amber', byCol: 'cuci_jemur_by', atCol: 'cuci_jemur_at' },
+  { key: 'Packing', label: 'Packing', icon: Package, color: 'purple', byCol: 'packing_by', atCol: 'packing_at' },
+  { key: 'Pengantaran', label: 'Pengantaran', icon: Navigation, color: 'green', byCol: 'pengantaran_by', atCol: 'pengantaran_at' },
 ];
 
 const STAGE_COLORS = {
-  blue:   { line: 'bg-blue-500',   dot: 'bg-blue-500',   dotBorder: 'border-blue-200',   bg: 'bg-blue-50',   text: 'text-blue-700'   },
-  amber:  { line: 'bg-amber-500',  dot: 'bg-amber-500',  dotBorder: 'border-amber-200',  bg: 'bg-amber-50',  text: 'text-amber-700'  },
+  blue: { line: 'bg-blue-500', dot: 'bg-blue-500', dotBorder: 'border-blue-200', bg: 'bg-blue-50', text: 'text-blue-700' },
+  amber: { line: 'bg-amber-500', dot: 'bg-amber-500', dotBorder: 'border-amber-200', bg: 'bg-amber-50', text: 'text-amber-700' },
   purple: { line: 'bg-purple-500', dot: 'bg-purple-500', dotBorder: 'border-purple-200', bg: 'bg-purple-50', text: 'text-purple-700' },
-  green:  { line: 'bg-green-500',  dot: 'bg-green-500',  dotBorder: 'border-green-200',  bg: 'bg-green-50',  text: 'text-green-700'  },
+  green: { line: 'bg-green-500', dot: 'bg-green-500', dotBorder: 'border-green-200', bg: 'bg-green-50', text: 'text-green-700' },
 };
 
 /* ── Multi-select Employee Picker ─────────────────────── */
@@ -759,8 +774,11 @@ function TrackingModal({ show, onClose, row, userRole }) {
   const [saving, setSaving] = useState(null); // stage key being saved
   const [stageForm, setStageForm] = useState({});
   const [catatan, setCatatan] = useState('');
+  const [decisionCatatan, setDecisionCatatan] = useState('');
+  const [savingDecision, setSavingDecision] = useState(false);
   const [savingCatatan, setSavingCatatan] = useState(false);
   const [editingStage, setEditingStage] = useState(null); // stage key admin is overriding
+  const [onHoldSuccess, setOnHoldSuccess] = useState(false);
 
   // Fetch tracking data + employees on open
   useEffect(() => {
@@ -768,7 +786,9 @@ function TrackingModal({ show, onClose, row, userRole }) {
     setLoading(true);
     setStageForm({});
     setCatatan('');
+    setDecisionCatatan('');
     setEditingStage(null);
+    setOnHoldSuccess(false);
 
     const fetchAll = async () => {
       try {
@@ -781,6 +801,7 @@ function TrackingModal({ show, onClose, row, userRole }) {
         setTracking(trackRes.data.tracking);
         setEmployees(empRes.data.employees || []);
         setCatatan(trackRes.data.tracking?.catatan_by_cleanox || '');
+        setDecisionCatatan(trackRes.data.tracking?.catatan_cuci_jemur || '');
 
         // Init form with existing data
         const form = {};
@@ -814,6 +835,46 @@ function TrackingModal({ show, onClose, row, userRole }) {
       alert(err.response?.data?.message || 'Gagal menyimpan catatan');
     } finally {
       setSavingCatatan(false);
+    }
+  };
+
+  const handleRequestOnHold = async () => {
+    setSaving('on_hold');
+    try {
+      await api.patch('/cleanox-by-waschen-production/on-hold', { id: row.id });
+      setTracking((prev) => ({
+        ...prev,
+        on_hold: 1,
+        isContinue: null,
+        continue_by: null,
+        catatan_cuci_jemur: null,
+      }));
+      setOnHoldSuccess(true);
+      window.setTimeout(() => setOnHoldSuccess(false), 1800);
+    } catch (err) {
+      alert(err.response?.data?.message || 'Gagal mengajukan on hold');
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const handleDecision = async (decision) => {
+    setSavingDecision(true);
+    try {
+      await api.patch('/cleanox-by-waschen-production/cuci-jemur/decision', {
+        id: row.id,
+        decision,
+        catatan: decisionCatatan.trim() || null,
+      });
+      const { data } = await api.get('/cleanox-by-waschen-production/tracking', {
+        params: { id: row.id },
+      });
+      setTracking(data.tracking);
+      setDecisionCatatan(data.tracking?.catatan_cuci_jemur || '');
+    } catch (err) {
+      alert(err.response?.data?.message || 'Gagal menyimpan keputusan');
+    } finally {
+      setSavingDecision(false);
     }
   };
 
@@ -867,8 +928,12 @@ function TrackingModal({ show, onClose, row, userRole }) {
   if (!show) return null;
 
   // Permission flags
-  const canFillNext = userRole === 'cleanox' || userRole === 'admin';
+  const isProduksiRole = userRole === 'cleanox' || userRole === 'produksi';
+  const canFillNext = isProduksiRole || userRole === 'admin';
   const canEditFilled = userRole === 'admin';
+  const canDecideOnHold = userRole === 'frontliner' || userRole === 'admin';
+  const isRejectedByFrontliner = tracking?.isContinue === 0 || tracking?.isContinue === '0';
+  const productionLocked = isProduksiRole && isRejectedByFrontliner;
 
   // Determine current active stage index
   const currentStageIdx = tracking
@@ -928,7 +993,73 @@ function TrackingModal({ show, onClose, row, userRole }) {
                 <div className="pt-1 border-t border-gray-200">
                   <span className="text-gray-400">Nama Item</span>
                   <p className="font-semibold text-gray-800">{tracking.nama_item}</p>
+                  <span className="text-gray-400 mt-1.5 block">Keterangan Dari FL Via Smartlink</span>
+                  <p className="font-medium text-gray-700">{tracking.keterangan || '—'}</p>
                 </div>
+                {tracking.on_hold ? (
+                  <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-xs font-semibold text-rose-700 uppercase tracking-wider">Status Tertunda</p>
+                        <p className="text-xs text-rose-600">Item ini menunggu pengecekan FL.</p>
+                      </div>
+                      <StatusBadge status="Tertunda" />
+                    </div>
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <input
+                        type="text"
+                        value={decisionCatatan}
+                        onChange={(e) => canDecideOnHold && setDecisionCatatan(e.target.value)}
+                        placeholder="Catatan pengecekan / konfirmasi customer (opsional)"
+                        readOnly={!canDecideOnHold}
+                        className={`flex-1 px-3 py-2 text-xs border border-rose-200 rounded-lg bg-white ${canDecideOnHold ? 'focus:outline-none focus:ring-1 focus:ring-rose-400' : 'text-gray-500 cursor-not-allowed'}`}
+                      />
+                      {canDecideOnHold && (
+                        <>
+                          <button
+                            onClick={() => handleDecision('lanjut')}
+                            disabled={savingDecision}
+                            className="px-3 py-2 text-xs font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                          >
+                            {savingDecision ? 'Menyimpan...' : 'Lanjut'}
+                          </button>
+                          <button
+                            onClick={() => handleDecision('batal')}
+                            disabled={savingDecision}
+                            className="px-3 py-2 text-xs font-semibold rounded-lg bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                          >
+                            {savingDecision ? 'Menyimpan...' : 'Batal'}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                    {!canDecideOnHold && (
+                      <p className="text-[11px] text-rose-600">Mode baca saja. Keputusan hanya bisa diisi Frontliner/Admin.</p>
+                    )}
+                  </div>
+                ) : null}
+
+                {!tracking.on_hold && tracking?.continue_by && (
+                  <div className={`mt-3 rounded-lg border p-3 space-y-1.5 ${tracking.isContinue === 1 ? 'border-emerald-200 bg-emerald-50' : 'border-rose-200 bg-rose-50'}`}>
+                    <p className={`text-[10px] font-semibold uppercase tracking-wider ${tracking.isContinue === 1 ? 'text-emerald-700' : 'text-rose-700'}`}>Riwayat Keputusan FL</p>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className={`text-xs ${tracking.isContinue === 1 ? 'text-emerald-700' : 'text-rose-700'}`}>Diputuskan oleh: <strong>{tracking.continue_by}</strong></span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border ${tracking.isContinue === 1 ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-rose-100 text-rose-700 border-rose-200'}`}>
+                        {tracking.isContinue === 1 ? 'ACC Lanjut' : 'Batal'}
+                      </span>
+                    </div>
+                    <p className={`text-xs ${tracking.isContinue === 1 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                      Catatan FL: {tracking.catatan_cuci_jemur || 'Tidak ada catatan'}
+                    </p>
+                  </div>
+                )}
+
+                {productionLocked && (
+                  <div className="mt-3 rounded-lg border border-rose-300 bg-rose-50 p-3">
+                    <p className="text-xs font-semibold text-rose-700">Progres dihentikan</p>
+                    <p className="text-xs text-rose-600 mt-0.5">Frontliner memilih Batal. Tim produksi tidak dapat melanjutkan progres item ini.</p>
+                  </div>
+                )}
               </div>
 
               {/* Timeline */}
@@ -936,7 +1067,7 @@ function TrackingModal({ show, onClose, row, userRole }) {
                 {STAGES.map((stage, idx) => {
                   const sc = STAGE_COLORS[stage.color];
                   const filled = !!tracking[stage.atCol];
-                  const isActive = idx === currentStageIdx + 1 && canFillNext;
+                  const isActive = idx === currentStageIdx + 1 && canFillNext && !productionLocked;
                   const isEditing = filled && canEditFilled && editingStage === stage.key;
                   const Icon = stage.icon;
                   const form = stageForm[stage.key] || { employees: [], timestamp: '' };
@@ -944,26 +1075,28 @@ function TrackingModal({ show, onClose, row, userRole }) {
                   const byVal = tracking[stage.byCol];
                   const byNames = Array.isArray(byVal) ? byVal : [];
                   const atVal = tracking[stage.atCol];
+                  const deadlineVal = stage.key === 'Cuci Jemur' ? tracking?.cuci_jemur_deadline_at : null;
+                  const previewDeadline = stage.key === 'Cuci Jemur'
+                    ? plusDays(form.timestamp || new Date(), 10)
+                    : null;
 
                   return (
                     <div key={stage.key} className="relative pb-6 last:pb-0">
                       {/* Vertical line */}
                       {idx < STAGES.length - 1 && (
                         <div
-                          className={`absolute left-[11px] top-8 w-0.5 h-[calc(100%-16px)] ${
-                            filled ? sc.line : 'bg-gray-200'
-                          }`}
+                          className={`absolute left-[11px] top-8 w-0.5 h-[calc(100%-16px)] ${filled ? sc.line : 'bg-gray-200'
+                            }`}
                         />
                       )}
 
                       {/* Dot */}
                       <div className="flex items-start gap-3">
                         <div
-                          className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 border-2 ${
-                            filled
-                              ? `${sc.dot} border-white text-white shadow-sm`
-                              : `bg-white ${sc.dotBorder}`
-                          }`}
+                          className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 border-2 ${filled
+                            ? `${sc.dot} border-white text-white shadow-sm`
+                            : `bg-white ${sc.dotBorder}`
+                            }`}
                         >
                           {filled ? (
                             <Check className="w-3 h-3" />
@@ -1006,6 +1139,12 @@ function TrackingModal({ show, onClose, row, userRole }) {
                                   </button>
                                 )}
                               </div>
+                              {stage.key === 'Cuci Jemur' && (
+                                <div className="flex items-center gap-1.5 text-xs">
+                                  <Calendar className="w-3 h-3 flex-shrink-0" />
+                                  <span className={sc.text}>Estimasi selesai Maks: {fmtDateTime(deadlineVal)}</span>
+                                </div>
+                              )}
                             </div>
                           )}
 
@@ -1077,6 +1216,11 @@ function TrackingModal({ show, onClose, row, userRole }) {
                                   onChange={(e) => updateFormField(stage.key, 'timestamp', e.target.value)}
                                 />
                                 <p className="text-[10px] text-gray-400 mt-0.5">Kosongkan untuk waktu sekarang</p>
+                                {stage.key === 'Cuci Jemur' && (
+                                  <p className="text-[10px] text-brand-600 mt-0.5">
+                                    Estimasi selesai otomatis: {fmtDateTime(previewDeadline)} (10 hari)
+                                  </p>
+                                )}
                               </div>
                               <button
                                 onClick={() => handleSaveStage(stage.key)}
@@ -1090,6 +1234,26 @@ function TrackingModal({ show, onClose, row, userRole }) {
                                 )}
                                 Simpan {stage.label}
                               </button>
+                              {stage.key === 'Cuci Jemur' && (userRole === 'cleanox' || userRole === 'admin') && (
+                                <>
+                                  <button
+                                    onClick={handleRequestOnHold}
+                                    disabled={saving === 'on_hold'}
+                                    className={`w-full py-1.5 text-xs font-semibold rounded-lg border transition-colors flex items-center justify-center gap-1.5 ${onHoldSuccess
+                                      ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+                                      : 'border-rose-200 text-rose-700 hover:bg-rose-50'} disabled:opacity-60`}
+                                  >
+                                    {saving === 'on_hold'
+                                      ? 'Mengajukan...'
+                                      : onHoldSuccess
+                                        ? 'On Hold Berhasil'
+                                        : 'On Hold - Tunda Progres'}
+                                  </button>
+                                  {onHoldSuccess && (
+                                    <p className="text-[10px] text-emerald-600 animate-pulse">Permintaan on hold berhasil dikirim.</p>
+                                  )}
+                                </>
+                              )}
                             </div>
                           )}
 
@@ -1193,29 +1357,29 @@ export default function CleanoxByWaschenProductionPage() {
   const user = getUser();
 
   const [dateStart, setDateStart] = useState(DEFAULT_START);
-  const [dateEnd, setDateEnd]     = useState(DEFAULT_END);
-  const [outlet, setOutlet]       = useState('');
+  const [dateEnd, setDateEnd] = useState(DEFAULT_END);
+  const [outlet, setOutlet] = useState('');
   const [dateField, setDateField] = useState('tgl_terima');
-  const [search, setSearch]       = useState('');
+  const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState(new Set());
 
   const [applied, setApplied] = useState({
     date_start: DEFAULT_START,
-    date_end:   DEFAULT_END,
-    outlet:     '',
+    date_end: DEFAULT_END,
+    outlet: '',
     date_field: 'tgl_terima',
-    sort_key:   '',
-    sort_dir:   'desc',
-    search:     '',
-    status:     '',
+    sort_key: '',
+    sort_dir: 'desc',
+    search: '',
+    status: '',
   });
 
-  const [outlets,    setOutlets]    = useState([]);
-  const [rows,       setRows]       = useState([]);
-  const [stats,      setStats]      = useState({ total: 0 });
+  const [outlets, setOutlets] = useState([]);
+  const [rows, setRows] = useState([]);
+  const [stats, setStats] = useState({ total: 0 });
   const [pagination, setPagination] = useState({ total: 0, page: 1, limit: 25, totalPages: 0 });
-  const [loading,    setLoading]    = useState(false);
-  const [error,      setError]      = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const [quickLabel, setQuickLabel] = useState('');
 
   // Tracking modal
@@ -1227,7 +1391,7 @@ export default function CleanoxByWaschenProductionPage() {
   useEffect(() => {
     api.get('/cleanox-by-waschen-production/outlets')
       .then(({ data }) => setOutlets(data.outlets || []))
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   /* Core fetch */
@@ -1241,12 +1405,12 @@ export default function CleanoxByWaschenProductionPage() {
 
     const params = new URLSearchParams({
       date_start: f.date_start,
-      date_end:   f.date_end,
+      date_end: f.date_end,
       date_field: f.date_field || 'tgl_terima',
-      ...(f.outlet    && { outlet:    f.outlet }),
-      ...(f.sort_key  && { sort_key:  f.sort_key, sort_dir: f.sort_dir || 'asc' }),
-      ...(f.search    && { search:    f.search }),
-      ...(f.status    && { status:    f.status }),
+      ...(f.outlet && { outlet: f.outlet }),
+      ...(f.sort_key && { sort_key: f.sort_key, sort_dir: f.sort_dir || 'asc' }),
+      ...(f.search && { search: f.search }),
+      ...(f.status && { status: f.status }),
       page,
       limit,
     });
@@ -1278,14 +1442,39 @@ export default function CleanoxByWaschenProductionPage() {
     es.onmessage = (e) => {
       try {
         const payload = JSON.parse(e.data);
+        const has = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+
         setRows((prev) =>
           prev.map((r) =>
             r.id === payload.id
-              ? { ...r, status: payload.status, updated_at: payload.updated_at }
+              ? {
+                ...r,
+                ...(has(payload, 'status') ? { status: payload.status } : {}),
+                ...(has(payload, 'on_hold') ? { on_hold: payload.on_hold } : {}),
+                ...(has(payload, 'isContinue') ? { isContinue: payload.isContinue } : {}),
+                ...(has(payload, 'continue_by') ? { continue_by: payload.continue_by } : {}),
+                ...(has(payload, 'catatan_cuci_jemur') ? { catatan_cuci_jemur: payload.catatan_cuci_jemur } : {}),
+                ...(has(payload, 'cuci_jemur_deadline_at') ? { cuci_jemur_deadline_at: payload.cuci_jemur_deadline_at } : {}),
+                ...(has(payload, 'updated_at') ? { updated_at: payload.updated_at } : {}),
+              }
               : r
           )
         );
-      } catch {}
+
+        setTrackingRow((prev) => {
+          if (!prev || prev.id !== payload.id) return prev;
+          return {
+            ...prev,
+            ...(has(payload, 'status') ? { status: payload.status } : {}),
+            ...(has(payload, 'on_hold') ? { on_hold: payload.on_hold } : {}),
+            ...(has(payload, 'isContinue') ? { isContinue: payload.isContinue } : {}),
+            ...(has(payload, 'continue_by') ? { continue_by: payload.continue_by } : {}),
+            ...(has(payload, 'catatan_cuci_jemur') ? { catatan_cuci_jemur: payload.catatan_cuci_jemur } : {}),
+            ...(has(payload, 'cuci_jemur_deadline_at') ? { cuci_jemur_deadline_at: payload.cuci_jemur_deadline_at } : {}),
+            ...(has(payload, 'updated_at') ? { updated_at: payload.updated_at } : {}),
+          };
+        });
+      } catch { }
     };
     return () => es.close();
   }, []);
@@ -1308,13 +1497,13 @@ export default function CleanoxByWaschenProductionPage() {
 
   const applyFilter = () => setApplied((prev) => ({
     date_start: dateStart,
-    date_end:   dateEnd,
+    date_end: dateEnd,
     outlet,
     date_field: dateField,
-    sort_key:   prev.sort_key,
-    sort_dir:   prev.sort_dir,
-    search:     search.trim(),
-    status:     prev.status,
+    sort_key: prev.sort_key,
+    sort_dir: prev.sort_dir,
+    search: search.trim(),
+    status: prev.status,
   }));
 
   const applyQuick = (qr) => {
@@ -1324,13 +1513,13 @@ export default function CleanoxByWaschenProductionPage() {
     setQuickLabel(qr.label);
     setApplied((prev) => ({
       date_start: r.date_start,
-      date_end:   r.date_end,
+      date_end: r.date_end,
       outlet,
       date_field: dateField,
-      sort_key:   prev.sort_key,
-      sort_dir:   prev.sort_dir,
-      search:     search.trim(),
-      status:     prev.status,
+      sort_key: prev.sort_key,
+      sort_dir: prev.sort_dir,
+      search: search.trim(),
+      status: prev.status,
     }));
   };
 
@@ -1351,7 +1540,7 @@ export default function CleanoxByWaschenProductionPage() {
   const pageButtons = () => {
     const total = pagination.totalPages, cur = pagination.page;
     if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
-    if (cur <= 4)         return [1, 2, 3, 4, 5, '…', total];
+    if (cur <= 4) return [1, 2, 3, 4, 5, '…', total];
     if (cur >= total - 3) return [1, '…', total - 4, total - 3, total - 2, total - 1, total];
     return [1, '…', cur - 1, cur, cur + 1, '…', total];
   };
@@ -1496,9 +1685,8 @@ export default function CleanoxByWaschenProductionPage() {
                   if (next.has(st)) next.delete(st); else next.add(st);
                   updateStatusFilter(next);
                 }}
-                className={`transition-all duration-150 rounded-full ${
-                  isActive ? 'ring-2 ring-offset-1 ring-gray-400 scale-105' : 'opacity-70 hover:opacity-100'
-                }`}
+                className={`transition-all duration-150 rounded-full ${isActive ? 'ring-2 ring-offset-1 ring-gray-400 scale-105' : 'opacity-70 hover:opacity-100'
+                  }`}
               >
                 <StatusBadge status={st} />
               </button>
@@ -1607,6 +1795,7 @@ export default function CleanoxByWaschenProductionPage() {
                 {/* Rows */}
                 {!loading && !error && filtered.map((row, idx) => {
                   const rowNum = (pagination.page - 1) * pagination.limit + idx + 1;
+                  const itemTitle = [row.nama_item, row.keterangan].filter((v) => v).join(' — ');
                   return (
                     <tr
                       key={row.id}
@@ -1618,14 +1807,17 @@ export default function CleanoxByWaschenProductionPage() {
                       </td>
                       <td className="px-3 sm:px-4 py-2.5 font-mono text-xs text-gray-700 whitespace-nowrap">{row.no_nota || '—'}</td>
                       <td className="px-3 sm:px-4 py-2.5 font-medium text-gray-900 whitespace-nowrap text-xs">{row.customer_nama || '—'}</td>
-                      <td className="px-3 sm:px-4 py-2.5 text-gray-700 text-xs max-w-[200px] truncate" title={row.nama_item}>{row.nama_item || '—'}</td>
+                      <td className="px-3 sm:px-4 py-2.5 max-w-[200px]" title={itemTitle}>
+                        <p className="text-gray-700 text-xs truncate">{row.nama_item || '—'}</p>
+                        <p className="text-[10px] text-gray-400 truncate">{row.keterangan || '—'}</p>
+                      </td>
                       <td className="px-3 sm:px-4 py-2.5 text-right tabular-nums text-xs text-gray-700 whitespace-nowrap">
                         {row.jumlah != null ? <><span className="font-semibold">{Number(row.jumlah).toLocaleString('id-ID')}</span><span className="text-gray-400 ml-1">{row.satuan_item || ''}</span></> : '—'}
                       </td>
                       <td className="px-3 sm:px-4 py-2.5 text-gray-500 whitespace-nowrap text-xs">{fmtDate(row.tgl_terima)}</td>
                       <td className="px-3 sm:px-4 py-2.5 text-gray-500 whitespace-nowrap text-xs">{fmtDate(row.tgl_selesai)}</td>
                       <td className="px-3 sm:px-4 py-2.5 text-center">
-                        <StatusBadge status={row.status} />
+                        <StatusBadge status={displayStatus(row)} />
                       </td>
                       <td className="px-3 sm:px-4 py-2.5 text-center">
                         <button
@@ -1676,11 +1868,10 @@ export default function CleanoxByWaschenProductionPage() {
                       <span key={`el-${i}`} className="px-1 text-gray-400 text-xs">…</span>
                     ) : (
                       <button key={p} onClick={() => goPage(p)}
-                        className={`min-w-[28px] h-[28px] px-1 text-xs rounded-lg border transition-colors ${
-                          pagination.page === p
-                            ? 'bg-brand-700 text-white border-brand-700 font-semibold'
-                            : 'border-gray-200 hover:bg-gray-50 text-gray-700'
-                        }`}>
+                        className={`min-w-[28px] h-[28px] px-1 text-xs rounded-lg border transition-colors ${pagination.page === p
+                          ? 'bg-brand-700 text-white border-brand-700 font-semibold'
+                          : 'border-gray-200 hover:bg-gray-50 text-gray-700'
+                          }`}>
                         {p}
                       </button>
                     )

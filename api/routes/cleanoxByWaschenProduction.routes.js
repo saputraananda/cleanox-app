@@ -8,6 +8,8 @@ import {
   getTracking,
   updateTracking,
   updateCatatan,
+  requestOnHold,
+  decideCuciJemur,
   subscribeEvents,
 } from '../controllers/cleanoxByWaschenProduction.controller.js';
 
@@ -35,5 +37,7 @@ router.get('/tracking', getTracking);
 router.get('/', getData);
 router.post('/tracking', updateTracking);
 router.patch('/catatan', updateCatatan);
+router.patch('/on-hold', requestOnHold);
+router.patch('/cuci-jemur/decision', decideCuciJemur);
 
 export default router;
