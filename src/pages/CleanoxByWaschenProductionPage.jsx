@@ -1205,6 +1205,7 @@ export default function CleanoxByWaschenProductionPage() {
     date_field: 'tgl_terima',
     sort_key:   '',
     sort_dir:   'desc',
+    search:     '',
   });
 
   const [outlets,    setOutlets]    = useState([]);
@@ -1243,6 +1244,7 @@ export default function CleanoxByWaschenProductionPage() {
       date_field: f.date_field || 'tgl_terima',
       ...(f.outlet    && { outlet:    f.outlet }),
       ...(f.sort_key  && { sort_key:  f.sort_key, sort_dir: f.sort_dir || 'asc' }),
+      ...(f.search    && { search:    f.search }),
       page,
       limit,
     });
@@ -1287,14 +1289,38 @@ export default function CleanoxByWaschenProductionPage() {
     return () => es.close();
   }, []);
 
-  const applyFilter = () => setApplied((prev) => ({ date_start: dateStart, date_end: dateEnd, outlet, date_field: dateField, sort_key: prev.sort_key, sort_dir: prev.sort_dir }));
+  useEffect(() => {
+    const q = search.trim();
+    const t = setTimeout(() => {
+      setApplied((prev) => (prev.search === q ? prev : { ...prev, search: q }));
+    }, 400);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const applyFilter = () => setApplied((prev) => ({
+    date_start: dateStart,
+    date_end:   dateEnd,
+    outlet,
+    date_field: dateField,
+    sort_key:   prev.sort_key,
+    sort_dir:   prev.sort_dir,
+    search:     search.trim(),
+  }));
 
   const applyQuick = (qr) => {
     const r = qr.range();
     setDateStart(r.date_start);
     setDateEnd(r.date_end);
     setQuickLabel(qr.label);
-    setApplied((prev) => ({ date_start: r.date_start, date_end: r.date_end, outlet, date_field: dateField, sort_key: prev.sort_key, sort_dir: prev.sort_dir }));
+    setApplied((prev) => ({
+      date_start: r.date_start,
+      date_end:   r.date_end,
+      outlet,
+      date_field: dateField,
+      sort_key:   prev.sort_key,
+      sort_dir:   prev.sort_dir,
+      search:     search.trim(),
+    }));
   };
 
   const goPage = (p) => { setPagination((prev) => ({ ...prev, page: p })); fetchData(p, pagination.limit); };
@@ -1310,20 +1336,9 @@ export default function CleanoxByWaschenProductionPage() {
     }));
   };
 
-  /* Client-side filtering + search + status filter from legend */
+  /* Client-side status filter from legend */
   const filtered = useMemo(() => {
     let data = rows;
-
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      data = data.filter((r) =>
-        (r.no_nota        || '').toLowerCase().includes(q) ||
-        (r.customer_nama  || '').toLowerCase().includes(q) ||
-        (r.outlet         || '').toLowerCase().includes(q) ||
-        (r.nama_item      || '').toLowerCase().includes(q) ||
-        (r.status         || '').toLowerCase().includes(q)
-      );
-    }
 
     const statusSel = colFilters['status'];
     if (statusSel && statusSel.size > 0) {
@@ -1331,7 +1346,7 @@ export default function CleanoxByWaschenProductionPage() {
     }
 
     return data;
-  }, [rows, search, colFilters]);
+  }, [rows, colFilters]);
 
   /* Page buttons */
   const pageButtons = () => {

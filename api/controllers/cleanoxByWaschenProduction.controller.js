@@ -58,6 +58,7 @@ export const getData = async (req, res) => {
     sort_dir,
     page  = 1,
     limit = 25,
+    search,
   } = req.query;
 
   if (!date_start || !date_end) {
@@ -75,12 +76,24 @@ export const getData = async (req, res) => {
   const outletWhere   = outlet ? 'AND outlet = ?' : '';
   const outletParams  = outlet ? [outlet] : [];
   const dateParams    = [date_start, date_end];
+  const searchTerm    = typeof search === 'string' ? search.trim().toLowerCase() : '';
+  const searchWhere   = searchTerm
+    ? `AND (
+      LOWER(COALESCE(no_nota, '')) LIKE ?
+      OR LOWER(COALESCE(customer_nama, '')) LIKE ?
+      OR LOWER(COALESCE(outlet, '')) LIKE ?
+      OR LOWER(COALESCE(nama_item, '')) LIKE ?
+      OR LOWER(COALESCE(status, '')) LIKE ?
+    )`
+    : '';
+  const searchParams  = searchTerm ? Array(5).fill(`%${searchTerm}%`) : [];
 
   const baseWhere = `
     DATE(${dateFieldSafe}) BETWEEN DATE(?) AND DATE(?)
     AND (LOWER(COALESCE(nama_item,'')) LIKE '%cleanox%'
-      OR LOWER(COALESCE(nama_item,'')) LIKE '%karpet%')
+      OR LOWER(COALESCE(nama_item,'')) LIKE '%karpet%') 
     ${outletWhere}
+    ${searchWhere}
   `;
 
   const statsQuery = `SELECT COUNT(*) AS total FROM rekap_transaksi_reguler WHERE ${baseWhere}`;
@@ -109,7 +122,7 @@ export const getData = async (req, res) => {
     LIMIT ? OFFSET ?
   `;
 
-  const params = [...dateParams, ...outletParams];
+  const params = [...dateParams, ...outletParams, ...searchParams];
 
   try {
     const [statsResult, dataResult] = await Promise.all([
