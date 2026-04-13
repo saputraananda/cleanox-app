@@ -1,5 +1,9 @@
 import cleanoxPool from '../db/cleanox.js';
 
+const TRANSAKSI_TABLE = process.env.NODE_ENV === 'development'
+  ? 'rekap_transaksi_reguler'
+  : 'rekap_transaksi_reguler';
+
 /* ── KPI Summary — all employees for a period ─────────── */
 export const getKpiSummary = async (req, res) => {
   const { date_start, date_end, date_field = 'tgl_terima' } = req.query;
@@ -26,7 +30,7 @@ export const getKpiSummary = async (req, res) => {
          cuci_jemur_by, cuci_jemur_at,
          packing_by, packing_at,
          pengantaran_by, pengantaran_at
-       FROM rekap_transaksi_reguler
+       FROM ${TRANSAKSI_TABLE}
        WHERE ${baseWhere}`,
       [date_start, date_end]
     );
@@ -115,7 +119,7 @@ export const getKpiDetail = async (req, res) => {
          packing_by, packing_at,
          pengantaran_by, pengantaran_at,
          status, tgl_terima, tgl_selesai
-       FROM rekap_transaksi_reguler
+       FROM ${TRANSAKSI_TABLE}
        WHERE DATE(${dateFieldSafe}) BETWEEN DATE(?) AND DATE(?)
          AND (LOWER(COALESCE(nama_item,'')) LIKE '%cleanox%'
            OR LOWER(COALESCE(nama_item,'')) LIKE '%karpet%')

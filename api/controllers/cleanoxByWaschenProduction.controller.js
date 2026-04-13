@@ -1,5 +1,9 @@
 import cleanoxPool from '../db/cleanox.js';
 
+const TRANSAKSI_TABLE = process.env.NODE_ENV === 'development'
+  ? 'rekap_transaksi_reguler'
+  : 'rekap_transaksi_reguler';
+
 /* ── SSE client store ─────────────────────────────────── */
 const sseClients = new Set();
 
@@ -23,7 +27,7 @@ export const getOutlets = async (_req, res) => {
   try {
     const [rows] = await cleanoxPool.query(
       `SELECT DISTINCT outlet
-       FROM rekap_transaksi_reguler
+       FROM ${TRANSAKSI_TABLE}
        WHERE outlet IS NOT NULL AND outlet <> ''
        ORDER BY outlet`
     );
@@ -96,7 +100,7 @@ export const getData = async (req, res) => {
     ${searchWhere}
   `;
 
-  const statsQuery = `SELECT COUNT(*) AS total FROM rekap_transaksi_reguler WHERE ${baseWhere}`;
+  const statsQuery = `SELECT COUNT(*) AS total FROM ${TRANSAKSI_TABLE} WHERE ${baseWhere}`;
 
   const dataQuery = `
     SELECT
@@ -116,7 +120,7 @@ export const getData = async (req, res) => {
       pengantaran_by, pengantaran_at,
       updated_by,
       updated_at
-    FROM rekap_transaksi_reguler
+    FROM ${TRANSAKSI_TABLE}
     WHERE ${baseWhere}
     ORDER BY ${sortFieldSafe} ${sortDirSafe}, no_nota DESC, nama_item
     LIMIT ? OFFSET ?
@@ -169,7 +173,7 @@ export const getTracking = async (req, res) => {
         pickup_evidance_file, pickup_evidance_path,
         packing_evidance_file, packing_evidance_path,
         updated_by, updated_at
-      FROM rekap_transaksi_reguler
+      FROM ${TRANSAKSI_TABLE}
       WHERE id = ?`,
       [id]
     );
@@ -229,7 +233,7 @@ export const updateTracking = async (req, res) => {
 
   try {
     const [result] = await cleanoxPool.query(
-      `UPDATE rekap_transaksi_reguler
+      `UPDATE ${TRANSAKSI_TABLE}
        SET ${col.by} = ?, ${col.at} = ?,
            status = ?, updated_by = ?, updated_at = NOW()
        WHERE id = ?`,
@@ -242,7 +246,7 @@ export const updateTracking = async (req, res) => {
 
     // Fetch updated row to get no_nota/nama_item for SSE payload
     const [[updatedRow]] = await cleanoxPool.query(
-      `SELECT id, no_nota, nama_item FROM rekap_transaksi_reguler WHERE id = ?`,
+      `SELECT id, no_nota, nama_item FROM ${TRANSAKSI_TABLE} WHERE id = ?`,
       [id]
     );
 
@@ -273,7 +277,7 @@ export const updateCatatan = async (req, res) => {
 
   try {
     const [result] = await cleanoxPool.query(
-      `UPDATE rekap_transaksi_reguler
+      `UPDATE ${TRANSAKSI_TABLE}
        SET catatan_by_cleanox = ?, updated_at = NOW()
        WHERE id = ?`,
       [catatanValue || null, id]

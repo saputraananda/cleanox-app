@@ -5,6 +5,10 @@ import multer from 'multer';
 import sharp from 'sharp';
 import cleanoxPool from '../db/cleanox.js';
 
+const TRANSAKSI_TABLE = process.env.NODE_ENV === 'development'
+  ? 'rekap_transaksi_reguler'
+  : 'rekap_transaksi_reguler';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -83,7 +87,7 @@ export const uploadEvidance = async (req, res) => {
     const cols = DB_COLS[stage];
     const [[row]] = await cleanoxPool.query(
       `SELECT id, no_nota, ${cols.file} AS old_file, ${cols.path} AS old_path
-       FROM rekap_transaksi_reguler WHERE id = ?`,
+       FROM ${TRANSAKSI_TABLE} WHERE id = ?`,
       [id]
     );
     if (!row) return res.status(404).json({ message: 'Data tidak ditemukan' });
@@ -124,7 +128,7 @@ export const uploadEvidance = async (req, res) => {
 
     // Update DB
     await cleanoxPool.query(
-      `UPDATE rekap_transaksi_reguler SET ${cols.file} = ?, ${cols.path} = ?, updated_at = NOW() WHERE id = ?`,
+      `UPDATE ${TRANSAKSI_TABLE} SET ${cols.file} = ?, ${cols.path} = ?, updated_at = NOW() WHERE id = ?`,
       [safeName, relativePath, id]
     );
 
@@ -153,7 +157,7 @@ export const deleteEvidance = async (req, res) => {
 
   try {
     const [[row]] = await cleanoxPool.query(
-      `SELECT ${cols.file} AS filename FROM rekap_transaksi_reguler WHERE id = ?`,
+      `SELECT ${cols.file} AS filename FROM ${TRANSAKSI_TABLE} WHERE id = ?`,
       [id]
     );
     if (!row) return res.status(404).json({ message: 'Data tidak ditemukan' });
@@ -166,7 +170,7 @@ export const deleteEvidance = async (req, res) => {
 
     // Clear DB columns
     await cleanoxPool.query(
-      `UPDATE rekap_transaksi_reguler SET ${cols.file} = NULL, ${cols.path} = NULL, updated_at = NOW() WHERE id = ?`,
+      `UPDATE ${TRANSAKSI_TABLE} SET ${cols.file} = NULL, ${cols.path} = NULL, updated_at = NOW() WHERE id = ?`,
       [id]
     );
 

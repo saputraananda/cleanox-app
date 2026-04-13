@@ -1,11 +1,15 @@
 import smartlinkPool from '../db/smartlink.js';
 
+const TRANSAKSI_TABLE = process.env.NODE_ENV === 'development'
+  ? 'rekap_transaksi_reguler'
+  : 'rekap_transaksi_reguler';
+
 /* ── Get distinct outlets ─────────────────────────────── */
 export const getOutlets = async (_req, res) => {
   try {
     const [rows] = await smartlinkPool.query(
       `SELECT DISTINCT outlet
-       FROM rekap_transaksi_reguler
+       FROM ${TRANSAKSI_TABLE}
        WHERE outlet IS NOT NULL AND outlet <> ''
        ORDER BY outlet`
     );
@@ -48,7 +52,7 @@ export const getData = async (req, res) => {
         no_nota,
         MAX(outlet)        COLLATE utf8mb4_unicode_ci AS outlet,
         MAX(total_tagihan) AS total_tagihan
-      FROM rekap_transaksi_reguler
+      FROM ${TRANSAKSI_TABLE}
       WHERE DATE(${dateFieldSafe}) BETWEEN DATE(?) AND DATE(?)
         AND (LOWER(COALESCE(nama_item,'')) LIKE '%cleanox%'
           OR LOWER(COALESCE(nama_item,'')) LIKE '%karpet%')
@@ -60,7 +64,7 @@ export const getData = async (req, res) => {
   const dataQuery = `
     WITH nota_flag AS (
       SELECT DISTINCT no_nota COLLATE utf8mb4_unicode_ci AS no_nota
-      FROM rekap_transaksi_reguler
+      FROM ${TRANSAKSI_TABLE}
       WHERE DATE(${dateFieldSafe}) BETWEEN DATE(?) AND DATE(?)
         AND (LOWER(COALESCE(nama_item,'')) LIKE '%cleanox%'
           OR LOWER(COALESCE(nama_item,'')) LIKE '%karpet%')
@@ -75,7 +79,7 @@ export const getData = async (req, res) => {
       MAX(rtr.total_tagihan)  AS nominal_bayar,
       GROUP_CONCAT(DISTINCT rtr.nama_item ORDER BY rtr.nama_item SEPARATOR ', ') AS daftar_item
     FROM nota_flag nf
-    JOIN rekap_transaksi_reguler rtr
+    JOIN ${TRANSAKSI_TABLE} rtr
       ON rtr.no_nota COLLATE utf8mb4_unicode_ci = nf.no_nota
     WHERE 1=1 ${outletConditionData}
     GROUP BY rtr.outlet, rtr.no_nota
