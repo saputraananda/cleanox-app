@@ -20,12 +20,60 @@ export const getKpiSummary = async (req, res) => {
       OR LOWER(COALESCE(nama_item,'')) LIKE '%karpet%')
   `;
 
+  const parseJson = (v) => {
+    if (!v) return [];
+    if (Array.isArray(v)) return v;
+    try { return JSON.parse(v); } catch { return []; }
+  };
+
+  const parseDate = (v) => {
+    if (!v) return null;
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+
+  const toLocalDateKey = (v) => {
+    const d = parseDate(v);
+    if (!d) return null;
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const diffHours = (a, b) => {
+    const da = parseDate(a);
+    const db = parseDate(b);
+    if (!da || !db) return null;
+    const h = (db.getTime() - da.getTime()) / 36e5;
+    return h >= 0 ? h : null;
+  };
+
+  const summarizeHours = (arr) => {
+    if (!arr.length) {
+      return { sample_count: 0, avg_hours: null, min_hours: null, max_hours: null };
+    }
+    const sum = arr.reduce((s, v) => s + v, 0);
+    return {
+      sample_count: arr.length,
+      avg_hours: Number((sum / arr.length).toFixed(2)),
+      min_hours: Number(Math.min(...arr).toFixed(2)),
+      max_hours: Number(Math.max(...arr).toFixed(2)),
+    };
+  };
+
+  const normalizeServiceName = (name) => {
+    const s = String(name || '').trim().replace(/\s+/g, ' ');
+    return s || 'Tanpa Nama Item';
+  };
+
   try {
     // Fetch all relevant rows — we'll aggregate per employee in JS
     // because employees are stored as JSON arrays in each stage column
     const [rows] = await cleanoxPool.query(
       `SELECT
-         id, nama_item, jumlah, satuan_item,
+         id, no_nota, nama_item, jumlah, satuan_item,
+         COALESCE(total_tagihan, 0) AS total_tagihan,
          pickup_by, pickup_at,
          cuci_jemur_by, cuci_jemur_at,
          packing_by, packing_at,
@@ -34,12 +82,6 @@ export const getKpiSummary = async (req, res) => {
        WHERE ${baseWhere}`,
       [date_start, date_end]
     );
-
-    const parseJson = (v) => {
-      if (!v) return [];
-      if (Array.isArray(v)) return v;
-      try { return JSON.parse(v); } catch { return []; }
-    };
 
     // Aggregate per employee
     const empMap = {}; // name -> stats
@@ -92,7 +134,128 @@ export const getKpiSummary = async (req, res) => {
       pengantaran_done:  rows.filter((r) => parseJson(r.pengantaran_by).length > 0).length,
     };
 
-    return res.json({ summary: list, overall });
+    // 1) Total item per stage per day
+    const dailyMap = new Map(); // date -> counters
+    const ensureDaily = (dateKey) => {
+      if (!dailyMap.has(dateKey)) {
+        dailyMap.set(dateKey, {
+          date: dateKey,
+          pickup: 0,
+          cuci_jemur: 0,
+          packing: 0,
+          pengantaran: 0,
+          total: 0,
+        });
+      }
+      return dailyMap.get(dateKey);
+    };
+
+    for (const r of rows) {
+      const stageAtList = [
+        { key: 'pickup', at: r.pickup_at },
+        { key: 'cuci_jemur', at: r.cuci_jemur_at },
+        { key: 'packing', at: r.packing_at },
+        { key: 'pengantaran', at: r.pengantaran_at },
+      ];
+      for (const { key, at } of stageAtList) {
+        const dateKey = toLocalDateKey(at);
+        if (!dateKey) continue;
+        const d = ensureDaily(dateKey);
+        d[key] += 1;
+        d.total += 1;
+      }
+    }
+
+    const dailyStage = Array.from(dailyMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+
+    // 2) Aging processing time (hours)
+    const pickupToCuci = [];
+    const cuciToPacking = [];
+    const packingToDelivery = [];
+    const pickupToDelivery = [];
+
+    for (const r of rows) {
+      const h1 = diffHours(r.pickup_at, r.cuci_jemur_at);
+      const h2 = diffHours(r.cuci_jemur_at, r.packing_at);
+      const h3 = diffHours(r.packing_at, r.pengantaran_at);
+      const h4 = diffHours(r.pickup_at, r.pengantaran_at);
+      if (h1 !== null) pickupToCuci.push(h1);
+      if (h2 !== null) cuciToPacking.push(h2);
+      if (h3 !== null) packingToDelivery.push(h3);
+      if (h4 !== null) pickupToDelivery.push(h4);
+    }
+
+    const agingProcessingHours = {
+      pickup_to_cuci_jemur: summarizeHours(pickupToCuci),
+      cuci_jemur_to_packing: summarizeHours(cuciToPacking),
+      packing_to_delivery: summarizeHours(packingToDelivery),
+      pickup_to_delivery: summarizeHours(pickupToDelivery),
+    };
+
+    // 3) Top 5 services (volume, estimated revenue, avg cycle time)
+    const notaItemCount = {};
+    for (const r of rows) {
+      const notaKey = String(r.no_nota || '').trim();
+      if (!notaKey) continue;
+      notaItemCount[notaKey] = (notaItemCount[notaKey] || 0) + 1;
+    }
+
+    const serviceMap = new Map(); // nama_item -> stats
+    const ensureService = (serviceName) => {
+      if (!serviceMap.has(serviceName)) {
+        serviceMap.set(serviceName, {
+          service_name: serviceName,
+          volume: 0,
+          revenue: 0,
+          _cycle_sum: 0,
+          _cycle_count: 0,
+        });
+      }
+      return serviceMap.get(serviceName);
+    };
+
+    for (const r of rows) {
+      const serviceName = normalizeServiceName(r.nama_item);
+      const svc = ensureService(serviceName);
+      svc.volume += 1;
+
+      const rowRevenue = Number(r.total_tagihan || 0);
+      if (Number.isFinite(rowRevenue)) {
+        const notaKey = String(r.no_nota || '').trim();
+        const divisor = notaKey ? (notaItemCount[notaKey] || 1) : 1;
+        svc.revenue += rowRevenue / Math.max(1, divisor);
+      }
+
+      const cycle = diffHours(r.pickup_at, r.pengantaran_at);
+      if (cycle !== null) {
+        svc._cycle_sum += cycle;
+        svc._cycle_count += 1;
+      }
+    }
+
+    const topServices = Array.from(serviceMap.values())
+      .map((s) => ({
+        service_name: s.service_name,
+        volume: s.volume,
+        revenue: Math.round(s.revenue),
+        avg_cycle_hours: s._cycle_count > 0 ? Number((s._cycle_sum / s._cycle_count).toFixed(2)) : null,
+        cycle_sample_count: s._cycle_count,
+      }))
+      .sort((a, b) => {
+        if (b.volume !== a.volume) return b.volume - a.volume;
+        return b.revenue - a.revenue;
+      })
+      .slice(0, 5);
+
+    return res.json({
+      summary: list,
+      overall,
+      insights: {
+        daily_stage: dailyStage,
+        aging_processing_hours: agingProcessingHours,
+        top_services: topServices,
+      },
+    });
   } catch (err) {
     console.error('[kpi/getKpiSummary]', err.message);
     return res.status(500).json({ message: 'Gagal mengambil data KPI', error: err.message });

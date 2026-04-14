@@ -117,7 +117,13 @@ export const getData = async (req, res) => {
   const baseWhere = `
     DATE(${dateFieldSafe}) BETWEEN DATE(?) AND DATE(?)
     AND (LOWER(COALESCE(nama_item,'')) LIKE '%cleanox%'
-      OR LOWER(COALESCE(nama_item,'')) LIKE '%karpet%') 
+      OR LOWER(COALESCE(nama_item,'')) LIKE '%karpet%')
+    AND LOWER(COALESCE(customer_nama,'')) NOT LIKE '%dummy%'
+    AND LOWER(COALESCE(customer_nama,'')) NOT LIKE '%test%'
+    AND LOWER(COALESCE(customer_nama,'')) NOT LIKE '%haji%'
+    AND LOWER(COALESCE(customer_nama,'')) NOT LIKE '%tni%'
+    AND LOWER(COALESCE(nama_item,'')) NOT LIKE '%haji%'
+    AND LOWER(COALESCE(nama_item,'')) NOT LIKE '%tni%'
     ${outletWhere}
     ${searchWhere}
     ${statusWhere}

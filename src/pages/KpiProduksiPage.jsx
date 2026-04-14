@@ -20,6 +20,18 @@ const fmtDateTime = (dt) => {
     hour: '2-digit', minute: '2-digit',
   });
 };
+const fmtDateShort = (dt) => {
+  if (!dt) return '—';
+  return new Date(dt).toLocaleDateString('id-ID', {
+    day: '2-digit', month: 'short',
+  });
+};
+const fmtCurrency = (n) => new Intl.NumberFormat('id-ID', {
+  style: 'currency',
+  currency: 'IDR',
+  maximumFractionDigits: 0,
+}).format(Number(n || 0));
+const fmtHours = (n) => (n === null || n === undefined ? '—' : `${Number(n).toLocaleString('id-ID', { maximumFractionDigits: 1 })} jam`);
 
 const now = new Date();
 
@@ -54,6 +66,17 @@ const RANK_BADGE = {
   1: { icon: Trophy, cls: 'bg-yellow-400 text-white', label: '#1' },
   2: { icon: Medal,  cls: 'bg-gray-300 text-gray-700', label: '#2' },
   3: { icon: Award,  cls: 'bg-amber-600 text-white',  label: '#3' },
+};
+
+const EMPTY_INSIGHTS = {
+  daily_stage: [],
+  aging_processing_hours: {
+    pickup_to_cuci_jemur: { sample_count: 0, avg_hours: null, min_hours: null, max_hours: null },
+    cuci_jemur_to_packing: { sample_count: 0, avg_hours: null, min_hours: null, max_hours: null },
+    packing_to_delivery: { sample_count: 0, avg_hours: null, min_hours: null, max_hours: null },
+    pickup_to_delivery: { sample_count: 0, avg_hours: null, min_hours: null, max_hours: null },
+  },
+  top_services: [],
 };
 
 function LoadingBar({ visible }) {
@@ -286,6 +309,7 @@ export default function KpiProduksiPage() {
   const [monthLabel, setMonthLabel] = useState(`${MONTHS_ID[now.getMonth()]} ${now.getFullYear()}`);
   const [summary,    setSummary]    = useState([]);
   const [overall,    setOverall]    = useState(null);
+  const [insights,   setInsights]   = useState(EMPTY_INSIGHTS);
   const [loading,    setLoading]    = useState(false);
   const [error,      setError]      = useState('');
   const [detailEmp,  setDetailEmp]  = useState(null);
@@ -304,9 +328,11 @@ export default function KpiProduksiPage() {
       });
       setSummary(data.summary || []);
       setOverall(data.overall || null);
+      setInsights(data.insights || EMPTY_INSIGHTS);
     } catch (err) {
       if (err.name !== 'CanceledError' && err.name !== 'AbortError') {
         setError(err.response?.data?.message || 'Gagal memuat data KPI');
+        setInsights(EMPTY_INSIGHTS);
       }
     } finally {
       setLoading(false);
@@ -331,6 +357,14 @@ export default function KpiProduksiPage() {
     packing:     summary.reduce((s, e) => s + e.packing, 0),
     pengantaran: summary.reduce((s, e) => s + e.pengantaran, 0),
   };
+
+  const dailyMax = Math.max(1, ...(insights.daily_stage || []).map((d) => d.total || 0));
+  const agingCards = [
+    { key: 'pickup_to_cuci_jemur', label: 'Pickup → Cuci Jemur', color: 'text-blue-700 bg-blue-50 border-blue-200' },
+    { key: 'cuci_jemur_to_packing', label: 'Cuci Jemur → Packing', color: 'text-amber-700 bg-amber-50 border-amber-200' },
+    { key: 'packing_to_delivery', label: 'Packing → Delivery', color: 'text-green-700 bg-green-50 border-green-200' },
+    { key: 'pickup_to_delivery', label: 'Pickup → Delivery (End-to-End)', color: 'text-brand-700 bg-brand-50 border-brand-200' },
+  ];
 
   return (
     <>
@@ -402,6 +436,102 @@ export default function KpiProduksiPage() {
             })}
           </div>
         )}
+
+        {/* Insights: Daily Stage + Aging + Top Services */}
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-3 items-start">
+          <div className="bg-white rounded-xl border border-gray-200 p-4 xl:col-span-1 self-start">
+            <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2 mb-3">
+              <Calendar className="w-4 h-4 text-brand-600" />
+              Total Item per Stage (Daily)
+            </h3>
+            {insights.daily_stage?.length ? (
+              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                {insights.daily_stage.map((d) => (
+                  <div key={d.date} className="rounded-lg border border-gray-100 p-2.5">
+                    <div className="flex items-center justify-between text-xs mb-1.5">
+                      <span className="font-semibold text-gray-700">{fmtDateShort(d.date)}</span>
+                      <span className="text-gray-500">Total: <strong>{d.total}</strong></span>
+                    </div>
+                    <div className="w-full h-1.5 rounded-full bg-gray-100 overflow-hidden mb-2">
+                      <div className="h-full bg-gradient-to-r from-brand-500 to-lime-400" style={{ width: `${Math.round((d.total / dailyMax) * 100)}%` }} />
+                    </div>
+                    <div className="grid grid-cols-4 gap-1 text-[10px]">
+                      <div className="bg-blue-50 text-blue-700 rounded px-1.5 py-1 text-center">P: {d.pickup}</div>
+                      <div className="bg-amber-50 text-amber-700 rounded px-1.5 py-1 text-center">CJ: {d.cuci_jemur}</div>
+                      <div className="bg-purple-50 text-purple-700 rounded px-1.5 py-1 text-center">Pk: {d.packing}</div>
+                      <div className="bg-green-50 text-green-700 rounded px-1.5 py-1 text-center">Dlv: {d.pengantaran}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-400">Belum ada aktivitas stage harian pada periode ini.</p>
+            )}
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-200 p-4 xl:col-span-1 self-start">
+            <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2 mb-3">
+              <Clock className="w-4 h-4 text-brand-600" />
+              Aging Processing Time (Hours)
+            </h3>
+            <div className="space-y-2">
+              {agingCards.map((c) => {
+                const v = insights.aging_processing_hours?.[c.key] || {};
+                return (
+                  <div key={c.key} className={`rounded-lg border p-2.5 ${c.color}`}>
+                    <p className="text-xs font-semibold">{c.label}</p>
+                    <div className="grid grid-cols-3 gap-1 mt-1.5 text-[11px]">
+                      <div className="bg-white/70 rounded px-1.5 py-1">
+                        <p className="opacity-70">Avg</p>
+                        <p className="font-semibold">{fmtHours(v.avg_hours)}</p>
+                      </div>
+                      <div className="bg-white/70 rounded px-1.5 py-1">
+                        <p className="opacity-70">Min</p>
+                        <p className="font-semibold">{fmtHours(v.min_hours)}</p>
+                      </div>
+                      <div className="bg-white/70 rounded px-1.5 py-1">
+                        <p className="opacity-70">Max</p>
+                        <p className="font-semibold">{fmtHours(v.max_hours)}</p>
+                      </div>
+                    </div>
+                    <p className="text-[10px] mt-1 opacity-80">Sampel: {v.sample_count || 0} item</p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-200 p-4 xl:col-span-1 self-start">
+            <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2 mb-3">
+              <Trophy className="w-4 h-4 text-brand-600" />
+              Top 5 Services (Volume, Revenue, Time)
+            </h3>
+            {insights.top_services?.length ? (
+              <div className="space-y-2">
+                {insights.top_services.map((s, idx) => (
+                  <div key={`${s.service_name}-${idx}`} className="rounded-lg border border-gray-100 p-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-xs font-semibold text-gray-800 leading-snug">#{idx + 1} {s.service_name}</p>
+                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-brand-50 text-brand-700">{s.volume} item</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 mt-1.5 text-[11px]">
+                      <div className="bg-emerald-50 text-emerald-700 rounded px-2 py-1">
+                        <p className="opacity-70">Revenue</p>
+                        <p className="font-semibold">{fmtCurrency(s.revenue)}</p>
+                      </div>
+                      <div className="bg-indigo-50 text-indigo-700 rounded px-2 py-1">
+                        <p className="opacity-70">Avg Time</p>
+                        <p className="font-semibold">{fmtHours(s.avg_cycle_hours)}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-400">Belum ada service yang bisa dirangkum pada periode ini.</p>
+            )}
+          </div>
+        </div>
 
         {/* Employee ranking */}
         {summary.length === 0 && !loading ? (

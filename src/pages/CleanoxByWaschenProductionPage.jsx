@@ -223,30 +223,37 @@ function QuickRangeDropdown({ ranges, onSelect, currentLabel }) {
   );
 }
 
-/* ── Date Input (DD/MM/YYYY) ───────────────────────────── */
+/* ── Date Input (native calendar picker) ───────────────── */
 function DateInput({ value, onChange, className }) {
-  const toDisplay = (iso) => {
-    if (!iso) return '';
-    const [y, m, d] = iso.split('-');
-    return `${d}/${m}/${y}`;
-  };
-  const [display, setDisplay] = useState(() => toDisplay(value));
-  useEffect(() => { setDisplay(toDisplay(value)); }, [value]);
+  const inputRef = useRef(null);
 
-  const handleChange = (e) => {
-    let raw = e.target.value.replace(/[^\d]/g, '');
-    if (raw.length > 4) raw = raw.slice(0, 2) + '/' + raw.slice(2, 4) + '/' + raw.slice(4, 8);
-    else if (raw.length > 2) raw = raw.slice(0, 2) + '/' + raw.slice(2);
-    setDisplay(raw);
-    const match = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-    if (match) onChange(`${match[3]}-${match[2]}-${match[1]}`);
+  const openPicker = () => {
+    try {
+      if (typeof inputRef.current?.showPicker === 'function') {
+        inputRef.current.showPicker();
+      }
+    } catch {
+      // Some browsers throw if picker can't be opened in current state.
+    }
   };
 
-  const handleBlur = () => { setDisplay(toDisplay(value)); };
+  const handleKeyDown = (e) => {
+    const allowedKeys = ['Tab', 'Shift', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'];
+    if (!allowedKeys.includes(e.key)) e.preventDefault();
+  };
 
   return (
-    <input type="text" value={display} onChange={handleChange} onBlur={handleBlur}
-      placeholder="DD/MM/YYYY" maxLength={10} className={className} />
+    <input
+      ref={inputRef}
+      type="date"
+      value={value || ''}
+      onChange={(e) => onChange(e.target.value)}
+      onFocus={openPicker}
+      onClick={openPicker}
+      onKeyDown={handleKeyDown}
+      onPaste={(e) => e.preventDefault()}
+      className={className}
+    />
   );
 }
 
@@ -779,6 +786,19 @@ function TrackingModal({ show, onClose, row, userRole }) {
   const [savingCatatan, setSavingCatatan] = useState(false);
   const [editingStage, setEditingStage] = useState(null); // stage key admin is overriding
   const [onHoldSuccess, setOnHoldSuccess] = useState(false);
+
+  useEffect(() => {
+    if (!show) return;
+    const prevBodyOverflow = document.body.style.overflow;
+    const prevHtmlOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+
+    return () => {
+      document.body.style.overflow = prevBodyOverflow;
+      document.documentElement.style.overflow = prevHtmlOverflow;
+    };
+  }, [show]);
 
   // Fetch tracking data + employees on open
   useEffect(() => {
