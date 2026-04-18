@@ -4,6 +4,101 @@ const TRANSAKSI_TABLE = process.env.NODE_ENV === 'development'
   ? 'rekap_transaksi_reguler'
   : 'rekap_transaksi_reguler';
 
+/* ── WAHA WhatsApp notification ───────────────────────── */
+const OUTLET_MENTION = {
+  'Waschen Laundry Raffles Hills':  ['6289530162883@c.us', '62895358199284@c.us'],
+  'Waschen Citra Grand':            ['6289616020108@c.us'],
+  'Waschen Laundry Legenda Wisata': ['62895333561086@c.us'],
+  'Waschen Laundry Canadian':       ['6283896334423@c.us'],
+  'Waschen Laundry Kota Wisata':    ['628977300965@c.us'],
+};
+
+const OUTLET_SHORT = {
+  'Waschen Laundry Raffles Hills':  'Raffles',
+  'Waschen Citra Grand':            'Citra',
+  'Waschen Laundry Legenda Wisata': 'Legenda',
+  'Waschen Laundry Canadian':       'Canadian',
+  'Waschen Laundry Kota Wisata':    'Kota Wisata',
+};
+
+async function sendOnHoldWaNotification({ id, no_nota, customer_nama, nama_item, outlet }) {
+  const wahaUrl     = process.env.WAHA_URL;
+  const wahaApiKey  = process.env.WAHA_API_KEY;
+  const wahaSession = process.env.WAHA_SESSION_CLEANOX;
+  const appUrl      = (process.env.APP_URL || process.env.CORS_ORIGIN || '').replace(/\/$/, '');
+  const groupId     = '120363418441595080@g.us';
+
+  if (!wahaUrl || !wahaApiKey || !wahaSession) {
+    console.warn('[production/onHold] WAHA env vars not set, skipping WA notification');
+    return;
+  }
+
+  const mentionIds    = OUTLET_MENTION[outlet] || [];
+  const mentions      = mentionIds;
+  const mentionText   = mentionIds.map((m) => `@${m.replace('@c.us', '')}`).join(' ');
+  const outletShort   = OUTLET_SHORT[outlet] || outlet || '-';
+
+  const deepLink = appUrl
+    ? `${appUrl}/cleanox-by-waschen-production?open_id=${id}&status=Tertunda`
+    : null;
+  
+  const text =
+    `🚨WARNING STATUS TERTUNDA🚨\n\n` +
+    `No Nota : ${no_nota || '-'}\n` +
+    `Nama Customer : ${customer_nama || '-'}\n` +
+    `Nama Item : ${nama_item || '-'}\n` +
+    `Cabang : ${outletShort}\n` +
+    (deepLink ? `\nLink : ${deepLink}\n` : '') +
+    `\nMohon dicek yaa! Terima kasih 🙏` +
+    (mentionText ? `\n${mentionText}` : '');
+
+  const body = { session: wahaSession, chatId: groupId, text };
+  if (mentions.length > 0) body.mentions = mentions;
+
+  const MAX_ATTEMPTS = 3;
+  const RETRY_DELAY_MS = 5000; // 5 seconds between retries
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeoutId  = setTimeout(() => controller.abort(), 20000); // 20s timeout per attempt
+
+      const resp = await fetch(`${wahaUrl}/api/sendText`, {
+        method:  'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Api-Key':    wahaApiKey,
+        },
+        body:   JSON.stringify(body),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (resp.ok) {
+        console.log(`[production/onHold] WA notification sent to group (attempt ${attempt})`);
+        return; // success — stop retrying
+      }
+
+      const errText = await resp.text().catch(() => '(no body)');
+      console.error(`[production/onHold] WAHA sendText failed (attempt ${attempt}/${MAX_ATTEMPTS}): ${resp.status}`);
+
+      // Don't retry on client-side errors (4xx)
+      if (resp.status >= 400 && resp.status < 500) break;
+
+    } catch (err) {
+      const reason = err.name === 'AbortError' ? 'request timed out (20s)' : err.message;
+      console.error(`[production/onHold] WA notification error (attempt ${attempt}/${MAX_ATTEMPTS}): ${reason}`);
+    }
+
+    if (attempt < MAX_ATTEMPTS) {
+      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+    }
+  }
+
+  console.error('[production/onHold] WA notification gave up after all attempts');
+}
+
 /* ── SSE client store ─────────────────────────────────── */
 const sseClients = new Set();
 
@@ -392,7 +487,7 @@ export const requestOnHold = async (req, res) => {
     }
 
     const [[updatedRow]] = await cleanoxPool.query(
-      `SELECT id, no_nota, nama_item, on_hold, isContinue, cuci_jemur_deadline_at FROM ${TRANSAKSI_TABLE} WHERE id = ?`,
+      `SELECT id, no_nota, nama_item, outlet, customer_nama, on_hold, isContinue, cuci_jemur_deadline_at FROM ${TRANSAKSI_TABLE} WHERE id = ?`,
       [id]
     );
 
@@ -407,6 +502,15 @@ export const requestOnHold = async (req, res) => {
       updated_at: new Date().toISOString(),
     };
     broadcast(payload);
+
+    // Send WA notification to production group (fire-and-forget)
+    sendOnHoldWaNotification({
+      id,
+      no_nota:       updatedRow?.no_nota,
+      customer_nama: updatedRow?.customer_nama,
+      nama_item:     updatedRow?.nama_item,
+      outlet:        updatedRow?.outlet,
+    });
 
     return res.json({ message: 'Item di-hold', ...payload });
   } catch (err) {

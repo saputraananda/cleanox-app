@@ -35,6 +35,7 @@ import {
   Image,
   Eye,
 } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../utils/api.js';
 import { getToken, getUser } from '../utils/auth.js';
 
@@ -1375,6 +1376,7 @@ function TrackingModal({ show, onClose, row, userRole }) {
 /* ── Main Component ────────────────────────────────────── */
 export default function CleanoxByWaschenProductionPage() {
   const user = getUser();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [dateStart, setDateStart] = useState(DEFAULT_START);
   const [dateEnd, setDateEnd] = useState(DEFAULT_END);
@@ -1406,6 +1408,28 @@ export default function CleanoxByWaschenProductionPage() {
   const [trackingRow, setTrackingRow] = useState(null);
 
   const abortRef = useRef(null);
+
+  /* Deep-link: open_id query param → auto-open tracking modal */
+  useEffect(() => {
+    const openId = searchParams.get('open_id');
+    if (!openId) return;
+
+    // Apply Tertunda filter
+    const statusParam = searchParams.get('status') || 'Tertunda';
+    setStatusFilter(new Set([statusParam]));
+    setApplied((prev) => ({ ...prev, status: statusParam }));
+
+    // Fetch and open tracking modal for this item
+    api.get(`/cleanox-by-waschen-production/tracking?id=${openId}`)
+      .then(({ data }) => {
+        if (data?.tracking) setTrackingRow(data.tracking);
+      })
+      .catch(() => { })
+      .finally(() => {
+        // Clean up URL params so refresh doesn't re-open
+        setSearchParams({}, { replace: true });
+      });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* Fetch outlets once */
   useEffect(() => {
