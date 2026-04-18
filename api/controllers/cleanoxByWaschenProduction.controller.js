@@ -1,7 +1,7 @@
 import cleanoxPool from '../db/cleanox.js';
 
 const TRANSAKSI_TABLE = process.env.NODE_ENV === 'development'
-  ? 'rekap_transaksi_reguler'
+  ? 'rekap_transaksi_reguler_dev'
   : 'rekap_transaksi_reguler';
 
 /* ── WAHA WhatsApp notification ───────────────────────── */
@@ -26,7 +26,9 @@ async function sendOnHoldWaNotification({ id, no_nota, customer_nama, nama_item,
   const wahaApiKey  = process.env.WAHA_API_KEY;
   const wahaSession = process.env.WAHA_SESSION_CLEANOX;
   const appUrl      = (process.env.APP_URL || process.env.CORS_ORIGIN || '').replace(/\/$/, '');
-  const groupId     = '120363418441595080@g.us';
+  const groupId     = process.env.NODE_ENV === 'development'
+    ? '120363406439867993@g.us'
+    : '120363418441595080@g.us';
 
   if (!wahaUrl || !wahaApiKey || !wahaSession) {
     console.warn('[production/onHold] WAHA env vars not set, skipping WA notification');
