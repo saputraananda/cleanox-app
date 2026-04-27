@@ -81,8 +81,19 @@ const cutoffEnd = (year, month) => {
   return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-25`;
 };
 const now = new Date();
-const DEFAULT_START = cutoffStart(now.getFullYear(), now.getMonth() + 1);
-const DEFAULT_END = cutoffEnd(now.getFullYear(), now.getMonth() + 1);
+// If today is past the 25th, the billing period has rolled over to the next month
+const _curMonth = now.getMonth() + 1; // 1-based
+const _curYear  = now.getFullYear();
+let periodMonth, periodYear;
+if (now.getDate() > 25) {
+  if (_curMonth === 12) { periodMonth = 1; periodYear = _curYear + 1; }
+  else { periodMonth = _curMonth + 1; periodYear = _curYear; }
+} else {
+  periodMonth = _curMonth;
+  periodYear  = _curYear;
+}
+const DEFAULT_START = cutoffStart(periodYear, periodMonth);
+const DEFAULT_END   = cutoffEnd(periodYear, periodMonth);
 
 const MONTHS_ID = [
   'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
@@ -92,6 +103,7 @@ const MONTHS_ID = [
 const buildQuickRanges = () => {
   const ranges = [];
   const n = new Date();
+  ranges.push({ label: 'Semua Data', range: () => ({ date_start: '2000-01-01', date_end: '2099-12-31' }) });
   ranges.push({ label: 'Hari Ini', range: () => ({ date_start: today, date_end: today }) });
   ranges.push({
     label: 'Kemarin',
@@ -160,7 +172,7 @@ function QuickRangeDropdown({ ranges, onSelect, currentLabel }) {
     return () => document.removeEventListener('mousedown', h);
   }, []);
 
-  const cepat = ranges.filter((r) => ['Hari Ini', 'Kemarin'].includes(r.label));
+  const cepat = ranges.filter((r) => ['Semua Data', 'Hari Ini', 'Kemarin'].includes(r.label));
   const bulan = ranges.filter((r) => !['Hari Ini', 'Kemarin'].includes(r.label));
   const byYear = {};
   bulan.forEach((r) => {
@@ -1694,24 +1706,28 @@ export default function CleanoxByWaschenProductionPage() {
 
         {/* ── Stats ─── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {[
-            { icon: FileText, label: 'Total Item', value: loading ? null : stats.total.toLocaleString('id-ID'), color: 'text-brand-600', bg: 'bg-brand-50' },
-            { icon: Calendar, label: 'Periode', value: `${fmtDate(applied.date_start)} – ${fmtDate(applied.date_end)}`, color: 'text-teal-600', bg: 'bg-teal-50' },
-          ].map((s) => (
-            <div key={s.label} className="card flex items-center gap-3 sm:gap-4">
-              <div className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl ${s.bg} flex items-center justify-center flex-shrink-0`}>
-                <s.icon className={`w-5 h-5 ${s.color}`} />
+          {(() => {
+            const isAllData = applied.date_start === '2000-01-01' && applied.date_end === '2099-12-31';
+            const periodeValue = isAllData ? 'Semua Data' : `${fmtDate(applied.date_start)} – ${fmtDate(applied.date_end)}`;
+            return [
+              { icon: FileText, label: 'Total Item', value: loading ? null : stats.total.toLocaleString('id-ID'), color: 'text-brand-600', bg: 'bg-brand-50' },
+              { icon: Calendar, label: 'Periode', value: periodeValue, color: 'text-teal-600', bg: 'bg-teal-50' },
+            ].map((s) => (
+              <div key={s.label} className="card flex items-center gap-3 sm:gap-4">
+                <div className={`w-10 h-10 sm:w-11 sm:h-11 rounded-xl ${s.bg} flex items-center justify-center flex-shrink-0`}>
+                  <s.icon className={`w-5 h-5 ${s.color}`} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs text-gray-400 font-medium">{s.label}</p>
+                  {s.value === null ? (
+                    <div className="h-5 w-24 bg-gray-100 rounded animate-pulse mt-0.5" />
+                  ) : (
+                    <p className="text-base sm:text-lg font-bold text-gray-900 truncate">{s.value}</p>
+                  )}
+                </div>
               </div>
-              <div className="min-w-0">
-                <p className="text-xs text-gray-400 font-medium">{s.label}</p>
-                {s.value === null ? (
-                  <div className="h-5 w-24 bg-gray-100 rounded animate-pulse mt-0.5" />
-                ) : (
-                  <p className="text-base sm:text-lg font-bold text-gray-900 truncate">{s.value}</p>
-                )}
-              </div>
-            </div>
-          ))}
+            ));
+          })()}
         </div>
 
         {/* ── Status legend ─── */}
