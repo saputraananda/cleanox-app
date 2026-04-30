@@ -100,32 +100,17 @@ const MONTHS_ID = [
   'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
 ];
 
-const buildQuickRanges = () => {
-  const ranges = [];
-  const n = new Date();
-  ranges.push({ label: 'Semua Data', range: () => ({ date_start: '2000-01-01', date_end: '2099-12-31' }) });
-  ranges.push({ label: 'Hari Ini', range: () => ({ date_start: today, date_end: today }) });
-  ranges.push({
+const buildStaticRanges = () => [
+  { label: 'Semua Data', range: () => ({ date_start: '2000-01-01', date_end: '2099-12-31' }) },
+  { label: 'Hari Ini',  range: () => ({ date_start: today, date_end: today }) },
+  {
     label: 'Kemarin',
     range: () => {
       const d = new Date(); d.setDate(d.getDate() - 1); const s = toISO(d);
       return { date_start: s, date_end: s };
     },
-  });
-  for (let i = 0; i < 12; i++) {
-    const yr = n.getFullYear();
-    const mo = n.getMonth() + 1 - i;
-    const realYear = mo <= 0 ? yr - 1 : yr;
-    const realMonth = mo <= 0 ? mo + 12 : mo;
-    const s = cutoffStart(realYear, realMonth);
-    const e = cutoffEnd(realYear, realMonth);
-    const label = `${MONTHS_ID[realMonth - 1]} ${realYear}`;
-    ranges.push({ label, range: () => ({ date_start: s, date_end: e }) });
-  }
-  return ranges;
-};
-
-const QUICK_RANGES = buildQuickRanges();
+  },
+];
 const PAGE_SIZES = [10, 25, 50, 100];
 
 const OUTLET_META = {
@@ -173,7 +158,7 @@ function QuickRangeDropdown({ ranges, onSelect, currentLabel }) {
   }, []);
 
   const cepat = ranges.filter((r) => ['Semua Data', 'Hari Ini', 'Kemarin'].includes(r.label));
-  const bulan = ranges.filter((r) => !['Hari Ini', 'Kemarin'].includes(r.label));
+  const bulan = ranges.filter((r) => !['Semua Data', 'Hari Ini', 'Kemarin'].includes(r.label));
   const byYear = {};
   bulan.forEach((r) => {
     const yr = r.label.split(' ')[1];
@@ -1415,6 +1400,7 @@ export default function CleanoxByWaschenProductionPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [quickLabel, setQuickLabel] = useState('');
+  const [availablePeriods, setAvailablePeriods] = useState([]);
 
   // Tracking modal
   const [trackingRow, setTrackingRow] = useState(null);
@@ -1447,6 +1433,13 @@ export default function CleanoxByWaschenProductionPage() {
   useEffect(() => {
     api.get('/cleanox-by-waschen-production/outlets')
       .then(({ data }) => setOutlets(data.outlets || []))
+      .catch(() => { });
+  }, []);
+
+  /* Fetch available billing periods from DB */
+  useEffect(() => {
+    api.get('/kpi/available-periods')
+      .then(({ data }) => setAvailablePeriods(data.periods || []))
       .catch(() => { });
   }, []);
 
@@ -1603,6 +1596,17 @@ export default function CleanoxByWaschenProductionPage() {
 
   const activeColFiltersCount = statusFilter.size;
 
+  // Build dynamic quick ranges from available periods in DB
+  const dynamicRanges = [
+    ...buildStaticRanges(),
+    ...availablePeriods.map(({ yr, mo }) => {
+      const s = cutoffStart(yr, mo);
+      const e = cutoffEnd(yr, mo);
+      const label = `${MONTHS_ID[mo - 1]} ${yr}`;
+      return { label, range: () => ({ date_start: s, date_end: e }) };
+    }),
+  ];
+
   return (
     <>
       <LoadingBar visible={loading} />
@@ -1633,7 +1637,7 @@ export default function CleanoxByWaschenProductionPage() {
         </div>
 
         {/* ── Quick range dropdown ─── */}
-        <QuickRangeDropdown ranges={QUICK_RANGES} onSelect={applyQuick} currentLabel={quickLabel} />
+        <QuickRangeDropdown ranges={dynamicRanges} onSelect={applyQuick} currentLabel={quickLabel} />
 
         {/* ── Filter card ─── */}
         <div className="card">
