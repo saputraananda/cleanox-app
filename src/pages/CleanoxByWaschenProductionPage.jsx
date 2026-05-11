@@ -71,6 +71,15 @@ const toISO = (d) => {
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 };
+// Convert UTC datetime (from DB via mysql2) to local datetime-local input value
+const toLocalDateTimeInput = (dt) => {
+  if (!dt) return '';
+  const d = new Date(dt);
+  if (Number.isNaN(d.getTime())) return '';
+  const offset = d.getTimezoneOffset(); // -420 for UTC+7
+  const local = new Date(d.getTime() - offset * 60 * 1000);
+  return local.toISOString().slice(0, 16);
+};
 const today = toISO(new Date());
 
 const cutoffStart = (year, month) => {
@@ -828,7 +837,7 @@ function TrackingModal({ show, onClose, row, userRole }) {
           const atVal = trackRes.data.tracking[stage.atCol];
           form[stage.key] = {
             employees: Array.isArray(byVal) ? byVal : [],
-            timestamp: atVal ? atVal.slice(0, 16) : '', // datetime-local format
+            timestamp: toLocalDateTimeInput(atVal),
           };
         }
         setStageForm(form);
@@ -919,7 +928,7 @@ function TrackingModal({ show, onClose, row, userRole }) {
         ...prev,
         [stageKey]: {
           employees: Array.isArray(byVal) ? byVal : [],
-          timestamp: atVal ? atVal.slice(0, 16) : '',
+          timestamp: toLocalDateTimeInput(atVal),
         },
       }));
       setEditingStage(null); // close admin override form after save
