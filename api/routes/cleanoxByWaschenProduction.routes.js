@@ -7,10 +7,12 @@ import {
   getEmployees,
   getTracking,
   updateTracking,
+  clearTracking,
   updateCatatan,
   requestOnHold,
   decideCuciJemur,
   subscribeEvents,
+  sendManualCustomerNotification,
 } from '../controllers/cleanoxByWaschenProduction.controller.js';
 
 const router = Router();
@@ -36,8 +38,10 @@ router.get('/employees', getEmployees);
 router.get('/tracking', getTracking);
 router.get('/', getData);
 router.post('/tracking', updateTracking);
+router.delete('/tracking', clearTracking);
 router.patch('/catatan', updateCatatan);
 router.patch('/on-hold', requestOnHold);
 router.patch('/cuci-jemur/decision', decideCuciJemur);
+router.post('/notify-customer', sendManualCustomerNotification);
 
 export default router;

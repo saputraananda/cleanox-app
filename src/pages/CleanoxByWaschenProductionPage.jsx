@@ -34,6 +34,8 @@ import {
   Trash2,
   Image,
   Eye,
+  MessageSquare,
+  Send,
 } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import api from '../utils/api.js';
@@ -128,6 +130,67 @@ const OUTLET_META = {
   'Waschen Laundry Canadian': { short: 'Canadian', color: 'bg-green-100 text-green-700' },
   'Waschen Citra Grand': { short: 'Citra Grand', color: 'bg-pink-100 text-pink-700' },
   'Waschen Laundry Kota Wisata': { short: 'Kota Wisata', color: 'bg-blue-100 text-blue-700' },
+};
+
+const OUTLET_WA_LINK = {
+  'Waschen Laundry Raffles Hills': 'https://wa.me/6282219281920',
+  'Waschen Citra Grand': 'https://wa.me/6282127798574',
+  'Waschen Laundry Legenda Wisata': 'https://wa.me/6285122332217',
+  'Waschen Laundry Canadian': 'https://wa.me/6285188188391',
+  'Waschen Laundry Kota Wisata': 'https://wa.me/628977300965',
+};
+
+const buildNotifPreviewText = (tracking) => {
+  const waLink = OUTLET_WA_LINK[tracking.outlet] || '#';
+  const isLunas = (tracking.pembayaran || '').toLowerCase() === 'lunas';
+  const statusText = isLunas ? 'Lunas' : 'Belum Lunas';
+  const formattedTagihan = tracking.total_tagihan
+    ? `Rp ${Number(tracking.total_tagihan).toLocaleString('id-ID')}`
+    : 'Rp _';
+  const itemList = `1. ${tracking.nama_item || '-'}`;
+
+  if (isLunas) {
+    return (
+      `Halo Kak, Kami dari Cleanox by Waschen 😊\n` +
+      `Khusus layanan pencucian item besar seperti karpet, stroller, boneka, dll.\n\n` +
+      `Minox ingin menginformasikan bahwa item Kakak sudah selesai diproses & siap diambil di ${tracking.outlet || '-'} 🙌\n\n` +
+      `Detail:\n` +
+      `* Nama: ${tracking.customer_nama || '-'}\n` +
+      `* No. Nota: ${tracking.no_nota || '-'}\n` +
+      `* Item:\n${itemList}\n` +
+      `* Total Tagihan: ${formattedTagihan}\n` +
+      `* Status: ${statusText}\n\n` +
+      `Item bisa langsung diambil atau dijadwalkan pengantaran 🚚\n` +
+      `Jadwal pengantaran:\n` +
+      `* Selasa\n` +
+      `* Kamis\n` +
+      `* Sabtu\n\n` +
+      `Mohon konfirmasinya agar item tetap dalam kondisi fresh & siap digunakan ✨\n` +
+      `Terima kasih 🙏`
+    );
+  }
+  return (
+    `Halo Kak, Kami dari Cleanox by Waschen 😊\n` +
+    `Khusus layanan pencucian item besar seperti karpet, stroller, boneka, dll.\n\n` +
+    `Minox ingin menginformasikan bahwa item Kakak sudah selesai diproses & siap diambil di ${tracking.outlet || '-'} 🙌\n\n` +
+    `Detail:\n` +
+    `* Nama: ${tracking.customer_nama || '-'}\n` +
+    `* No. Nota: ${tracking.no_nota || '-'}\n` +
+    `* Item:\n${itemList}\n` +
+    `* Total Tagihan: ${formattedTagihan}\n` +
+    `* Status: ${statusText}\n\n` +
+    `Untuk mempercepat proses pengambilan, Kakak bisa langsung konfirmasi pembayaran melalui WhatsApp cabang di bawah ini ya 👇\n` +
+    `👉 ${waLink}\n\n` +
+    `Setelah pembayaran, item bisa langsung diambil atau dijadwalkan pengantaran 🚚\n\n` +
+    `Jadwal pengantaran:\n` +
+    `* Selasa\n` +
+    `* Kamis\n` +
+    `* Sabtu\n\n` +
+    `Catatan:\n` +
+    `Item akan diprioritaskan untuk pengantaran setelah pembayaran dikonfirmasi ya Kak 🙏\n\n` +
+    `Kami sarankan untuk segera diproses agar item tetap dalam kondisi fresh & siap digunakan ✨\n` +
+    `Terima kasih 🙏`
+  );
 };
 const outletMeta = (name) => OUTLET_META[name] || { short: name, color: 'bg-brand-100 text-brand-700' };
 
@@ -793,6 +856,10 @@ function TrackingModal({ show, onClose, row, userRole }) {
   const [savingCatatan, setSavingCatatan] = useState(false);
   const [editingStage, setEditingStage] = useState(null); // stage key admin is overriding
   const [onHoldSuccess, setOnHoldSuccess] = useState(false);
+  const [deletingStage, setDeletingStage] = useState(null); // stage key pending delete confirm
+  const [showNotifPreview, setShowNotifPreview] = useState(false);
+  const [sendingNotif, setSendingNotif] = useState(false);
+  const [notifSent, setNotifSent] = useState(false);
 
   useEffect(() => {
     if (!show) return;
@@ -816,6 +883,10 @@ function TrackingModal({ show, onClose, row, userRole }) {
     setDecisionCatatan('');
     setEditingStage(null);
     setOnHoldSuccess(false);
+    setDeletingStage(null);
+    setShowNotifPreview(false);
+    setSendingNotif(false);
+    setNotifSent(false);
 
     const fetchAll = async () => {
       try {
@@ -885,8 +956,50 @@ function TrackingModal({ show, onClose, row, userRole }) {
     }
   };
 
-  const handleDecision = async (decision) => {
-    setSavingDecision(true);
+  const handleClearStage = async (stageKey) => {
+    setSaving(stageKey + '_clear');
+    try {
+      const { data } = await api.delete('/cleanox-by-waschen-production/tracking', {
+        data: { id: row.id, stage: stageKey },
+      });
+      // Refresh full tracking
+      const refreshed = await api.get('/cleanox-by-waschen-production/tracking', {
+        params: { id: row.id },
+      });
+      setTracking(refreshed.data.tracking);
+      // Reset form fields for all cleared stages
+      const form = {};
+      for (const stage of STAGES) {
+        const byVal = refreshed.data.tracking[stage.byCol];
+        const atVal = refreshed.data.tracking[stage.atCol];
+        form[stage.key] = {
+          employees: Array.isArray(byVal) ? byVal : [],
+          timestamp: toLocalDateTimeInput(atVal),
+        };
+      }
+      setStageForm(form);
+      setDeletingStage(null);
+      setEditingStage(null);
+    } catch (err) {
+      alert(err.response?.data?.message || 'Gagal menghapus progres');
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const handleSendNotif = async () => {
+    setSendingNotif(true);
+    try {
+      await api.post('/cleanox-by-waschen-production/notify-customer', { id: row.id });
+      setNotifSent(true);
+    } catch (err) {
+      alert(err.response?.data?.message || 'Gagal mengirim notifikasi');
+    } finally {
+      setSendingNotif(false);
+    }
+  };
+
+  const handleDecision = async (decision) => {    setSavingDecision(true);
     try {
       await api.patch('/cleanox-by-waschen-production/cuci-jemur/decision', {
         id: row.id,
@@ -1157,13 +1270,41 @@ function TrackingModal({ show, onClose, row, userRole }) {
                                   <span className={sc.text}>{fmtDateTime(atVal)}</span>
                                 </div>
                                 {canEditFilled && (
-                                  <button
-                                    onClick={() => setEditingStage(stage.key)}
-                                    title="Koreksi (Admin)"
-                                    className="ml-auto flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded border border-gray-300 text-gray-500 hover:border-brand-400 hover:text-brand-600 transition-colors"
-                                  >
-                                    <Pencil className="w-2.5 h-2.5" /> Koreksi
-                                  </button>
+                                  <div className="ml-auto flex items-center gap-1">
+                                    <button
+                                      onClick={() => setEditingStage(stage.key)}
+                                      title="Koreksi (Admin)"
+                                      className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded border border-gray-300 text-gray-500 hover:border-brand-400 hover:text-brand-600 transition-colors"
+                                    >
+                                      <Pencil className="w-2.5 h-2.5" /> Koreksi
+                                    </button>
+                                    {deletingStage === stage.key ? (
+                                      <>
+                                        <button
+                                          onClick={() => handleClearStage(stage.key)}
+                                          disabled={saving === stage.key + '_clear'}
+                                          className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded border border-red-400 bg-red-500 text-white hover:bg-red-600 transition-colors disabled:opacity-60"
+                                        >
+                                          {saving === stage.key + '_clear' ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Check className="w-2.5 h-2.5" />} Ya, Hapus
+                                        </button>
+                                        <button
+                                          onClick={() => setDeletingStage(null)}
+                                          disabled={saving === stage.key + '_clear'}
+                                          className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded border border-gray-300 text-gray-500 hover:bg-gray-50 transition-colors"
+                                        >
+                                          Batal
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <button
+                                        onClick={() => { setDeletingStage(stage.key); setEditingStage(null); }}
+                                        title="Hapus progres ini (Admin)"
+                                        className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded border border-red-200 text-red-500 hover:border-red-400 hover:bg-red-50 transition-colors"
+                                      >
+                                        <Trash2 className="w-2.5 h-2.5" /> Hapus
+                                      </button>
+                                    )}
+                                  </div>
                                 )}
                               </div>
                               {stage.key === 'Cuci Jemur' && (
@@ -1171,6 +1312,11 @@ function TrackingModal({ show, onClose, row, userRole }) {
                                   <Calendar className="w-3 h-3 flex-shrink-0" />
                                   <span className={sc.text}>Estimasi selesai Maks: {fmtDateTime(deadlineVal)}</span>
                                 </div>
+                              )}
+                              {deletingStage === stage.key && (
+                                <p className="text-[10px] text-red-600 mt-1">
+                                  ⚠ Semua progres setelah <strong>{stage.label}</strong> juga akan ikut dihapus.
+                                </p>
                               )}
                             </div>
                           )}
@@ -1311,10 +1457,27 @@ function TrackingModal({ show, onClose, row, userRole }) {
 
               {/* Completed banner */}
               {currentStageIdx === STAGES.length - 1 && (
-                <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
-                  <Check className="w-5 h-5 text-green-600 mx-auto mb-1" />
-                  <p className="text-sm font-semibold text-green-700">Semua proses selesai!</p>
-                </div>
+                <>
+                  <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
+                    <Check className="w-5 h-5 text-green-600 mx-auto mb-1" />
+                    <p className="text-sm font-semibold text-green-700">Semua proses selesai!</p>
+                  </div>
+                  {userRole === 'admin' && tracking?.all_nota_complete && (
+                    <button
+                      onClick={() => setShowNotifPreview(true)}
+                      className="w-full py-2.5 text-sm font-semibold rounded-xl bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-800 transition-colors flex items-center justify-center gap-2"
+                    >
+                      <MessageSquare className="w-4 h-4" />
+                      Kirim Notifikasi Ke Customer
+                    </button>
+                  )}
+                  {userRole === 'admin' && !tracking?.all_nota_complete && (
+                    <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-700">
+                      <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                      <span>Notifikasi belum bisa dikirim. Masih ada item lain dalam nota <strong>{tracking?.no_nota}</strong> yang belum selesai.</span>
+                    </div>
+                  )}
+                </>
               )}
 
               {/* Catatan Cleanox */}
@@ -1375,6 +1538,95 @@ function TrackingModal({ show, onClose, row, userRole }) {
           )}
         </div>
       </div>
+
+      {/* Notification Preview Modal */}
+      {showNotifPreview && tracking && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          onClick={() => { if (!sendingNotif) setShowNotifPreview(false); }}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col max-h-[85vh] animate-fade-in"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+              <div>
+                <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4 text-blue-600" />
+                  Preview Notifikasi WhatsApp
+                </h3>
+                <p className="text-xs text-gray-400 mt-0.5">Pesan yang akan dikirim ke customer</p>
+              </div>
+              <button
+                onClick={() => setShowNotifPreview(false)}
+                disabled={sendingNotif}
+                className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-40"
+              >
+                <X className="w-4 h-4 text-gray-400" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+              <div className="bg-gray-50 rounded-lg p-3 text-xs space-y-1">
+                <div className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">Kepada:</span>
+                  <span className="font-semibold text-gray-800">
+                    {tracking.customer_nama || '-'}
+                    {tracking.customer_telepon ? ` (${tracking.customer_telepon})` : ''}
+                  </span>
+                </div>
+                <div className="flex gap-2">
+                  <span className="text-gray-400 flex-shrink-0">No. Nota:</span>
+                  <span className="font-mono font-semibold text-gray-800">{tracking.no_nota || '-'}</span>
+                </div>
+              </div>
+
+              {tracking.no_nota && (
+                <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  ⚠ Semua item dengan No. Nota <strong>{tracking.no_nota}</strong> akan disertakan otomatis dalam pesan ini.
+                </p>
+              )}
+
+              <div className="bg-[#dcf8c6] border border-green-200 rounded-xl p-3">
+                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Preview Pesan</p>
+                <pre className="text-xs text-gray-800 whitespace-pre-wrap font-sans leading-relaxed">
+                  {buildNotifPreviewText(tracking)}
+                </pre>
+              </div>
+
+              {notifSent && (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center gap-2 justify-center">
+                  <Check className="w-4 h-4 text-emerald-600" />
+                  <p className="text-sm font-semibold text-emerald-700">Notifikasi berhasil dikirim!</p>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-5 py-4 border-t border-gray-100 flex gap-3 flex-shrink-0">
+              <button
+                onClick={() => setShowNotifPreview(false)}
+                disabled={sendingNotif}
+                className="flex-1 py-2 text-sm font-semibold rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-60"
+              >
+                Batal
+              </button>
+              <button
+                onClick={handleSendNotif}
+                disabled={sendingNotif || notifSent}
+                className="flex-1 py-2 text-sm font-semibold rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {sendingNotif
+                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                  : <Send className="w-4 h-4" />}
+                {notifSent ? 'Terkirim!' : sendingNotif ? 'Mengirim...' : 'Kirim Notifikasi'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -6,7 +6,7 @@ import sharp from 'sharp';
 import cleanoxPool from '../db/cleanox.js';
 
 const TRANSAKSI_TABLE = process.env.NODE_ENV === 'development'
-  ? 'rekap_transaksi_reguler'
+  ? 'rekap_transaksi_reguler_dev'
   : 'rekap_transaksi_reguler';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -111,7 +111,8 @@ export const uploadEvidance = async (req, res) => {
         .slice(0, 60);
 
     const noNota   = slug(row.no_nota);
-    const safeName = `${stage}_${noNota}${ext}`;
+    const itemId   = String(id);
+    const safeName = `${stage}_${noNota}_${itemId}${ext}`;
     const filePath = path.join(UPLOAD_BASE, safeName);
 
     // Delete old file if exists (and different name)
