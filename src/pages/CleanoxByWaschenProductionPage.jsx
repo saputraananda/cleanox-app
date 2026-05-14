@@ -854,8 +854,12 @@ function TrackingModal({ show, onClose, row, userRole }) {
   const [decisionCatatan, setDecisionCatatan] = useState('');
   const [savingDecision, setSavingDecision] = useState(false);
   const [savingCatatan, setSavingCatatan] = useState(false);
+  const [catatanSuccess, setCatatanSuccess] = useState(false);
+  const [editingCatatan, setEditingCatatan] = useState(false);
   const [editingStage, setEditingStage] = useState(null); // stage key admin is overriding
   const [onHoldSuccess, setOnHoldSuccess] = useState(false);
+  const [showOnHoldConfirm, setShowOnHoldConfirm] = useState(false);
+  const [validationMsg, setValidationMsg] = useState(null);
   const [deletingStage, setDeletingStage] = useState(null); // stage key pending delete confirm
   const [showNotifPreview, setShowNotifPreview] = useState(false);
   const [sendingNotif, setSendingNotif] = useState(false);
@@ -929,8 +933,11 @@ function TrackingModal({ show, onClose, row, userRole }) {
         catatan: catatan.trim() || null,
       });
       setTracking((prev) => ({ ...prev, catatan_by_cleanox: catatan.trim() || null }));
+      setEditingCatatan(false);
+      setCatatanSuccess(true);
+      window.setTimeout(() => setCatatanSuccess(false), 2500);
     } catch (err) {
-      alert(err.response?.data?.message || 'Gagal menyimpan catatan');
+      setValidationMsg(err.response?.data?.message || 'Gagal menyimpan catatan');
     } finally {
       setSavingCatatan(false);
     }
@@ -1020,7 +1027,7 @@ function TrackingModal({ show, onClose, row, userRole }) {
 
   const handleSaveStage = async (stageKey) => {
     const form = stageForm[stageKey];
-    if (!form || form.employees.length === 0) return alert('Pilih minimal 1 pegawai');
+    if (!form || form.employees.length === 0) { setValidationMsg('Pilih minimal 1 pegawai sebelum menyimpan.'); return; }
 
     setSaving(stageKey);
     try {
@@ -1207,7 +1214,7 @@ function TrackingModal({ show, onClose, row, userRole }) {
                 {STAGES.map((stage, idx) => {
                   const sc = STAGE_COLORS[stage.color];
                   const filled = !!tracking[stage.atCol];
-                  const isActive = idx === currentStageIdx + 1 && canFillNext && !productionLocked;
+                  const isActive = idx === currentStageIdx + 1 && canFillNext && !productionLocked && (userRole === 'admin' || !tracking?.on_hold);
                   const isEditing = filled && canEditFilled && editingStage === stage.key;
                   const Icon = stage.icon;
                   const form = stageForm[stage.key] || { employees: [], timestamp: '' };
@@ -1410,7 +1417,7 @@ function TrackingModal({ show, onClose, row, userRole }) {
                               {stage.key === 'Cuci Jemur' && (userRole === 'cleanox' || userRole === 'admin') && (
                                 <>
                                   <button
-                                    onClick={handleRequestOnHold}
+                                    onClick={() => setShowOnHoldConfirm(true)}
                                     disabled={saving === 'on_hold'}
                                     className={`w-full py-1.5 text-xs font-semibold rounded-lg border transition-colors flex items-center justify-center gap-1.5 ${onHoldSuccess
                                       ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
@@ -1482,16 +1489,55 @@ function TrackingModal({ show, onClose, row, userRole }) {
 
               {/* Catatan Cleanox */}
               <div className="border-t border-gray-100 pt-4 space-y-2">
-                <label className="text-xs font-semibold text-gray-600 uppercase tracking-wider block">
-                  Catatan Dari Team Cleanox (Opsional)
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                    Catatan Dari Team Cleanox (Opsional)
+                  </label>
+                  {catatanSuccess && (
+                    <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-600 animate-pulse">
+                      <Check className="w-3 h-3" /> Catatan tersimpan!
+                    </span>
+                  )}
+                </div>
                 {userRole === 'frontliner' ? (
                   /* Read-only view for frontliner */
                   <div className={`px-3 py-2.5 text-xs rounded-lg border ${tracking?.catatan_by_cleanox ? 'bg-gray-50 border-gray-200 text-gray-800' : 'bg-gray-50 border-gray-200 text-gray-400 italic'}`}>
                     {tracking?.catatan_by_cleanox || 'Catatan Kosong'}
                   </div>
+                ) : tracking?.catatan_by_cleanox && !editingCatatan ? (
+                  /* View mode — catatan sudah ada */
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-2">
+                    <p className="text-xs text-gray-800 whitespace-pre-wrap">{tracking.catatan_by_cleanox}</p>
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        onClick={() => { setCatatan(tracking.catatan_by_cleanox); setEditingCatatan(true); }}
+                        className="flex items-center gap-1 px-3 py-1.5 text-[10px] font-semibold rounded-lg border border-brand-200 text-brand-700 hover:bg-brand-50 transition-colors"
+                      >
+                        <Pencil className="w-3 h-3" /> Edit
+                      </button>
+                      <button
+                        onClick={async () => {
+                          setSavingCatatan(true);
+                          try {
+                            await api.patch('/cleanox-by-waschen-production/catatan', { id: row.id, catatan: null });
+                            setTracking((prev) => ({ ...prev, catatan_by_cleanox: null }));
+                            setCatatan('');
+                            setCatatanSuccess(false);
+                          } catch (err) {
+                            setValidationMsg(err.response?.data?.message || 'Gagal menghapus catatan');
+                          } finally {
+                            setSavingCatatan(false);
+                          }
+                        }}
+                        disabled={savingCatatan}
+                        className="flex items-center gap-1 px-3 py-1.5 text-[10px] font-semibold rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-60 transition-colors"
+                      >
+                        {savingCatatan ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />} Hapus
+                      </button>
+                    </div>
+                  </div>
                 ) : (
-                  /* Editable for cleanox, admin, and others */
+                  /* Edit / input mode */
                   <>
                     <textarea
                       rows={3}
@@ -1509,25 +1555,13 @@ function TrackingModal({ show, onClose, row, userRole }) {
                         {savingCatatan ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
                         Simpan Catatan
                       </button>
-                      {tracking?.catatan_by_cleanox && (
+                      {editingCatatan && (
                         <button
-                          onClick={async () => {
-                            setCatatan('');
-                            setSavingCatatan(true);
-                            try {
-                              await api.patch('/cleanox-by-waschen-production/catatan', { id: row.id, catatan: null });
-                              setTracking((prev) => ({ ...prev, catatan_by_cleanox: null }));
-                            } catch (err) {
-                              alert(err.response?.data?.message || 'Gagal menghapus catatan');
-                            } finally {
-                              setSavingCatatan(false);
-                            }
-                          }}
+                          onClick={() => { setEditingCatatan(false); setCatatan(tracking?.catatan_by_cleanox || ''); }}
                           disabled={savingCatatan}
-                          title="Hapus catatan"
-                          className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-60 transition-colors"
+                          className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 disabled:opacity-60 transition-colors"
                         >
-                          <X className="w-3.5 h-3.5" />
+                          Batal
                         </button>
                       )}
                     </div>
@@ -1538,6 +1572,85 @@ function TrackingModal({ show, onClose, row, userRole }) {
           )}
         </div>
       </div>
+
+      {/* On Hold Confirmation Modal */}
+      {showOnHoldConfirm && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          onClick={() => setShowOnHoldConfirm(false)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-sm animate-fade-in"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 pt-5 pb-4">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center flex-shrink-0">
+                  <AlertCircle className="w-5 h-5 text-rose-600" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-gray-900">Konfirmasi On Hold</h3>
+                  <p className="text-xs text-gray-400">Tindakan ini akan menunda progres item</p>
+                </div>
+              </div>
+              <p className="text-xs text-gray-600 leading-relaxed">
+                Anda yakin ingin men-<strong>tunda (On Hold)</strong> item ini?
+                Status akan berubah menjadi <span className="font-semibold text-rose-600">Tertunda</span> dan
+                tim Frontliner akan mendapat notifikasi untuk melakukan pengecekan ulang.
+              </p>
+            </div>
+            <div className="px-5 pb-5 flex gap-2">
+              <button
+                onClick={() => setShowOnHoldConfirm(false)}
+                className="flex-1 py-2 text-xs font-semibold rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
+              >
+                Batal
+              </button>
+              <button
+                onClick={() => { setShowOnHoldConfirm(false); handleRequestOnHold(); }}
+                disabled={saving === 'on_hold'}
+                className="flex-1 py-2 text-xs font-semibold rounded-xl bg-rose-600 text-white hover:bg-rose-700 transition-colors disabled:opacity-60"
+              >
+                Ya, On Hold
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Validation Alert Modal */}
+      {validationMsg && (
+        <div
+          className="fixed inset-0 z-[300] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+          onClick={() => setValidationMsg(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-xs animate-fade-in"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 pt-5 pb-4">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+                  <AlertCircle className="w-5 h-5 text-amber-600" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-gray-900">Perhatian</h3>
+                  <p className="text-xs text-gray-400">Mohon lengkapi data terlebih dahulu</p>
+                </div>
+              </div>
+              <p className="text-sm text-gray-700">{validationMsg}</p>
+            </div>
+            <div className="px-5 pb-5">
+              <button
+                onClick={() => setValidationMsg(null)}
+                className="w-full py-2 text-sm font-semibold rounded-xl bg-amber-500 text-white hover:bg-amber-600 transition-colors"
+              >
+                Mengerti
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Notification Preview Modal */}
       {showNotifPreview && tracking && (

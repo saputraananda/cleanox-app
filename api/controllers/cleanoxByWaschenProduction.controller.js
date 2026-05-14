@@ -628,6 +628,7 @@ export const updateTracking = async (req, res) => {
       `${col.by} = ?`,
       `${col.at} = ?`,
       'status = ?',
+      'on_hold = 0',
       'updated_by = ?',
       'updated_at = NOW()',
     ];
