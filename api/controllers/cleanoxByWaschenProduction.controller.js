@@ -15,8 +15,8 @@ const OUTLET_NUMBER = {
 
 /* ── WAHA WhatsApp notification ───────────────────────── */
 const OUTLET_MENTION = {
-  'Waschen Laundry Raffles Hills': ['6289530162883@c.us', '62895358199284@c.us'],
-  'Waschen Citra Grand': ['6289616020108@c.us'],
+  'Waschen Laundry Raffles Hills': ['6289530162883@c.us', '6289501426161@c.us'],
+  'Waschen Citra Grand': ['6289616020108@c.us', '6285715225947@c.us'],
   'Waschen Laundry Legenda Wisata': ['62895333561086@c.us'],
   'Waschen Laundry Canadian': ['6283896334423@c.us'],
   'Waschen Laundry Kota Wisata': ['628977300965@c.us'],
