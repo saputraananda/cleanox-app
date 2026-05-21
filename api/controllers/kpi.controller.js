@@ -115,7 +115,7 @@ export const getKpiSummary = async (req, res) => {
       ];
       for (const { names, key } of stages) {
         for (const name of names) {
-          if (!name) continue;
+          if (!name || name === 'Admin') continue;
           const emp = ensure(name);
           emp[key] += 1;
         }

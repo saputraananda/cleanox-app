@@ -88,7 +88,7 @@ async function sendOnHoldWaNotification({ id, no_nota, customer_nama, nama_item,
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 20000); // 20s timeout per attempt
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s
 
       const resp = await fetch(`${wahaUrl}/api/sendText`, {
         method: 'POST',
@@ -136,6 +136,7 @@ async function sendPengantaranNotificationToCustomer({
   outlet,
   total_tagihan,
   pembayaran,
+  custom_text, // optional: override generated message
 }) {
   const wahaUrl = process.env.WAHA_URL;
   const wahaApiKey = process.env.WAHA_API_KEY;
@@ -158,7 +159,6 @@ async function sendPengantaranNotificationToCustomer({
 
   const waLink = OUTLET_WHATSAPP_LINK[outlet] || '#';
   const isLunas = (pembayaran || '').toLowerCase() === 'lunas';
-  const statusText = isLunas ? 'Lunas' : 'Belum Lunas';
   const formattedTagihan = total_tagihan
     ? `Rp ${Number(total_tagihan).toLocaleString('id-ID')}`
     : 'Rp _';
@@ -176,8 +176,7 @@ async function sendPengantaranNotificationToCustomer({
       `* Nama: ${customer_nama || '-'}\n` +
       `* No. Nota: ${no_nota || '-'}\n` +
       `* Item:\n${itemList}\n` +
-      `* Total Tagihan: ${formattedTagihan}\n` +
-      `* Status: ${statusText}\n\n` +
+      `* Status: Lunas\n\n` +
       `Item bisa langsung diambil atau dijadwalkan pengantaran 🚚\n` +
       `Jadwal pengantaran:\n` +
       `* Selasa\n` +
@@ -194,8 +193,7 @@ async function sendPengantaranNotificationToCustomer({
       `* Nama: ${customer_nama || '-'}\n` +
       `* No. Nota: ${no_nota || '-'}\n` +
       `* Item:\n${itemList}\n` +
-      `* Total Tagihan: ${formattedTagihan}\n` +
-      `* Status: ${statusText}\n\n` +
+      `* Total Tagihan: ${formattedTagihan}\n\n` +
       `Untuk mempercepat proses pengambilan, Kakak bisa langsung konfirmasi pembayaran melalui WhatsApp cabang di bawah ini ya 👇\n` +
       `👉 ${waLink}\n\n` +
       `Setelah pembayaran, item bisa langsung diambil atau dijadwalkan pengantaran 🚚\n\n` +
@@ -205,15 +203,19 @@ async function sendPengantaranNotificationToCustomer({
       `* Sabtu\n\n` +
       `Catatan:\n` +
       `Item akan diprioritaskan untuk pengantaran setelah pembayaran dikonfirmasi ya Kak 🙏\n\n` +
-      `Kami sarankan untuk segera diproses agar item tetap dalam kondisi fresh & siap digunakan ✨\n` +
       `Terima kasih 🙏`;
+  }
+
+  // Allow admin to override the generated text with a custom message
+  if (custom_text && typeof custom_text === 'string' && custom_text.trim()) {
+    text = custom_text.trim();
   }
 
   const body = { session: wahaSession, chatId, text };
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s — WAHA bisa lambat
 
     const resp = await fetch(`${wahaUrl}/api/sendText`, {
       method: 'POST',
@@ -233,7 +235,7 @@ async function sendPengantaranNotificationToCustomer({
     console.error(`[production/pengantaranNotif] WAHA failed: ${resp.status} - ${errText}`);
     return { success: false, reason: `WAHA error: ${resp.status}` };
   } catch (err) {
-    const reason = err.name === 'AbortError' ? 'timeout' : err.message;
+    const reason = err.name === 'AbortError' ? 'timeout (60s)' : err.message;
     console.error(`[production/pengantaranNotif] Error: ${reason}`);
     return { success: false, reason };
   }
@@ -916,7 +918,7 @@ export const decideCuciJemur = async (req, res) => {
 
 /* ── Manual customer notification (Admin only) ───────── */
 export const sendManualCustomerNotification = async (req, res) => {
-  const { id } = req.body;
+  const { id, custom_text } = req.body;
   if (!id) return res.status(400).json({ message: 'id wajib diisi' });
 
   if (req.user?.role !== 'admin') {
@@ -956,6 +958,7 @@ export const sendManualCustomerNotification = async (req, res) => {
       outlet: main.outlet,
       total_tagihan: main.total_tagihan,
       pembayaran: main.pembayaran,
+      custom_text: custom_text || undefined,
     });
 
     if (result.success) {

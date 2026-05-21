@@ -143,7 +143,6 @@ const OUTLET_WA_LINK = {
 const buildNotifPreviewText = (tracking) => {
   const waLink = OUTLET_WA_LINK[tracking.outlet] || '#';
   const isLunas = (tracking.pembayaran || '').toLowerCase() === 'lunas';
-  const statusText = isLunas ? 'Lunas' : 'Belum Lunas';
   const formattedTagihan = tracking.total_tagihan
     ? `Rp ${Number(tracking.total_tagihan).toLocaleString('id-ID')}`
     : 'Rp _';
@@ -158,8 +157,7 @@ const buildNotifPreviewText = (tracking) => {
       `* Nama: ${tracking.customer_nama || '-'}\n` +
       `* No. Nota: ${tracking.no_nota || '-'}\n` +
       `* Item:\n${itemList}\n` +
-      `* Total Tagihan: ${formattedTagihan}\n` +
-      `* Status: ${statusText}\n\n` +
+      `* Status: Lunas\n\n` +
       `Item bisa langsung diambil atau dijadwalkan pengantaran 🚚\n` +
       `Jadwal pengantaran:\n` +
       `* Selasa\n` +
@@ -177,8 +175,7 @@ const buildNotifPreviewText = (tracking) => {
     `* Nama: ${tracking.customer_nama || '-'}\n` +
     `* No. Nota: ${tracking.no_nota || '-'}\n` +
     `* Item:\n${itemList}\n` +
-    `* Total Tagihan: ${formattedTagihan}\n` +
-    `* Status: ${statusText}\n\n` +
+    `* Total Tagihan: ${formattedTagihan}\n\n` +
     `Untuk mempercepat proses pengambilan, Kakak bisa langsung konfirmasi pembayaran melalui WhatsApp cabang di bawah ini ya 👇\n` +
     `👉 ${waLink}\n\n` +
     `Setelah pembayaran, item bisa langsung diambil atau dijadwalkan pengantaran 🚚\n\n` +
@@ -188,7 +185,6 @@ const buildNotifPreviewText = (tracking) => {
     `* Sabtu\n\n` +
     `Catatan:\n` +
     `Item akan diprioritaskan untuk pengantaran setelah pembayaran dikonfirmasi ya Kak 🙏\n\n` +
-    `Kami sarankan untuk segera diproses agar item tetap dalam kondisi fresh & siap digunakan ✨\n` +
     `Terima kasih 🙏`
   );
 };
@@ -864,6 +860,7 @@ function TrackingModal({ show, onClose, row, userRole }) {
   const [showNotifPreview, setShowNotifPreview] = useState(false);
   const [sendingNotif, setSendingNotif] = useState(false);
   const [notifSent, setNotifSent] = useState(false);
+  const [notifText, setNotifText] = useState('');
 
   useEffect(() => {
     if (!show) return;
@@ -891,6 +888,7 @@ function TrackingModal({ show, onClose, row, userRole }) {
     setShowNotifPreview(false);
     setSendingNotif(false);
     setNotifSent(false);
+    setNotifText('');
 
     const fetchAll = async () => {
       try {
@@ -901,7 +899,12 @@ function TrackingModal({ show, onClose, row, userRole }) {
           (userRole === 'cleanox' || userRole === 'admin') ? api.get('/cleanox-by-waschen-production/employees') : Promise.resolve({ data: { employees: [] } }),
         ]);
         setTracking(trackRes.data.tracking);
-        setEmployees(empRes.data.employees || []);
+        const empList = empRes.data.employees || [];
+        // Add "Admin" option for admin users (won't count in KPI)
+        if (userRole === 'admin') {
+          empList.unshift({ id: '__admin__', name: 'Admin' });
+        }
+        setEmployees(empList);
         setCatatan(trackRes.data.tracking?.catatan_by_cleanox || '');
         setDecisionCatatan(trackRes.data.tracking?.catatan_cuci_jemur || '');
 
@@ -997,7 +1000,10 @@ function TrackingModal({ show, onClose, row, userRole }) {
   const handleSendNotif = async () => {
     setSendingNotif(true);
     try {
-      await api.post('/cleanox-by-waschen-production/notify-customer', { id: row.id });
+      await api.post('/cleanox-by-waschen-production/notify-customer', {
+        id: row.id,
+        custom_text: notifText || undefined,
+      });
       setNotifSent(true);
     } catch (err) {
       alert(err.response?.data?.message || 'Gagal mengirim notifikasi');
@@ -1471,7 +1477,7 @@ function TrackingModal({ show, onClose, row, userRole }) {
                   </div>
                   {userRole === 'admin' && tracking?.all_nota_complete && (
                     <button
-                      onClick={() => setShowNotifPreview(true)}
+                      onClick={() => { setNotifText(buildNotifPreviewText(tracking)); setShowNotifPreview(true); }}
                       className="w-full py-2.5 text-sm font-semibold rounded-xl bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-800 transition-colors flex items-center justify-center gap-2"
                     >
                       <MessageSquare className="w-4 h-4" />
@@ -1703,10 +1709,17 @@ function TrackingModal({ show, onClose, row, userRole }) {
               )}
 
               <div className="bg-[#dcf8c6] border border-green-200 rounded-xl p-3">
-                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">Preview Pesan</p>
-                <pre className="text-xs text-gray-800 whitespace-pre-wrap font-sans leading-relaxed">
-                  {buildNotifPreviewText(tracking)}
-                </pre>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Preview Pesan</p>
+                  <span className="text-[10px] text-gray-400 italic">Bisa diedit sebelum kirim</span>
+                </div>
+                <textarea
+                  className="w-full text-xs text-gray-800 whitespace-pre-wrap font-sans leading-relaxed bg-transparent border-none outline-none resize-none min-h-[280px]"
+                  value={notifText}
+                  onChange={(e) => setNotifText(e.target.value)}
+                  disabled={sendingNotif || notifSent}
+                  rows={16}
+                />
               </div>
 
               {notifSent && (
