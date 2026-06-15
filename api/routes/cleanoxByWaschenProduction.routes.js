@@ -13,6 +13,8 @@ import {
   decideCuciJemur,
   subscribeEvents,
   sendManualCustomerNotification,
+  deleteItem,
+  getNotaItemCount,
 } from '../controllers/cleanoxByWaschenProduction.controller.js';
 
 const router = Router();
@@ -43,5 +45,7 @@ router.patch('/catatan', updateCatatan);
 router.patch('/on-hold', requestOnHold);
 router.patch('/cuci-jemur/decision', decideCuciJemur);
 router.post('/notify-customer', sendManualCustomerNotification);
+router.delete('/item', deleteItem);
+router.get('/nota-item-count', getNotaItemCount);
 
 export default router;

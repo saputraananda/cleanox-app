@@ -916,6 +916,109 @@ export const decideCuciJemur = async (req, res) => {
   }
 };
 
+/* ── Delete item(s) — admin only ─────────────────────── */
+export const deleteItem = async (req, res) => {
+  const { id, scope } = req.body; // scope: 'item' | 'nota'
+  if (!id) {
+    return res.status(400).json({ message: 'id wajib diisi' });
+  }
+  if (req.user?.role !== 'admin') {
+    return res.status(403).json({ message: 'Hanya admin yang bisa menghapus item' });
+  }
+
+  try {
+    // First get the item to know its no_nota
+    const [[item]] = await cleanoxPool.query(
+      `SELECT id, no_nota, nama_item, customer_nama FROM ${TRANSAKSI_TABLE} WHERE id = ?`,
+      [id]
+    );
+    if (!item) {
+      return res.status(404).json({ message: 'Data tidak ditemukan' });
+    }
+
+    let deletedCount = 0;
+    let deletedIds = [];
+
+    if (scope === 'nota' && item.no_nota) {
+      // Delete all items with same no_nota (cleanox/karpet only)
+      const [toDelete] = await cleanoxPool.query(
+        `SELECT id FROM ${TRANSAKSI_TABLE}
+         WHERE no_nota = ?
+           AND (LOWER(COALESCE(nama_item,'')) LIKE '%cleanox%'
+             OR LOWER(COALESCE(nama_item,'')) LIKE '%karpet%')`,
+        [item.no_nota]
+      );
+      deletedIds = toDelete.map((r) => r.id);
+      const [result] = await cleanoxPool.query(
+        `DELETE FROM ${TRANSAKSI_TABLE}
+         WHERE no_nota = ?
+           AND (LOWER(COALESCE(nama_item,'')) LIKE '%cleanox%'
+             OR LOWER(COALESCE(nama_item,'')) LIKE '%karpet%')`,
+        [item.no_nota]
+      );
+      deletedCount = result.affectedRows;
+    } else {
+      // Delete single item
+      const [result] = await cleanoxPool.query(
+        `DELETE FROM ${TRANSAKSI_TABLE} WHERE id = ?`,
+        [id]
+      );
+      deletedCount = result.affectedRows;
+      deletedIds = [id];
+    }
+
+    if (deletedCount === 0) {
+      return res.status(404).json({ message: 'Data tidak ditemukan' });
+    }
+
+    // Broadcast deletion for each deleted id
+    for (const delId of deletedIds) {
+      broadcast({ id: delId, deleted: true });
+    }
+
+    return res.json({
+      message: scope === 'nota'
+        ? `${deletedCount} item dalam nota berhasil dihapus`
+        : 'Item berhasil dihapus',
+      deleted_count: deletedCount,
+    });
+  } catch (err) {
+    console.error('[production/deleteItem]', err.message);
+    return res.status(500).json({ message: 'Gagal menghapus item', error: err.message });
+  }
+};
+
+/* ── Check how many items share the same no_nota ──────── */
+export const getNotaItemCount = async (req, res) => {
+  const { id } = req.query;
+  if (!id) return res.status(400).json({ message: 'id wajib diisi' });
+
+  try {
+    const [[item]] = await cleanoxPool.query(
+      `SELECT no_nota FROM ${TRANSAKSI_TABLE} WHERE id = ?`,
+      [id]
+    );
+    if (!item) return res.status(404).json({ message: 'Data tidak ditemukan' });
+
+    let count = 1;
+    if (item.no_nota) {
+      const [[result]] = await cleanoxPool.query(
+        `SELECT COUNT(*) AS cnt FROM ${TRANSAKSI_TABLE}
+         WHERE no_nota = ?
+           AND (LOWER(COALESCE(nama_item,'')) LIKE '%cleanox%'
+             OR LOWER(COALESCE(nama_item,'')) LIKE '%karpet%')`,
+        [item.no_nota]
+      );
+      count = Number(result?.cnt || 1);
+    }
+
+    return res.json({ no_nota: item.no_nota, count });
+  } catch (err) {
+    console.error('[production/getNotaItemCount]', err.message);
+    return res.status(500).json({ message: 'Gagal mengambil data' });
+  }
+};
+
 /* ── Manual customer notification (Admin only) ───────── */
 export const sendManualCustomerNotification = async (req, res) => {
   const { id, custom_text } = req.body;

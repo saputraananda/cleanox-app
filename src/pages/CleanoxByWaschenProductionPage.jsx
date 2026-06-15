@@ -37,6 +37,7 @@ import {
   MessageSquare,
   Send,
 } from 'lucide-react';
+import Swal from 'sweetalert2';
 import { useSearchParams } from 'react-router-dom';
 import api from '../utils/api.js';
 import { getToken, getUser } from '../utils/auth.js';
@@ -201,7 +202,7 @@ const STATUS_STYLE = {
   'Tertunda': { bg: 'bg-rose-100', text: 'text-rose-700', border: 'border-rose-200' },
 };
 
-const COLS = [
+const COLS_BASE = [
   { key: 'no', label: 'No', align: 'center', filterable: false, w: 'w-10' },
   { key: 'outlet', label: 'Outlet', align: 'left', filterable: true },
   { key: 'no_nota', label: 'No Nota', align: 'left', filterable: true },
@@ -213,6 +214,8 @@ const COLS = [
   { key: 'status', label: 'Status', align: 'center', filterable: true },
   { key: 'lacak', label: 'Lacak', align: 'center', filterable: false, w: 'w-20' },
 ];
+
+const COL_AKSI = { key: 'aksi', label: 'Aksi', align: 'center', filterable: false, w: 'w-16' };
 
 /* ── Quick Range Dropdown ─────────────────────────────── */
 function QuickRangeDropdown({ ranges, onSelect, currentLabel }) {
@@ -1792,6 +1795,9 @@ export default function CleanoxByWaschenProductionPage() {
   // Tracking modal
   const [trackingRow, setTrackingRow] = useState(null);
 
+  const isAdmin = user?.role === 'admin';
+  const COLS = isAdmin ? [...COLS_BASE, COL_AKSI] : COLS_BASE;
+
   const abortRef = useRef(null);
 
   /* Deep-link: open_id query param → auto-open tracking modal */
@@ -1880,8 +1886,12 @@ export default function CleanoxByWaschenProductionPage() {
         const payload = JSON.parse(e.data);
         const has = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 
-        setRows((prev) =>
-          prev.map((r) =>
+        setRows((prev) => {
+          // Handle deletion broadcast — remove deleted rows
+          if (payload.deleted) {
+            return prev.filter((r) => r.id !== payload.id);
+          }
+          return prev.map((r) =>
             r.id === payload.id
               ? {
                 ...r,
@@ -1894,8 +1904,8 @@ export default function CleanoxByWaschenProductionPage() {
                 ...(has(payload, 'updated_at') ? { updated_at: payload.updated_at } : {}),
               }
               : r
-          )
-        );
+          );
+        });
 
         setTrackingRow((prev) => {
           if (!prev || prev.id !== payload.id) return prev;
@@ -2182,7 +2192,7 @@ export default function CleanoxByWaschenProductionPage() {
 
           {/* Table */}
           <div className="overflow-x-auto">
-            <table className="w-full text-xs sm:text-sm min-w-[1000px]">
+            <table className={`w-full text-xs sm:text-sm ${isAdmin ? 'min-w-[1080px]' : 'min-w-[1000px]'}`}>
               <thead>
                 <tr className="bg-gradient-to-r from-brand-900 to-brand-800 border-b border-brand-700">
                   {COLS.map((col) => (
@@ -2280,6 +2290,87 @@ export default function CleanoxByWaschenProductionPage() {
                           Lacak
                         </button>
                       </td>
+                      {isAdmin && (
+                        <td className="px-3 sm:px-4 py-2.5 text-center">
+                          <button
+                            onClick={async () => {
+                              try {
+                                // Check how many items share this nota
+                                const { data: notaInfo } = await api.get('/cleanox-by-waschen-production/nota-item-count', {
+                                  params: { id: row.id },
+                                });
+
+                                if (notaInfo.count <= 1) {
+                                  // Single item — simple confirm
+                                  const result = await Swal.fire({
+                                    icon: 'warning',
+                                    title: 'Hapus Item?',
+                                    html: `<p class="text-sm text-gray-600">Item <strong>${row.nama_item || '-'}</strong> (Nota: ${row.no_nota || '-'}) akan dihapus permanen.</p>`,
+                                    showCancelButton: true,
+                                    confirmButtonText: 'Ya, Hapus',
+                                    cancelButtonText: 'Batal',
+                                    confirmButtonColor: '#e11d48',
+                                  });
+                                  if (!result.isConfirmed) return;
+
+                                  await api.delete('/cleanox-by-waschen-production/item', {
+                                    data: { id: row.id, scope: 'item' },
+                                  });
+                                  setRows((prev) => prev.filter((r) => r.id !== row.id));
+                                  Swal.fire({ icon: 'success', title: 'Berhasil', text: 'Item berhasil dihapus', timer: 1800, showConfirmButton: false });
+                                } else {
+                                  // Multiple items in nota — ask scope
+                                  const result = await Swal.fire({
+                                    icon: 'warning',
+                                    title: 'Hapus Item',
+                                    html: `<p class="text-sm text-gray-600 mb-3">Nota <strong>${row.no_nota}</strong> memiliki <strong>${notaInfo.count} item</strong>.</p>`,
+                                    showDenyButton: true,
+                                    showCancelButton: true,
+                                    confirmButtonText: 'Hapus Semua di Nota',
+                                    denyButtonText: `Hapus Item Ini Saja`,
+                                    cancelButtonText: 'Batal',
+                                    confirmButtonColor: '#e11d48',
+                                    denyButtonColor: '#f59e0b',
+                                  });
+
+                                  if (result.isDismissed && result.dismiss === 'cancel') return;
+
+                                  const scope = result.isConfirmed ? 'nota' : 'item';
+                                  const { data: delRes } = await api.delete('/cleanox-by-waschen-production/item', {
+                                    data: { id: row.id, scope },
+                                  });
+
+                                  if (scope === 'nota') {
+                                    // Refresh entire page since many rows may be gone
+                                    fetchData(pagination.page, pagination.limit);
+                                  } else {
+                                    setRows((prev) => prev.filter((r) => r.id !== row.id));
+                                  }
+
+                                  Swal.fire({
+                                    icon: 'success',
+                                    title: 'Berhasil',
+                                    text: delRes.message,
+                                    timer: 2000,
+                                    showConfirmButton: false,
+                                  });
+                                }
+                              } catch (err) {
+                                Swal.fire({
+                                  icon: 'error',
+                                  title: 'Gagal',
+                                  text: err.response?.data?.message || 'Gagal menghapus item',
+                                });
+                              }
+                            }}
+                            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold rounded-lg
+                              border border-rose-200 text-rose-500 hover:bg-rose-50 hover:border-rose-400 transition-colors"
+                            title="Hapus item"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
