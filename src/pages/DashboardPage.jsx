@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { Sparkles, Building2, ChevronRight, Calendar, Factory, Users, Activity, TrendingUp } from 'lucide-react';
+import { Sparkles, ChevronRight, Calendar, Factory, Users, TrendingUp } from 'lucide-react';
 import { getUser } from '../utils/auth.js';
 
 const MENU_CARDS = [
@@ -12,17 +12,6 @@ const MENU_CARDS = [
     ring: 'ring-purple-200',
     soon: true,
     to: '/cleanox',
-    roles: [],
-  },
-  {
-    id: 'cleanox-by-waschen',
-    title: 'Cleanox By Waschen',
-    description: 'Laporan transaksi Cleanox & Karpet dari seluruh outlet Waschen.',
-    icon: Building2,
-    gradient: 'from-blue-500 to-indigo-600',
-    ring: 'ring-blue-200',
-    soon: false,
-    to: '/cleanox-by-waschen',
     roles: [],
   },
   {
@@ -45,17 +34,6 @@ const MENU_CARDS = [
     ring: 'ring-orange-200',
     soon: false,
     to: '/users',
-    roles: ['admin'],
-  },
-  {
-    id: 'audit-login',
-    title: 'Audit Login',
-    description: 'Riwayat login & logout seluruh pengguna beserta durasi sesi aktif.',
-    icon: Activity,
-    gradient: 'from-cyan-500 to-sky-600',
-    ring: 'ring-cyan-200',
-    soon: false,
-    to: '/audit-login',
     roles: ['admin'],
   },
   {

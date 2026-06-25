@@ -5,7 +5,6 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 import authRoutes from './api/routes/auth.routes.js';
-import cleanoxByWaschenRoutes from './api/routes/cleanoxByWaschen.routes.js';
 import cleanoxByWaschenProductionRoutes from './api/routes/cleanoxByWaschenProduction.routes.js';
 import kpiRoutes from './api/routes/kpi.routes.js';
 import evidanceRoutes from './api/routes/evidance.routes.js';
@@ -28,7 +27,6 @@ app.use(express.urlencoded({ extended: true }));
 
 /* ── API Routes ───────────────────────────────────────── */
 app.use('/api/auth', authRoutes);
-app.use('/api/cleanox-by-waschen', cleanoxByWaschenRoutes);
 app.use('/api/cleanox-by-waschen-production', cleanoxByWaschenProductionRoutes);
 app.use('/api/kpi', kpiRoutes);
 app.use('/api/evidance', evidanceRoutes);

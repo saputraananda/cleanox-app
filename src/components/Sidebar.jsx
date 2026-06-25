@@ -2,10 +2,8 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard,
   Sparkles,
-  Building2,
   Factory,
   Users,
-  Activity,
   TrendingUp,
   X,
 } from 'lucide-react';
@@ -14,12 +12,10 @@ import { getUser } from '../utils/auth.js';
 
 const NAV_ITEMS = [
   { label: 'Beranda',            icon: LayoutDashboard, to: '/dashboard',                     roles: ['admin', 'cleanox', 'frontliner'] },
-  { label: 'Cleanox',            icon: Sparkles,        to: '/cleanox',        soon: true,    roles: [] },
-  { label: 'Cleanox By Waschen', icon: Building2,       to: '/cleanox-by-waschen',             roles: [] },
-  { label: 'Status Produksi',    icon: Factory,         to: '/cleanox-by-waschen-production',  roles: ['admin', 'cleanox', 'frontliner'] },
+  { label: 'Cleanox',            icon: Sparkles,        to: '/cleanox',                       roles: ['admin'] },
+  { label: 'Cleanox By Waschen', icon: Factory,         to: '/cleanox-by-waschen-production',  roles: ['admin', 'cleanox', 'frontliner'] },
   { label: 'Manajemen User',     icon: Users,           to: '/users',                          roles: ['admin'] },
-  { label: 'Audit Login',         icon: Activity,        to: '/audit-login',                    roles: ['admin'] },
-  { label: 'KPI Produksi',        icon: TrendingUp,      to: '/kpi-produksi',                   roles: ['admin'] },
+  { label: 'KPI Produksi',       icon: TrendingUp,      to: '/kpi-produksi',                   roles: ['admin'] },
 ];
 
 export default function Sidebar({ collapsed, mobileOpen, onMobileClose }) {

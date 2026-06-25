@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { register, login, logout, getMe, getUsers, createUser, updateUser, deleteUser, getAuditLog } from '../controllers/auth.controller.js';
+import { register, login, logout, getMe, getUsers, createUser, updateUser, deleteUser } from '../controllers/auth.controller.js';
 import { authenticate, requireAdmin } from '../middleware/auth.middleware.js';
 
 const router = Router();
@@ -14,8 +14,5 @@ router.get('/users', authenticate, requireAdmin, getUsers);
 router.post('/users', authenticate, requireAdmin, createUser);
 router.put('/users/:id', authenticate, requireAdmin, updateUser);
 router.delete('/users/:id', authenticate, requireAdmin, deleteUser);
-
-/* ── Audit Log (admin only) ──────────────────────────── */
-router.get('/audit-login', authenticate, requireAdmin, getAuditLog);
 
 export default router;

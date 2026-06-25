@@ -8,15 +8,9 @@ Aplikasi web internal untuk manajemen dan pelaporan transaksi laundry PT Waschen
 
 - **Autentikasi** — Register & Login dengan JWT, otomatis membuat entri di tabel `users` dan `mst_employee` secara atomik
 - **Dashboard** — Halaman utama dengan navigasi ke modul yang tersedia
-- **Cleanox By Waschen** — Laporan transaksi lengkap dari outlet Waschen dengan:
-  - Filter tanggal berdasarkan `tgl_terima` atau `waktu_pembayaran`
-  - Quick range per periode cutoff (26 bulan lalu → 25 bulan ini)
-  - Filter per outlet
-  - Filter kolom Excel-style (checkbox per nilai unik)
-  - Pencarian teks real-time
-  - Pagination server-side
-  - Export ke CSV
-  - Loading bar & skeleton rows
+- **Status Produksi** — Manajemen produksi cleanox & karpet dengan tracking status (Pickup → Cuci Jemur → Packing → Pengantaran), notifikasi WA, on-hold, dan SSE realtime
+- **Manajemen User** — CRUD user & role
+- **KPI Produksi** — Metrik performa produksi
 - **Responsive** — Mendukung tampilan mobile dan desktop
 - **Branding Cleanox** — Warna navy & lime sesuai identitas visual PT Waschen Alora Indonesia
 
@@ -39,8 +33,7 @@ Aplikasi web internal untuk manajemen dan pelaporan transaksi laundry PT Waschen
 cleanox-new/
 ├── api/
 │   ├── controllers/
-│   │   ├── auth.controller.js
-│   │   └── cleanoxByWaschen.controller.js
+│   │   └── auth.controller.js
 │   ├── db/
 │   │   ├── cleanox.js          # Pool koneksi cleanox_smartlink
 │   │   └── smartlink.js        # Pool koneksi waschen_smartlink
@@ -48,7 +41,7 @@ cleanox-new/
 │   │   └── auth.middleware.js
 │   └── routes/
 │       ├── auth.routes.js
-│       └── cleanoxByWaschen.routes.js
+│       └── cleanoxByWaschenProduction.routes.js
 ├── src/
 │   ├── assets/
 │   │   └── cleanox.png
@@ -57,7 +50,7 @@ cleanox-new/
 │   │   ├── Layout.jsx
 │   │   └── Sidebar.jsx
 │   ├── pages/
-│   │   ├── CleanoxByWaschenPage.jsx
+│   │   ├── CleanoxByWaschenProductionPage.jsx
 │   │   ├── DashboardPage.jsx
 │   │   ├── LoginPage.jsx
 │   │   └── RegisterPage.jsx
@@ -161,23 +154,23 @@ Perintah ini menjalankan **backend** (port `3001`) dan **frontend** (port `5173`
 | `POST` | `/login` | Login, mendapatkan JWT |
 | `GET` | `/me` | Data user yang sedang login |
 
-### Cleanox By Waschen — `/api/cleanox-by-waschen`
+### Cleanox By Waschen Production — `/api/cleanox-by-waschen-production`
 
 | Method | Endpoint | Deskripsi |
 |---|---|---|
 | `GET` | `/outlets` | Daftar nama outlet |
+| `GET` | `/employees` | Daftar karyawan role cleanox |
+| `GET` | `/tracking` | Detail tracking satu item |
 | `GET` | `/` | Data transaksi (paginated, filtered) |
-
-**Query params untuk `GET /`:**
-
-| Parameter | Default | Keterangan |
-|---|---|---|
-| `date_start` | — | Tanggal mulai (`YYYY-MM-DD`) |
-| `date_end` | — | Tanggal akhir (`YYYY-MM-DD`) |
-| `date_field` | `tgl_terima` | Field filter: `tgl_terima` / `waktu_pembayaran` |
-| `outlet` | semua | Nama outlet |
-| `page` | `1` | Nomor halaman |
-| `limit` | `25` | Jumlah baris per halaman |
+| `POST` | `/tracking` | Update stage tracking |
+| `DELETE` | `/tracking` | Hapus progres stage (admin) |
+| `PATCH` | `/catatan` | Update catatan |
+| `PATCH` | `/on-hold` | Ajukan on-hold |
+| `PATCH` | `/cuci-jemur/decision` | Keputusan lanjut/batal |
+| `POST` | `/notify-customer` | Kirim notifikasi manual |
+| `DELETE` | `/item` | Hapus item/nota (admin) |
+| `GET` | `/nota-item-count` | Cek jumlah item dalam satu nota |
+| `GET` | `/events` | SSE realtime (token via query) |
 
 ---
 

@@ -2018,7 +2018,7 @@ export default function CleanoxByWaschenProductionPage() {
         {/* ── Page header ─── */}
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-lg sm:text-xl font-bold text-gray-900">Production Status</h1>
+            <h1 className="text-lg sm:text-xl font-bold text-gray-900">Production Status Cleanox By Waschen</h1>
             <p className="text-xs sm:text-sm text-gray-400 mt-0.5">
               Tracking status produksi per item Cleanox &amp; Karpet — klik Lacak untuk detail progres
             </p>

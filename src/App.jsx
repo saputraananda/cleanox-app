@@ -3,10 +3,8 @@ import { isAuthenticated, getUser } from './utils/auth.js';
 import LoginPage from './pages/LoginPage.jsx';
 import RegisterPage from './pages/RegisterPage.jsx';
 import DashboardPage from './pages/DashboardPage.jsx';
-import CleanoxByWaschenPage from './pages/CleanoxByWaschenPage.jsx';
 import CleanoxByWaschenProductionPage from './pages/CleanoxByWaschenProductionPage.jsx';
 import UserManagementPage from './pages/UserManagementPage.jsx';
-import AuditLoginPage from './pages/AuditLoginPage.jsx';
 import KpiProduksiPage from './pages/KpiProduksiPage.jsx';
 import Layout from './components/Layout.jsx';
 
@@ -55,14 +53,7 @@ export default function App() {
           </PrivateRoute>
         }
       />
-      <Route
-        path="/cleanox-by-waschen"
-        element={
-          <PrivateRoute roles={['admin']}>
-            <Layout><CleanoxByWaschenPage /></Layout>
-          </PrivateRoute>
-        }
-      />
+      {/* (hapus) dulu ada /cleanox-by-waschen */}
       <Route
         path="/cleanox-by-waschen-production"
         element={
@@ -76,14 +67,6 @@ export default function App() {
         element={
           <PrivateRoute roles={['admin']}>
             <Layout><UserManagementPage /></Layout>
-          </PrivateRoute>
-        }
-      />
-      <Route
-        path="/audit-login"
-        element={
-          <PrivateRoute roles={['admin']}>
-            <Layout><AuditLoginPage /></Layout>
           </PrivateRoute>
         }
       />
