@@ -18,11 +18,11 @@ import api from '../utils/api.js';
 import { getUser } from '../utils/auth.js';
 
 /* ── Constants ────────────────────────────────────────── */
-const ROLES = ['admin', 'cleanox', 'frontliner'];
+const ROLES = ['management', 'produksi', 'frontliner'];
 
 const ROLE_CONFIG = {
-  admin:      { label: 'Admin',      cls: 'bg-purple-100 text-purple-700 ring-1 ring-purple-200' },
-  cleanox:    { label: 'Cleanox',    cls: 'bg-blue-100   text-blue-700   ring-1 ring-blue-200'   },
+  management: { label: 'Management', cls: 'bg-purple-100 text-purple-700 ring-1 ring-purple-200' },
+  produksi:   { label: 'Produksi',   cls: 'bg-blue-100   text-blue-700   ring-1 ring-blue-200'   },
   frontliner: { label: 'Frontliner', cls: 'bg-green-100  text-green-700  ring-1 ring-green-200'  },
 };
 
@@ -385,8 +385,8 @@ export default function UserManagementPage() {
 
   const stats = useMemo(() => ({
     total:      users.length,
-    admin:      users.filter((u) => u.role === 'admin').length,
-    cleanox:    users.filter((u) => u.role === 'cleanox').length,
+    management: users.filter((u) => u.role === 'management').length,
+    produksi:   users.filter((u) => u.role === 'produksi').length,
     frontliner: users.filter((u) => u.role === 'frontliner').length,
   }), [users]);
 
@@ -430,8 +430,8 @@ export default function UserManagementPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
         <StatCard icon={Users}      label="Total User"  value={stats.total}      gradient="from-blue-500 to-indigo-600"   />
-        <StatCard icon={ShieldCheck} label="Admin"      value={stats.admin}      gradient="from-violet-500 to-purple-600" />
-        <StatCard icon={Building2}  label="Cleanox"     value={stats.cleanox}    gradient="from-sky-500 to-blue-500"      />
+        <StatCard icon={ShieldCheck} label="Management" value={stats.management} gradient="from-violet-500 to-purple-600" />
+        <StatCard icon={Building2}  label="Produksi"    value={stats.produksi}   gradient="from-sky-500 to-blue-500"      />
         <StatCard icon={UserCheck}  label="Frontliner"  value={stats.frontliner} gradient="from-emerald-500 to-green-600" />
       </div>
 

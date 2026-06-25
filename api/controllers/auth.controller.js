@@ -1,6 +1,8 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import pool from '../db/cleanox.js';
+import cleanoxPool, { aloraPool as pool } from '../db/cleanox.js';
+
+
 
 /* ── Register ─────────────────────────────────────────── */
 export const register = async (req, res) => {
@@ -28,8 +30,8 @@ export const register = async (req, res) => {
 
     // Insert ke tabel users
     const [userResult] = await conn.query(
-      'INSERT INTO users (name, email, username, password_hash, role) VALUES (?, ?, ?, ?, ?)',
-      [name, email, username || null, passwordHash, 'employee']
+      'INSERT INTO users (name, email, username, password_hash) VALUES (?, ?, ?, ?)',
+      [name, email, username || null, passwordHash]
     );
     const userId = userResult.insertId;
 
@@ -39,9 +41,17 @@ export const register = async (req, res) => {
     // Insert ke tabel mst_employee dengan id yang sama
     await conn.query(
       `INSERT INTO mst_employee
-         (id, employee_code, name, email, phone, status, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
-      [userId, employeeCode, name, email, phone || null, userId, userId]
+         (employee_id, employee_code, full_name, email, phone_number)
+       VALUES (?, ?, ?, ?, ?)`,
+      [userId, employeeCode, name, email, phone || null]
+    );
+
+    // Insert ke tabel mst_role di CleanoxPool
+    await cleanoxPool.query(
+      `INSERT INTO mst_role (employee_id, role)
+       VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE role = ?`,
+      [userId, 'frontliner', 'frontliner']
     );
 
     await conn.commit();
@@ -83,8 +93,15 @@ export const login = async (req, res) => {
       return res.status(401).json({ message: 'Username atau password salah' });
     }
 
+    // Ambil role dari CleanoxPool.mst_role
+    const [roleRows] = await cleanoxPool.query(
+      'SELECT role FROM mst_role WHERE employee_id = ?',
+      [user.id]
+    );
+    const userRole = roleRows.length > 0 ? roleRows[0].role : user.role || 'frontliner';
+
     const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role, name: user.name, username: user.username },
+      { id: user.id, email: user.email, role: userRole, name: user.name, username: user.username },
       process.env.SESSION_SECRET,
       { expiresIn: '7d' }
     );
@@ -96,7 +113,7 @@ export const login = async (req, res) => {
         name: user.name,
         email: user.email,
         username: user.username,
-        role: user.role,
+        role: userRole,
         avatar: user.avatar,
       },
     });
@@ -116,7 +133,21 @@ export const getMe = async (req, res) => {
     if (rows.length === 0) {
       return res.status(404).json({ message: 'User tidak ditemukan' });
     }
-    return res.json({ user: rows[0] });
+    const user = rows[0];
+
+    // Ambil role dari CleanoxPool.mst_role
+    const [roleRows] = await cleanoxPool.query(
+      'SELECT role FROM mst_role WHERE employee_id = ?',
+      [user.id]
+    );
+    const userRole = roleRows.length > 0 ? roleRows[0].role : user.role || 'frontliner';
+
+    return res.json({
+      user: {
+        ...user,
+        role: userRole,
+      },
+    });
   } catch (err) {
     console.error('[getMe]', err.message);
     return res.status(500).json({ message: 'Terjadi kesalahan server' });
@@ -124,18 +155,34 @@ export const getMe = async (req, res) => {
 };
 
 /* ── CRUD Users (admin only) ──────────────────────────── */
-const ALLOWED_ROLES = ['admin', 'cleanox', 'frontliner', 'employee'];
+const ALLOWED_ROLES = ['admin', 'cleanox', 'frontliner', 'employee', 'management', 'produksi'];
 
 export const getUsers = async (req, res) => {
   try {
-    const [rows] = await pool.query(
-      `SELECT u.id, u.name, u.email, u.username, u.role, u.created_at,
-              e.phone
-       FROM users u
-       LEFT JOIN mst_employee e ON e.id = u.id
-       ORDER BY u.name ASC`
+    const [employees] = await pool.query(
+      `SELECT e.employee_id AS id, e.full_name AS name, e.email, e.phone_number AS phone,
+              u.username, u.created_at
+       FROM mst_employee e
+       LEFT JOIN users u ON e.employee_id = u.id
+       WHERE e.company_id IN (1, 3, 5)
+       ORDER BY e.full_name ASC`
     );
-    return res.json(rows);
+
+    const [roles] = await cleanoxPool.query(
+      'SELECT employee_id, role FROM mst_role'
+    );
+
+    const roleMap = {};
+    roles.forEach((r) => {
+      roleMap[r.employee_id] = r.role;
+    });
+
+    const merged = employees.map((emp) => ({
+      ...emp,
+      role: roleMap[emp.id] || null,
+    }));
+
+    return res.json(merged);
   } catch (err) {
     console.error('[getUsers]', err.message);
     return res.status(500).json({ message: 'Terjadi kesalahan server' });
@@ -174,17 +221,25 @@ export const createUser = async (req, res) => {
     const passwordHash = await bcrypt.hash(password, 12);
 
     const [userResult] = await conn.query(
-      'INSERT INTO users (name, email, username, password_hash, role) VALUES (?, ?, ?, ?, ?)',
-      [name, email, username, passwordHash, role]
+      'INSERT INTO users (name, email, username, password_hash) VALUES (?, ?, ?, ?)',
+      [name, email, username, passwordHash]
     );
     const userId = userResult.insertId;
 
     const employeeCode = `EMP-${String(userId).padStart(4, '0')}`;
     await conn.query(
       `INSERT INTO mst_employee
-         (id, employee_code, name, email, phone, status, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, 'active', ?, ?)`,
-      [userId, employeeCode, name, email, phone || null, req.user.id, req.user.id]
+         (employee_id, employee_code, full_name, email, phone_number)
+       VALUES (?, ?, ?, ?, ?)`,
+      [userId, employeeCode, name, email, phone || null]
+    );
+
+    // Insert/update role di CleanoxPool
+    await cleanoxPool.query(
+      `INSERT INTO mst_role (employee_id, role)
+       VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE role = ?`,
+      [userId, role, role]
     );
 
     await conn.commit();
@@ -237,20 +292,30 @@ export const updateUser = async (req, res) => {
     if (password) {
       const passwordHash = await bcrypt.hash(password, 12);
       await conn.query(
-        'UPDATE users SET name = ?, email = ?, username = ?, role = ?, password_hash = ?, updated_at = NOW() WHERE id = ?',
-        [name, email, username, role, passwordHash, userId]
+        'UPDATE users SET name = ?, email = ?, username = ?, password_hash = ?, updated_at = NOW() WHERE id = ?',
+        [name, email, username, passwordHash, userId]
       );
     } else {
       await conn.query(
-        'UPDATE users SET name = ?, email = ?, username = ?, role = ?, updated_at = NOW() WHERE id = ?',
-        [name, email, username, role, userId]
+        'UPDATE users SET name = ?, email = ?, username = ?, updated_at = NOW() WHERE id = ?',
+        [name, email, username, userId]
       );
     }
 
     await conn.query(
-      'UPDATE mst_employee SET name = ?, email = ?, phone = ?, updated_by = ?, updated_at = NOW() WHERE id = ?',
-      [name, email, phone || null, req.user.id, userId]
+      'UPDATE mst_employee SET full_name = ?, email = ?, phone_number = ? WHERE employee_id = ?',
+      [name, email, phone || null, userId]
     );
+
+    // Update role di CleanoxPool jika diberikan
+    if (role) {
+      await cleanoxPool.query(
+        `INSERT INTO mst_role (employee_id, role)
+         VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE role = ?`,
+        [userId, role, role]
+      );
+    }
 
     await conn.commit();
     return res.json({ message: 'User berhasil diperbarui' });
@@ -280,7 +345,10 @@ export const deleteUser = async (req, res) => {
       return res.status(404).json({ message: 'User tidak ditemukan' });
     }
 
-    await conn.query('DELETE FROM mst_employee WHERE id = ?', [userId]);
+    // Delete role di CleanoxPool
+    await cleanoxPool.query('DELETE FROM mst_role WHERE employee_id = ?', [userId]);
+
+    await conn.query('DELETE FROM mst_employee WHERE employee_id = ?', [userId]);
     await conn.query('DELETE FROM users WHERE id = ?', [userId]);
 
     await conn.commit();

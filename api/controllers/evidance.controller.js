@@ -5,9 +5,7 @@ import multer from 'multer';
 import sharp from 'sharp';
 import cleanoxPool from '../db/cleanox.js';
 
-const TRANSAKSI_TABLE = process.env.NODE_ENV === 'development'
-  ? 'rekap_transaksi_reguler_dev'
-  : 'rekap_transaksi_reguler';
+const TRANSAKSI_TABLE = 'tr_rekap_transaksi_reguler_waschen';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

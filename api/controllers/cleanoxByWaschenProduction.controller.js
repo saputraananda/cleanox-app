@@ -1,8 +1,6 @@
-import cleanoxPool from '../db/cleanox.js';
+import cleanoxPool, { aloraPool } from '../db/cleanox.js';
 
-const TRANSAKSI_TABLE = process.env.NODE_ENV === 'development'
-  ? 'rekap_transaksi_reguler_dev'
-  : 'rekap_transaksi_reguler';
+const TRANSAKSI_TABLE = 'tr_rekap_transaksi_reguler_waschen';
 
 /* WAHA WhatsApp cabang */
 const OUTLET_NUMBER = {
@@ -363,11 +361,21 @@ export const getOutlets = async (_req, res) => {
   }
 };
 
-/* ── Get employees (for tracking modal) — only role 'cleanox' ── */
+/* ── Get employees (for tracking modal) — role 'produksi' or 'cleanox' ── */
 export const getEmployees = async (_req, res) => {
   try {
-    const [rows] = await cleanoxPool.query(
-      `SELECT id, name FROM users WHERE role = 'cleanox' and name <> 'Tim Produksi Cleanox' ORDER BY name`
+    const [roles] = await cleanoxPool.query(
+      `SELECT employee_id FROM mst_role WHERE role IN ('produksi', 'cleanox')`
+    );
+    const employeeIds = roles.map(r => r.employee_id);
+
+    if (employeeIds.length === 0) {
+      return res.json({ employees: [] });
+    }
+
+    const [rows] = await aloraPool.query(
+      `SELECT id, name FROM users WHERE id IN (?) AND name <> 'Tim Produksi Cleanox' ORDER BY name`,
+      [employeeIds]
     );
     return res.json({ employees: rows });
   } catch (err) {
@@ -689,8 +697,8 @@ export const clearTracking = async (req, res) => {
   if (!STAGE_COLUMNS[stage]) {
     return res.status(400).json({ message: 'Stage tidak valid' });
   }
-  if (req.user?.role !== 'admin') {
-    return res.status(403).json({ message: 'Hanya admin yang bisa menghapus progres' });
+  if (req.user?.role !== 'admin' && req.user?.role !== 'management') {
+    return res.status(403).json({ message: 'Hanya admin/management yang bisa menghapus progres' });
   }
 
   // Cascade: clear this stage AND all stages after it
@@ -795,8 +803,8 @@ export const requestOnHold = async (req, res) => {
     return res.status(400).json({ message: 'id wajib diisi' });
   }
 
-  if (!['cleanox', 'admin'].includes(req.user?.role)) {
-    return res.status(403).json({ message: 'Hanya cleanox/admin yang bisa mengajukan on hold' });
+  if (!['cleanox', 'produksi', 'admin', 'management'].includes(req.user?.role)) {
+    return res.status(403).json({ message: 'Hanya produksi/management yang bisa mengajukan on hold' });
   }
 
   try {
@@ -858,8 +866,8 @@ export const decideCuciJemur = async (req, res) => {
   if (!['lanjut', 'batal'].includes(String(decision).toLowerCase())) {
     return res.status(400).json({ message: 'decision harus lanjut atau batal' });
   }
-  if (!['frontliner', 'admin'].includes(req.user?.role)) {
-    return res.status(403).json({ message: 'Hanya frontliner/admin yang bisa melakukan keputusan' });
+  if (!['frontliner', 'admin', 'management'].includes(req.user?.role)) {
+    return res.status(403).json({ message: 'Hanya frontliner/management yang bisa melakukan keputusan' });
   }
 
   const isContinue = String(decision).toLowerCase() === 'lanjut' ? 1 : 0;
@@ -922,8 +930,8 @@ export const deleteItem = async (req, res) => {
   if (!id) {
     return res.status(400).json({ message: 'id wajib diisi' });
   }
-  if (req.user?.role !== 'admin') {
-    return res.status(403).json({ message: 'Hanya admin yang bisa menghapus item' });
+  if (req.user?.role !== 'admin' && req.user?.role !== 'management') {
+    return res.status(403).json({ message: 'Hanya admin/management yang bisa menghapus item' });
   }
 
   try {
@@ -1024,8 +1032,8 @@ export const sendManualCustomerNotification = async (req, res) => {
   const { id, custom_text } = req.body;
   if (!id) return res.status(400).json({ message: 'id wajib diisi' });
 
-  if (req.user?.role !== 'admin') {
-    return res.status(403).json({ message: 'Hanya admin yang bisa mengirim notifikasi manual' });
+  if (req.user?.role !== 'admin' && req.user?.role !== 'management') {
+    return res.status(403).json({ message: 'Hanya admin/management yang bisa mengirim notifikasi manual' });
   }
 
   try {

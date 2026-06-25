@@ -11,11 +11,11 @@ import cleanoxLogo from '../assets/cleanox.png';
 import { getUser } from '../utils/auth.js';
 
 const NAV_ITEMS = [
-  { label: 'Beranda',            icon: LayoutDashboard, to: '/dashboard',                     roles: ['admin', 'cleanox', 'frontliner'] },
-  { label: 'Cleanox',            icon: Sparkles,        to: '/cleanox',                       roles: ['admin'] },
-  { label: 'Cleanox By Waschen', icon: Factory,         to: '/cleanox-by-waschen-production',  roles: ['admin', 'cleanox', 'frontliner'] },
-  { label: 'Manajemen User',     icon: Users,           to: '/users',                          roles: ['admin'] },
-  { label: 'KPI Produksi',       icon: TrendingUp,      to: '/kpi-produksi',                   roles: ['admin'] },
+  { label: 'Beranda',            icon: LayoutDashboard, to: '/dashboard',                     roles: ['admin', 'management', 'produksi', 'frontliner'] },
+  { label: 'Cleanox',            icon: Sparkles,        to: '/cleanox',                       roles: ['admin', 'management'] },
+  { label: 'Cleanox By Waschen', icon: Factory,         to: '/cleanox-by-waschen-production',  roles: ['admin', 'management', 'produksi', 'frontliner'] },
+  { label: 'Manajemen User',     icon: Users,           to: '/users',                          roles: ['admin', 'management'] },
+  { label: 'KPI Produksi',       icon: TrendingUp,      to: '/kpi-produksi',                   roles: ['admin', 'management'] },
 ];
 
 export default function Sidebar({ collapsed, mobileOpen, onMobileClose }) {

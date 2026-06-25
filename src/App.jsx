@@ -43,7 +43,7 @@ export default function App() {
       <Route
         path="/cleanox"
         element={
-          <PrivateRoute roles={['admin']}>
+          <PrivateRoute roles={['admin', 'management']}>
             <Layout>
               <div className="p-8 text-center">
                 <p className="text-2xl font-bold text-gray-700">Cleanox</p>
@@ -65,7 +65,7 @@ export default function App() {
       <Route
         path="/users"
         element={
-          <PrivateRoute roles={['admin']}>
+          <PrivateRoute roles={['admin', 'management']}>
             <Layout><UserManagementPage /></Layout>
           </PrivateRoute>
         }
@@ -73,7 +73,7 @@ export default function App() {
       <Route
         path="/kpi-produksi"
         element={
-          <PrivateRoute roles={['admin']}>
+          <PrivateRoute roles={['admin', 'management']}>
             <Layout><KpiProduksiPage /></Layout>
           </PrivateRoute>
         }

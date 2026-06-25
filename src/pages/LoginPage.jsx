@@ -133,7 +133,7 @@ export default function LoginPage() {
               </button>
             </form>
 
-            <div className="mt-6 pt-6 border-t border-gray-100 text-center text-sm text-gray-500">
+            {/* <div className="mt-6 pt-6 border-t border-gray-100 text-center text-sm text-gray-500">
               Belum punya akun?{' '}
               <Link
                 to="/register"
@@ -141,7 +141,7 @@ export default function LoginPage() {
               >
                 Daftar di sini
               </Link>
-            </div>
+            </div> */}
           </div>
         </div>
 

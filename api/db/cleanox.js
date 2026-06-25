@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const cleanoxPool = mysql.createPool({
+export const cleanoxPool = mysql.createPool({
   host: process.env.DB_HOST_CLEANOX,
   port: Number(process.env.DB_PORT_CLEANOX) || 3306,
   user: process.env.DB_USER_CLEANOX,
@@ -15,4 +15,18 @@ const cleanoxPool = mysql.createPool({
   ssl: { rejectUnauthorized: false },
 });
 
+export const aloraPool = mysql.createPool({
+  host: process.env.DB_HOST,
+  port: Number(process.env.DB_PORT) || 3306,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASS,
+  database: process.env.DB_NAME,
+  waitForConnections: true,
+  connectionLimit: 10,
+  timezone: '+07:00',
+  ssl: { rejectUnauthorized: false },
+});
+
 export default cleanoxPool;
+
+

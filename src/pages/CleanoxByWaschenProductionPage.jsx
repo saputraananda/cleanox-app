@@ -678,7 +678,7 @@ function EvidanceSection({ itemId, stage, evidancePath, evidanceFile, userRole, 
   const [showCamera, setShowCamera] = useState(false);
   const fileInputRef = useRef(null);
 
-  const canUpload = userRole === 'cleanox' || userRole === 'admin';
+  const canUpload = userRole === 'cleanox' || userRole === 'produksi' || userRole === 'admin' || userRole === 'management';
   const hasFile = !!evidancePath;
   const isImage = evidanceFile && /\.(jpe?g|png|gif|webp)$/i.test(evidanceFile);
 
@@ -899,12 +899,12 @@ function TrackingModal({ show, onClose, row, userRole }) {
           api.get('/cleanox-by-waschen-production/tracking', {
             params: { id: row.id },
           }),
-          (userRole === 'cleanox' || userRole === 'admin') ? api.get('/cleanox-by-waschen-production/employees') : Promise.resolve({ data: { employees: [] } }),
+          (userRole === 'cleanox' || userRole === 'produksi' || userRole === 'admin' || userRole === 'management') ? api.get('/cleanox-by-waschen-production/employees') : Promise.resolve({ data: { employees: [] } }),
         ]);
         setTracking(trackRes.data.tracking);
         const empList = empRes.data.employees || [];
         // Add "Admin" option for admin users (won't count in KPI)
-        if (userRole === 'admin') {
+        if (userRole === 'admin' || userRole === 'management') {
           empList.unshift({ id: '__admin__', name: 'Admin' });
         }
         setEmployees(empList);
@@ -1085,9 +1085,9 @@ function TrackingModal({ show, onClose, row, userRole }) {
 
   // Permission flags
   const isProduksiRole = userRole === 'cleanox' || userRole === 'produksi';
-  const canFillNext = isProduksiRole || userRole === 'admin';
-  const canEditFilled = userRole === 'admin';
-  const canDecideOnHold = userRole === 'frontliner' || userRole === 'admin';
+  const canFillNext = isProduksiRole || userRole === 'admin' || userRole === 'management';
+  const canEditFilled = userRole === 'admin' || userRole === 'management';
+  const canDecideOnHold = userRole === 'frontliner' || userRole === 'admin' || userRole === 'management';
   const isRejectedByFrontliner = tracking?.isContinue === 0 || tracking?.isContinue === '0';
   const productionLocked = isProduksiRole && isRejectedByFrontliner;
 
@@ -1223,7 +1223,7 @@ function TrackingModal({ show, onClose, row, userRole }) {
                 {STAGES.map((stage, idx) => {
                   const sc = STAGE_COLORS[stage.color];
                   const filled = !!tracking[stage.atCol];
-                  const isActive = idx === currentStageIdx + 1 && canFillNext && !productionLocked && (userRole === 'admin' || !tracking?.on_hold);
+                  const isActive = idx === currentStageIdx + 1 && canFillNext && !productionLocked && (userRole === 'admin' || userRole === 'management' || !tracking?.on_hold);
                   const isEditing = filled && canEditFilled && editingStage === stage.key;
                   const Icon = stage.icon;
                   const form = stageForm[stage.key] || { employees: [], timestamp: '' };
@@ -1423,7 +1423,7 @@ function TrackingModal({ show, onClose, row, userRole }) {
                                 )}
                                 Simpan {stage.label}
                               </button>
-                              {stage.key === 'Cuci Jemur' && (userRole === 'cleanox' || userRole === 'admin') && (
+                              {stage.key === 'Cuci Jemur' && (userRole === 'cleanox' || userRole === 'produksi' || userRole === 'admin' || userRole === 'management') && (
                                 <>
                                   <button
                                     onClick={() => setShowOnHoldConfirm(true)}
@@ -1478,7 +1478,7 @@ function TrackingModal({ show, onClose, row, userRole }) {
                     <Check className="w-5 h-5 text-green-600 mx-auto mb-1" />
                     <p className="text-sm font-semibold text-green-700">Semua proses selesai!</p>
                   </div>
-                  {userRole === 'admin' && tracking?.all_nota_complete && (
+                  {(userRole === 'admin' || userRole === 'management') && tracking?.all_nota_complete && (
                     <button
                       onClick={() => { setNotifText(buildNotifPreviewText(tracking)); setShowNotifPreview(true); }}
                       className="w-full py-2.5 text-sm font-semibold rounded-xl bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-800 transition-colors flex items-center justify-center gap-2"
@@ -1487,7 +1487,7 @@ function TrackingModal({ show, onClose, row, userRole }) {
                       Kirim Notifikasi Ke Customer
                     </button>
                   )}
-                  {userRole === 'admin' && !tracking?.all_nota_complete && (
+                  {(userRole === 'admin' || userRole === 'management') && !tracking?.all_nota_complete && (
                     <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-700">
                       <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
                       <span>Notifikasi belum bisa dikirim. Masih ada item lain dalam nota <strong>{tracking?.no_nota}</strong> yang belum selesai.</span>
@@ -1795,7 +1795,7 @@ export default function CleanoxByWaschenProductionPage() {
   // Tracking modal
   const [trackingRow, setTrackingRow] = useState(null);
 
-  const isAdmin = user?.role === 'admin';
+  const isAdmin = user?.role === 'admin' || user?.role === 'management';
   const COLS = isAdmin ? [...COLS_BASE, COL_AKSI] : COLS_BASE;
 
   const abortRef = useRef(null);

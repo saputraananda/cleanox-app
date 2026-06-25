@@ -1,9 +1,7 @@
 import cleanoxPool from '../db/cleanox.js';
 import ExcelJS from 'exceljs';
 
-const TRANSAKSI_TABLE = process.env.NODE_ENV === 'development'
-  ? 'rekap_transaksi_reguler_dev'
-  : 'rekap_transaksi_reguler';
+const TRANSAKSI_TABLE = 'tr_rekap_transaksi_reguler_waschen';
 
 /* ── KPI Summary — all employees for a period ─────────── */
 export const getKpiSummary = async (req, res) => {

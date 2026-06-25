@@ -23,7 +23,7 @@ const MENU_CARDS = [
     ring: 'ring-emerald-200',
     soon: false,
     to: '/cleanox-by-waschen-production',
-    roles: ['admin', 'cleanox', 'frontliner'],
+    roles: ['admin', 'management', 'produksi', 'frontliner'],
   },
   {
     id: 'users',
@@ -34,7 +34,7 @@ const MENU_CARDS = [
     ring: 'ring-orange-200',
     soon: false,
     to: '/users',
-    roles: ['admin'],
+    roles: ['admin', 'management'],
   },
   {
     id: 'kpi-produksi',
@@ -45,7 +45,7 @@ const MENU_CARDS = [
     ring: 'ring-lime-200',
     soon: false,
     to: '/kpi-produksi',
-    roles: ['admin'],
+    roles: ['admin', 'management'],
   },
 ];
 
