@@ -4,7 +4,6 @@ import LoginPage from './pages/LoginPage.jsx';
 import RegisterPage from './pages/RegisterPage.jsx';
 import DashboardPage from './pages/DashboardPage.jsx';
 import CleanoxByWaschenProductionPage from './pages/CleanoxByWaschenProductionPage.jsx';
-import UserManagementPage from './pages/UserManagementPage.jsx';
 import KpiProduksiPage from './pages/KpiProduksiPage.jsx';
 import Layout from './components/Layout.jsx';
 
@@ -12,7 +11,8 @@ const PrivateRoute = ({ children, roles }) => {
   if (!isAuthenticated()) return <Navigate to="/login" replace />;
   if (roles) {
     const user = getUser();
-    if (!roles.includes(user?.role)) return <Navigate to="/dashboard" replace />;
+    const hasRole = roles.includes(user?.role) || (roles.includes('management') && user?.isManagement);
+    if (!hasRole) return <Navigate to="/dashboard" replace />;
   }
   return children;
 };
@@ -59,14 +59,6 @@ export default function App() {
         element={
           <PrivateRoute>
             <Layout><CleanoxByWaschenProductionPage /></Layout>
-          </PrivateRoute>
-        }
-      />
-      <Route
-        path="/users"
-        element={
-          <PrivateRoute roles={['admin', 'management']}>
-            <Layout><UserManagementPage /></Layout>
           </PrivateRoute>
         }
       />

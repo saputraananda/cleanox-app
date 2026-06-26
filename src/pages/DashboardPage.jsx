@@ -25,17 +25,7 @@ const MENU_CARDS = [
     to: '/cleanox-by-waschen-production',
     roles: ['admin', 'management', 'produksi', 'frontliner'],
   },
-  {
-    id: 'users',
-    title: 'Manajemen User',
-    description: 'Tambah, edit, dan kelola akun serta role seluruh pengguna sistem.',
-    icon: Users,
-    gradient: 'from-orange-400 to-rose-500',
-    ring: 'ring-orange-200',
-    soon: false,
-    to: '/users',
-    roles: ['admin', 'management'],
-  },
+
   {
     id: 'kpi-produksi',
     title: 'KPI Produksi',
@@ -61,7 +51,10 @@ export default function DashboardPage() {
   });
 
   const visibleCards = MENU_CARDS.filter(
-    (item) => item.roles.length > 0 && item.roles.includes(user?.role)
+    (item) =>
+      item.roles.length > 0 &&
+      (item.roles.includes(user?.role) ||
+        (item.roles.includes('management') && user?.isManagement))
   );
 
   return (

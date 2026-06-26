@@ -14,13 +14,17 @@ const NAV_ITEMS = [
   { label: 'Beranda',            icon: LayoutDashboard, to: '/dashboard',                     roles: ['admin', 'management', 'produksi', 'frontliner'] },
   { label: 'Cleanox',            icon: Sparkles,        to: '/cleanox',                       roles: ['admin', 'management'] },
   { label: 'Cleanox By Waschen', icon: Factory,         to: '/cleanox-by-waschen-production',  roles: ['admin', 'management', 'produksi', 'frontliner'] },
-  { label: 'Manajemen User',     icon: Users,           to: '/users',                          roles: ['admin', 'management'] },
   { label: 'KPI Produksi',       icon: TrendingUp,      to: '/kpi-produksi',                   roles: ['admin', 'management'] },
 ];
 
 export default function Sidebar({ collapsed, mobileOpen, onMobileClose }) {
   const user = getUser();
-  const visibleItems = NAV_ITEMS.filter((item) => !item.roles || item.roles.includes(user?.role));
+  const visibleItems = NAV_ITEMS.filter(
+    (item) =>
+      !item.roles ||
+      item.roles.includes(user?.role) ||
+      (item.roles.includes('management') && user?.isManagement)
+  );
   return (
     <aside
       className={`

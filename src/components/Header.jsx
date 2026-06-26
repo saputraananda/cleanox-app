@@ -43,7 +43,7 @@ export default function Header({ onMenuToggle }) {
           </div>
           <div className="hidden sm:block text-left">
             <p className="text-sm font-semibold text-gray-800 leading-tight">{user?.name}</p>
-            <p className="text-xs text-gray-400 capitalize">{user?.role}</p>
+            <p className="text-xs text-gray-400 capitalize">{user?.isManagement ? 'management' : user?.role}</p>
           </div>
           <ChevronDown
             className={`w-3.5 h-3.5 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`}

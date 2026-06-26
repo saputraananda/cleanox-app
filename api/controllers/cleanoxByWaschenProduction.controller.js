@@ -697,8 +697,8 @@ export const clearTracking = async (req, res) => {
   if (!STAGE_COLUMNS[stage]) {
     return res.status(400).json({ message: 'Stage tidak valid' });
   }
-  if (req.user?.role !== 'admin' && req.user?.role !== 'management') {
-    return res.status(403).json({ message: 'Hanya admin/management yang bisa menghapus progres' });
+  if (!req.user?.isManagement) {
+    return res.status(403).json({ message: 'Hanya management yang bisa menghapus progres' });
   }
 
   // Cascade: clear this stage AND all stages after it
@@ -803,7 +803,7 @@ export const requestOnHold = async (req, res) => {
     return res.status(400).json({ message: 'id wajib diisi' });
   }
 
-  if (!['cleanox', 'produksi', 'admin', 'management'].includes(req.user?.role)) {
+  if (req.user?.role !== 'produksi' && !req.user?.isManagement) {
     return res.status(403).json({ message: 'Hanya produksi/management yang bisa mengajukan on hold' });
   }
 
@@ -866,7 +866,7 @@ export const decideCuciJemur = async (req, res) => {
   if (!['lanjut', 'batal'].includes(String(decision).toLowerCase())) {
     return res.status(400).json({ message: 'decision harus lanjut atau batal' });
   }
-  if (!['frontliner', 'admin', 'management'].includes(req.user?.role)) {
+  if (req.user?.role !== 'frontliner' && !req.user?.isManagement) {
     return res.status(403).json({ message: 'Hanya frontliner/management yang bisa melakukan keputusan' });
   }
 
@@ -930,8 +930,8 @@ export const deleteItem = async (req, res) => {
   if (!id) {
     return res.status(400).json({ message: 'id wajib diisi' });
   }
-  if (req.user?.role !== 'admin' && req.user?.role !== 'management') {
-    return res.status(403).json({ message: 'Hanya admin/management yang bisa menghapus item' });
+  if (!req.user?.isManagement) {
+    return res.status(403).json({ message: 'Hanya management yang bisa menghapus item' });
   }
 
   try {
@@ -1032,8 +1032,8 @@ export const sendManualCustomerNotification = async (req, res) => {
   const { id, custom_text } = req.body;
   if (!id) return res.status(400).json({ message: 'id wajib diisi' });
 
-  if (req.user?.role !== 'admin' && req.user?.role !== 'management') {
-    return res.status(403).json({ message: 'Hanya admin/management yang bisa mengirim notifikasi manual' });
+  if (!req.user?.isManagement) {
+    return res.status(403).json({ message: 'Hanya management yang bisa mengirim notifikasi manual' });
   }
 
   try {

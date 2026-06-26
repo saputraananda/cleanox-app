@@ -17,8 +17,8 @@ export const authenticate = (req, res, next) => {
 };
 
 export const requireAdmin = (req, res, next) => {
-  if (req.user?.role !== 'admin' && req.user?.role !== 'management') {
-    return res.status(403).json({ message: 'Forbidden: hanya admin/management yang diizinkan' });
+  if (!req.user?.isManagement) {
+    return res.status(403).json({ message: 'Forbidden: hanya management yang diizinkan' });
   }
   next();
 };
