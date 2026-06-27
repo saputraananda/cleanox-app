@@ -15,6 +15,7 @@ import {
   sendManualCustomerNotification,
   deleteItem,
   getNotaItemCount,
+  getAvailablePeriods,
 } from '../controllers/cleanoxByWaschenProduction.controller.js';
 
 const router = Router();
@@ -35,6 +36,7 @@ router.get('/events', authenticateSSE, subscribeEvents);
 
 router.use(authenticate);
 
+router.get('/available-periods', getAvailablePeriods);
 router.get('/outlets', getOutlets);
 router.get('/employees', getEmployees);
 router.get('/tracking', getTracking);

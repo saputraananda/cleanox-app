@@ -4,7 +4,6 @@ import LoginPage from './pages/LoginPage.jsx';
 import RegisterPage from './pages/RegisterPage.jsx';
 import DashboardPage from './pages/DashboardPage.jsx';
 import CleanoxByWaschenProductionPage from './pages/CleanoxByWaschenProductionPage.jsx';
-import KpiProduksiPage from './pages/KpiProduksiPage.jsx';
 import Layout from './components/Layout.jsx';
 
 const PrivateRoute = ({ children, roles }) => {
@@ -62,14 +61,7 @@ export default function App() {
           </PrivateRoute>
         }
       />
-      <Route
-        path="/kpi-produksi"
-        element={
-          <PrivateRoute roles={['admin', 'management']}>
-            <Layout><KpiProduksiPage /></Layout>
-          </PrivateRoute>
-        }
-      />
+
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   );

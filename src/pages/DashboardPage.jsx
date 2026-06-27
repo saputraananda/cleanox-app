@@ -26,17 +26,6 @@ const MENU_CARDS = [
     roles: ['admin', 'management', 'produksi', 'frontliner'],
   },
 
-  {
-    id: 'kpi-produksi',
-    title: 'KPI Produksi',
-    description: 'Pantau produktivitas karyawan Cleanox berdasarkan tahap pengerjaan order.',
-    icon: TrendingUp,
-    gradient: 'from-lime-500 to-green-600',
-    ring: 'ring-lime-200',
-    soon: false,
-    to: '/kpi-produksi',
-    roles: ['admin', 'management'],
-  },
 ];
 
 export default function DashboardPage() {

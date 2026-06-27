@@ -1081,3 +1081,58 @@ export const sendManualCustomerNotification = async (req, res) => {
     return res.status(500).json({ message: 'Server error' });
   }
 };
+
+export const getAvailablePeriods = async (req, res) => {
+  try {
+    // Billing period: tgl_terima >= 26 → belongs to NEXT month's period
+    const [rows] = await cleanoxPool.query(
+      `SELECT DISTINCT
+         CASE
+           WHEN DAY(tgl_terima) >= 26 THEN
+             CASE WHEN MONTH(tgl_terima) = 12 THEN YEAR(tgl_terima) + 1 ELSE YEAR(tgl_terima) END
+           ELSE YEAR(tgl_terima)
+         END AS yr,
+         CASE
+           WHEN DAY(tgl_terima) >= 26 THEN
+             CASE WHEN MONTH(tgl_terima) = 12 THEN 1 ELSE MONTH(tgl_terima) + 1 END
+           ELSE MONTH(tgl_terima)
+         END AS mo
+       FROM ${TRANSAKSI_TABLE}
+       WHERE tgl_terima IS NOT NULL
+         AND (LOWER(COALESCE(nama_item,'')) LIKE '%cleanox%'
+           OR LOWER(COALESCE(nama_item,'')) LIKE '%karpet%')
+       ORDER BY yr DESC, mo DESC`
+    );
+
+    // Calculate current active period based on today's date (Jakarta time zone UTC+7)
+    const now = new Date(Date.now() + 7 * 60 * 60 * 1000);
+    const jktDate = now.getUTCDate();
+    const jktMonth = now.getUTCMonth() + 1; // 1-based
+    const jktYear = now.getUTCFullYear();
+
+    let activeMonth, activeYear;
+    if (jktDate >= 26) {
+      if (jktMonth === 12) {
+        activeMonth = 1;
+        activeYear = jktYear + 1;
+      } else {
+        activeMonth = jktMonth + 1;
+        activeYear = jktYear;
+      }
+    } else {
+      activeMonth = jktMonth;
+      activeYear = jktYear;
+    }
+
+    const exists = rows.some(r => Number(r.yr) === activeYear && Number(r.mo) === activeMonth);
+    if (!exists) {
+      rows.push({ yr: activeYear, mo: activeMonth });
+      rows.sort((a, b) => b.yr - a.yr || b.mo - a.mo);
+    }
+
+    return res.json({ periods: rows });
+  } catch (err) {
+    console.error('[production/getAvailablePeriods]', err.message);
+    return res.status(500).json({ message: 'Gagal mengambil data periode', error: err.message });
+  }
+};

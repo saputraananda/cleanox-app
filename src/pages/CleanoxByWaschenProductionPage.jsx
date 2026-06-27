@@ -1832,7 +1832,7 @@ export default function CleanoxByWaschenProductionPage() {
 
   /* Fetch available billing periods from DB */
   useEffect(() => {
-    api.get('/kpi/available-periods')
+    api.get('/cleanox-by-waschen-production/available-periods')
       .then(({ data }) => setAvailablePeriods(data.periods || []))
       .catch(() => { });
   }, []);

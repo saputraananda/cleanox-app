@@ -14,7 +14,6 @@ const NAV_ITEMS = [
   { label: 'Beranda',            icon: LayoutDashboard, to: '/dashboard',                     roles: ['admin', 'management', 'produksi', 'frontliner'] },
   { label: 'Cleanox',            icon: Sparkles,        to: '/cleanox',                       roles: ['admin', 'management'] },
   { label: 'Cleanox By Waschen', icon: Factory,         to: '/cleanox-by-waschen-production',  roles: ['admin', 'management', 'produksi', 'frontliner'] },
-  { label: 'KPI Produksi',       icon: TrendingUp,      to: '/kpi-produksi',                   roles: ['admin', 'management'] },
 ];
 
 export default function Sidebar({ collapsed, mobileOpen, onMobileClose }) {
