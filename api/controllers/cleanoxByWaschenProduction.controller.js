@@ -2,7 +2,7 @@ import cleanoxPool, { aloraPool } from '../db/cleanox.js';
 
 const TRANSAKSI_TABLE = 'tr_rekap_transaksi_reguler_waschen';
 
-/* WAHA WhatsApp cabang */
+/* WhatsApp cabang */
 const OUTLET_NUMBER = {
   'Waschen Raffles': '+62 822-1928-1920',
   'Waschen Citra Gran': '+62 821-2779-8574',
@@ -11,7 +11,7 @@ const OUTLET_NUMBER = {
   'Waschen Canadian': '+62 851-8818-8391',
 };
 
-/* ── WAHA WhatsApp notification ───────────────────────── */
+/* ── WhatsApp notification Mention ───────────────────────── */
 const OUTLET_MENTION = {
   'Waschen Laundry Raffles Hills': ['6289530162883@c.us', '6289501426161@c.us'],
   'Waschen Citra Grand': ['6289616020108@c.us', '6285715225947@c.us'],
@@ -44,22 +44,42 @@ const NOTIF_START_CUTOFF = '2026-05-12 16:40:00'; // 16:40 WIB, 4 Mei 2026
 // Development: 1 menit (cepat), Production: 60 menit (1 jam)
 const NOTIF_DELAY_MINUTES = process.env.NODE_ENV === 'development' ? 1 : 60;
 
+/**
+ * Normalisasi nomor HP atau group JID ke format WhatsApp Gateway.
+ * Jika berakhiran @g.us, dipertahankan sebagai group JID.
+ * Jika nomor biasa, dikonversi ke format 62xxx.
+ */
+function formatWaRecipient(to) {
+  if (!to) return null;
+  const toStr = String(to).trim();
+  if (toStr.endsWith('@g.us')) {
+    return toStr;
+  }
+  // Hapus semua karakter selain angka
+  let clean = toStr.replace(/\D/g, '');
+  if (clean.startsWith('0')) {
+    clean = '62' + clean.slice(1);
+  }
+  if (!clean.startsWith('62')) {
+    clean = '62' + clean;
+  }
+  return clean;
+}
+
 async function sendOnHoldWaNotification({ id, no_nota, customer_nama, nama_item, outlet }) {
-  const wahaUrl = process.env.WAHA_URL;
-  const wahaApiKey = process.env.WAHA_API_KEY;
-  const wahaSession = process.env.WAHA_SESSION_CLEANOX;
+  const waUrl = (process.env.ALORA_WA_URL || 'http://43.129.37.205:3000').replace(/\/$/, '');
+  const waSession = process.env.ALORA_WA_ALORA_SESSION || 'cleanox';
   const appUrl = (process.env.APP_URL || process.env.CORS_ORIGIN || '').replace(/\/$/, '');
   const groupId = process.env.NODE_ENV === 'development'
     ? '120363406439867993@g.us'
     : '120363418441595080@g.us';
 
-  if (!wahaUrl || !wahaApiKey || !wahaSession) {
-    console.warn('[production/onHold] WAHA env vars not set, skipping WA notification');
+  if (!waUrl || !waSession) {
+    console.warn('[production/onHold] WA gateway env vars not set, skipping WA notification');
     return;
   }
 
   const mentionIds = OUTLET_MENTION[outlet] || [];
-  const mentions = mentionIds;
   const mentionText = mentionIds.map((m) => `@${m.replace('@c.us', '')}`).join(' ');
   const outletShort = OUTLET_SHORT[outlet] || outlet || '-';
 
@@ -77,8 +97,11 @@ async function sendOnHoldWaNotification({ id, no_nota, customer_nama, nama_item,
     `\nMohon dicek yaa! Terima kasih 🙏` +
     (mentionText ? `\n${mentionText}` : '');
 
-  const body = { session: wahaSession, chatId: groupId, text };
-  if (mentions.length > 0) body.mentions = mentions;
+  const body = {
+    session: waSession,
+    to: formatWaRecipient(groupId),
+    message: text,
+  };
 
   const MAX_ATTEMPTS = 3;
   const RETRY_DELAY_MS = 5000; // 5 seconds between retries
@@ -88,11 +111,10 @@ async function sendOnHoldWaNotification({ id, no_nota, customer_nama, nama_item,
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s
 
-      const resp = await fetch(`${wahaUrl}/api/sendText`, {
+      const resp = await fetch(`${waUrl}/api/send-message`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Api-Key': wahaApiKey,
         },
         body: JSON.stringify(body),
         signal: controller.signal,
@@ -106,13 +128,13 @@ async function sendOnHoldWaNotification({ id, no_nota, customer_nama, nama_item,
       }
 
       const errText = await resp.text().catch(() => '(no body)');
-      console.error(`[production/onHold] WAHA sendText failed (attempt ${attempt}/${MAX_ATTEMPTS}): ${resp.status}`);
+      console.error(`[production/onHold] WA gateway send-message failed (attempt ${attempt}/${MAX_ATTEMPTS}): ${resp.status}`);
 
       // Don't retry on client-side errors (4xx)
       if (resp.status >= 400 && resp.status < 500) break;
 
     } catch (err) {
-      const reason = err.name === 'AbortError' ? 'request timed out (20s)' : err.message;
+      const reason = err.name === 'AbortError' ? 'request timed out (60s)' : err.message;
       console.error(`[production/onHold] WA notification error (attempt ${attempt}/${MAX_ATTEMPTS}): ${reason}`);
     }
 
@@ -136,24 +158,19 @@ async function sendPengantaranNotificationToCustomer({
   pembayaran,
   custom_text, // optional: override generated message
 }) {
-  const wahaUrl = process.env.WAHA_URL;
-  const wahaApiKey = process.env.WAHA_API_KEY;
-  const wahaSession = process.env.WAHA_SESSION_CLEANOX;
+  const waUrl = (process.env.ALORA_WA_URL || 'http://43.129.37.205:3000').replace(/\/$/, '');
+  const waSession = process.env.ALORA_WA_ALORA_SESSION || 'cleanox';
 
-  if (!wahaUrl || !wahaApiKey || !wahaSession) {
-    console.warn('[production/pengantaranNotif] WAHA env vars not set, skipping');
-    return { success: false, reason: 'WAHA not configured' };
+  if (!waUrl || !waSession) {
+    console.warn('[production/pengantaranNotif] WA gateway env vars not set, skipping');
+    return { success: false, reason: 'WA gateway not configured' };
   }
 
-  // Format phone number to WhatsApp format (62xxx@c.us)
-  let phone = (customer_telepon || '').replace(/\D/g, '');
-  if (phone.startsWith('0')) phone = '62' + phone.slice(1);
-  if (!phone.startsWith('62')) phone = '62' + phone;
-  if (phone.length < 10) {
+  const recipient = formatWaRecipient(customer_telepon);
+  if (!recipient || recipient.length < 10) {
     console.warn(`[production/pengantaranNotif] Invalid phone: ${customer_telepon}`);
     return { success: false, reason: 'Invalid phone number' };
   }
-  const chatId = `${phone}@c.us`;
 
   const waLink = OUTLET_WHATSAPP_LINK[outlet] || '#';
   const isLunas = (pembayaran || '').toLowerCase() === 'lunas';
@@ -209,15 +226,19 @@ async function sendPengantaranNotificationToCustomer({
     text = custom_text.trim();
   }
 
-  const body = { session: wahaSession, chatId, text };
+  const body = {
+    session: waSession,
+    to: recipient,
+    message: text,
+  };
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s — WAHA bisa lambat
+    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s
 
-    const resp = await fetch(`${wahaUrl}/api/sendText`, {
+    const resp = await fetch(`${waUrl}/api/send-message`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Api-Key': wahaApiKey },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
       signal: controller.signal,
     });
@@ -225,13 +246,13 @@ async function sendPengantaranNotificationToCustomer({
     clearTimeout(timeoutId);
 
     if (resp.ok) {
-      console.log(`[production/pengantaranNotif] Sent to ${chatId} (no_nota: ${no_nota}, items: ${items.length})`);
+      console.log(`[production/pengantaranNotif] Sent to ${recipient} (no_nota: ${no_nota}, items: ${items.length})`);
       return { success: true };
     }
 
     const errText = await resp.text().catch(() => '(no body)');
-    console.error(`[production/pengantaranNotif] WAHA failed: ${resp.status} - ${errText}`);
-    return { success: false, reason: `WAHA error: ${resp.status}` };
+    console.error(`[production/pengantaranNotif] WA gateway failed: ${resp.status} - ${errText}`);
+    return { success: false, reason: `WA gateway error: ${resp.status}` };
   } catch (err) {
     const reason = err.name === 'AbortError' ? 'timeout (60s)' : err.message;
     console.error(`[production/pengantaranNotif] Error: ${reason}`);
@@ -241,12 +262,11 @@ async function sendPengantaranNotificationToCustomer({
 
 /* ── Scheduler: check pengantaran_at + delay and send notification ──── */
 export async function runPengantaranNotificationScheduler() {
-  const wahaUrl = process.env.WAHA_URL;
-  const wahaApiKey = process.env.WAHA_API_KEY;
-  const wahaSession = process.env.WAHA_SESSION_CLEANOX;
+  const waUrl = process.env.ALORA_WA_URL;
+  const waSession = process.env.ALORA_WA_ALORA_SESSION;
 
-  if (!wahaUrl || !wahaApiKey || !wahaSession) {
-    return; // WAHA not configured, skip silently
+  if (!waUrl || !waSession) {
+    return; // WA gateway not configured, skip silently
   }
 
   try {
