@@ -68,7 +68,7 @@ function formatWaRecipient(to) {
 
 async function sendOnHoldWaNotification({ id, no_nota, customer_nama, nama_item, outlet }) {
   const waUrl = (process.env.ALORA_WA_URL || 'http://43.129.37.205:3000').replace(/\/$/, '');
-  const waSession = process.env.ALORA_WA_ALORA_SESSION || 'cleanox';
+  const waSession = process.env.ALORA_WA_CLEANOX_SESSION || 'cleanox';
   const appUrl = (process.env.APP_URL || process.env.CORS_ORIGIN || '').replace(/\/$/, '');
   const groupId = process.env.NODE_ENV === 'development'
     ? '120363406439867993@g.us'
@@ -159,7 +159,7 @@ async function sendPengantaranNotificationToCustomer({
   custom_text, // optional: override generated message
 }) {
   const waUrl = (process.env.ALORA_WA_URL || 'http://43.129.37.205:3000').replace(/\/$/, '');
-  const waSession = process.env.ALORA_WA_ALORA_SESSION || 'cleanox';
+  const waSession = process.env.ALORA_WA_CLEANOX_SESSION || 'cleanox';
 
   if (!waUrl || !waSession) {
     console.warn('[production/pengantaranNotif] WA gateway env vars not set, skipping');
@@ -263,7 +263,7 @@ async function sendPengantaranNotificationToCustomer({
 /* ── Scheduler: check pengantaran_at + delay and send notification ──── */
 export async function runPengantaranNotificationScheduler() {
   const waUrl = process.env.ALORA_WA_URL;
-  const waSession = process.env.ALORA_WA_ALORA_SESSION;
+  const waSession = process.env.ALORA_WA_CLEANOX_SESSION;
 
   if (!waUrl || !waSession) {
     return; // WA gateway not configured, skip silently
