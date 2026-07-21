@@ -23,12 +23,14 @@ if (!fs.existsSync(UPLOAD_BASE)) fs.mkdirSync(UPLOAD_BASE, { recursive: true });
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 
 /* ── Allowed stages ───────────────────────────────────── */
-const ALLOWED_STAGES = ['pickup', 'packing'];
+const ALLOWED_STAGES = ['pickup', 'cuci_jemur', 'packing', 'pengantaran'];
 
 /* ── DB column mapping ────────────────────────────────── */
 const DB_COLS = {
-  pickup:  { file: 'pickup_evidance_file',  path: 'pickup_evidance_path'  },
-  packing: { file: 'packing_evidance_file', path: 'packing_evidance_path' },
+  pickup:      { file: 'pickup_evidance_file',  path: 'pickup_evidance_path'  },
+  cuci_jemur:  { file: 'cuci_jemur_file',       path: 'cuci_jemur_path'       },
+  packing:     { file: 'packing_evidance_file', path: 'packing_evidance_path' },
+  pengantaran: { file: 'pengantaran_file',      path: 'pengantaran_path'      },
 };
 
 /* ── Multer config (memory storage for compression) ──── */

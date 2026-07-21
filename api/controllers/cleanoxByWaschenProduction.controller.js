@@ -559,7 +559,9 @@ export const getTracking = async (req, res) => {
         pengantaran_by, pengantaran_at,
         catatan_by_cleanox,
         pickup_evidance_file, pickup_evidance_path,
+        cuci_jemur_file, cuci_jemur_path,
         packing_evidance_file, packing_evidance_path,
+        pengantaran_file, pengantaran_path,
         updated_by, updated_at
       FROM ${TRANSAKSI_TABLE}
       WHERE id = ?`,

@@ -723,13 +723,34 @@ function EvidanceSection({ itemId, stage, evidancePath, evidanceFile, userRole, 
   };
 
   const handleDelete = async () => {
-    if (!confirm('Hapus evidance ini?')) return;
+    const result = await Swal.fire({
+      icon: 'warning',
+      title: 'Hapus Evidance?',
+      html: '<p class="text-sm text-gray-600">Evidance ini akan dihapus secara permanen.</p>',
+      showCancelButton: true,
+      confirmButtonText: 'Ya, Hapus',
+      cancelButtonText: 'Batal',
+      confirmButtonColor: '#e11d48',
+    });
+    if (!result.isConfirmed) return;
+
     setDeleting(true);
     try {
       await api.delete('/evidance/delete', { data: { id: itemId, stage } });
       onUploaded(stage, null, null);
+      Swal.fire({
+        icon: 'success',
+        title: 'Berhasil',
+        text: 'Evidance berhasil dihapus',
+        timer: 1800,
+        showConfirmButton: false,
+      });
     } catch (err) {
-      alert(err.response?.data?.message || 'Gagal menghapus');
+      Swal.fire({
+        icon: 'error',
+        title: 'Gagal',
+        text: err.response?.data?.message || 'Gagal menghapus evidance',
+      });
     } finally {
       setDeleting(false);
     }
@@ -767,7 +788,13 @@ function EvidanceSection({ itemId, stage, evidancePath, evidanceFile, userRole, 
     }
   };
 
-  const stageLabel = stage === 'pickup' ? 'Pickup' : 'Packing';
+  const stageLabels = {
+    pickup: 'Pickup',
+    cuci_jemur: 'Cuci Jemur',
+    packing: 'Packing',
+    pengantaran: 'Pengantaran',
+  };
+  const stageLabel = stageLabels[stage] || stage;
 
   return (
     <div className="space-y-2">
@@ -1076,9 +1103,23 @@ function TrackingModal({ show, onClose, row, userRole, isManagement }) {
   };
 
   const handleEvidanceUploaded = (stage, filename, filepath) => {
-    const fileCol = stage === 'pickup' ? 'pickup_evidance_file' : 'packing_evidance_file';
-    const pathCol = stage === 'pickup' ? 'pickup_evidance_path' : 'packing_evidance_path';
-    setTracking((prev) => ({ ...prev, [fileCol]: filename, [pathCol]: filepath }));
+    let fileCol, pathCol;
+    if (stage === 'pickup') {
+      fileCol = 'pickup_evidance_file';
+      pathCol = 'pickup_evidance_path';
+    } else if (stage === 'cuci_jemur') {
+      fileCol = 'cuci_jemur_file';
+      pathCol = 'cuci_jemur_path';
+    } else if (stage === 'packing') {
+      fileCol = 'packing_evidance_file';
+      pathCol = 'packing_evidance_path';
+    } else if (stage === 'pengantaran') {
+      fileCol = 'pengantaran_file';
+      pathCol = 'pengantaran_path';
+    }
+    if (fileCol && pathCol) {
+      setTracking((prev) => ({ ...prev, [fileCol]: filename, [pathCol]: filepath }));
+    }
   };
 
   if (!show) return null;
@@ -1451,14 +1492,29 @@ function TrackingModal({ show, onClose, row, userRole, isManagement }) {
                             <p className="mt-1 text-xs text-gray-300 italic">Menunggu...</p>
                           )}
 
-                          {/* Evidance section for Pickup & Packing (show when stage is filled) */}
-                          {(stage.key === 'Pickup' || stage.key === 'Packing') && filled && (
+                          {/* Evidance section (show when stage is filled) */}
+                          {filled && (
                             <div className="mt-2">
                               <EvidanceSection
                                 itemId={row.id}
-                                stage={stage.key === 'Pickup' ? 'pickup' : 'packing'}
-                                evidancePath={tracking[stage.key === 'Pickup' ? 'pickup_evidance_path' : 'packing_evidance_path']}
-                                evidanceFile={tracking[stage.key === 'Pickup' ? 'pickup_evidance_file' : 'packing_evidance_file']}
+                                stage={
+                                  stage.key === 'Pickup' ? 'pickup' :
+                                  stage.key === 'Cuci Jemur' ? 'cuci_jemur' :
+                                  stage.key === 'Packing' ? 'packing' :
+                                  'pengantaran'
+                                }
+                                evidancePath={
+                                  stage.key === 'Pickup' ? tracking.pickup_evidance_path :
+                                  stage.key === 'Cuci Jemur' ? tracking.cuci_jemur_path :
+                                  stage.key === 'Packing' ? tracking.packing_evidance_path :
+                                  tracking.pengantaran_path
+                                }
+                                evidanceFile={
+                                  stage.key === 'Pickup' ? tracking.pickup_evidance_file :
+                                  stage.key === 'Cuci Jemur' ? tracking.cuci_jemur_file :
+                                  stage.key === 'Packing' ? tracking.packing_evidance_file :
+                                  tracking.pengantaran_file
+                                }
                                 userRole={userRole}
                                 isManagement={isManagement}
                                 onUploaded={handleEvidanceUploaded}
