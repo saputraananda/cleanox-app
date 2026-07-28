@@ -27,6 +27,30 @@ export const aloraPool = mysql.createPool({
   ssl: { rejectUnauthorized: false },
 });
 
+export const smartlinkPool = mysql.createPool({
+  host: process.env.DB_HOST_SMARTLINK,
+  port: Number(process.env.DB_PORT_SMARTLINK) || 3306,
+  user: process.env.DB_USER_SMARTLINK,
+  password: process.env.DB_PASS_SMARTLINK,
+  database: process.env.DB_NAME_SMARTLINK,
+  waitForConnections: true,
+  connectionLimit: 10,
+  timezone: '+07:00',
+  ssl: { rejectUnauthorized: false },
+});
+
+export const cleanoxSmartlinkPool = mysql.createPool({
+  host: process.env.DB_HOST_CLEANOX_SMARTLINK,
+  port: Number(process.env.DB_PORT_CLEANOX_SMARTLINK) || 3306,
+  user: process.env.DB_USER_CLEANOX_SMARTLINK,
+  password: process.env.DB_PASS_CLEANOX_SMARTLINK,
+  database: process.env.DB_NAME_CLEANOX_SMARTLINK,
+  waitForConnections: true,
+  connectionLimit: 10,
+  timezone: '+07:00',
+  ssl: { rejectUnauthorized: false },
+});
+
 export default cleanoxPool;
 
 

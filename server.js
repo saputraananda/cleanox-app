@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import authRoutes from './api/routes/auth.routes.js';
 import cleanoxByWaschenProductionRoutes from './api/routes/cleanoxByWaschenProduction.routes.js';
 import evidanceRoutes from './api/routes/evidance.routes.js';
+import dashboardCleanoxRoutes from './api/routes/DashboardCleanox.routes.js';
 
 dotenv.config();
 
@@ -28,6 +29,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api/auth', authRoutes);
 app.use('/api/cleanox-by-waschen-production', cleanoxByWaschenProductionRoutes);
 app.use('/api/evidance', evidanceRoutes);
+app.use('/api/dashboard-cleanox', dashboardCleanoxRoutes);
 
 /* ── Serve built React app in production ─────────────── */
 if (process.env.NODE_ENV === 'production') {

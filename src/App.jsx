@@ -25,17 +25,27 @@ export default function App() {
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route
         path="/login"
-        element={<PublicRoute><LoginPage /></PublicRoute>}
+        element={
+          <PublicRoute>
+            <LoginPage />
+          </PublicRoute>
+        }
       />
       <Route
         path="/register"
-        element={<PublicRoute><RegisterPage /></PublicRoute>}
+        element={
+          <PublicRoute>
+            <RegisterPage />
+          </PublicRoute>
+        }
       />
       <Route
         path="/dashboard"
         element={
           <PrivateRoute>
-            <Layout><DashboardPage /></Layout>
+            <Layout>
+              <DashboardPage />
+            </Layout>
           </PrivateRoute>
         }
       />
