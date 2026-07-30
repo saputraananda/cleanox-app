@@ -114,7 +114,7 @@ JWT_SECRET=<secret_key_panjang>
 JWT_EXPIRES_IN=7d
 
 # Server
-PORT=3001
+PORT=6000
 ```
 
 ### 4. Jalankan aplikasi (development)
@@ -123,12 +123,12 @@ PORT=3001
 npm run dev
 ```
 
-Perintah ini menjalankan **backend** (port `3001`) dan **frontend** (port `5173`) secara bersamaan.
+Perintah ini menjalankan **backend** (port `6000`) dan **frontend** (port `5175`) secara bersamaan.
 
 | URL | Keterangan |
 |---|---|
-| `http://localhost:5173` | Aplikasi React (Vite) |
-| `http://localhost:3001/api` | REST API Express |
+| `http://localhost:5175` | Aplikasi React (Vite) |
+| `http://localhost:6000/api` | REST API Express |
 
 ---
 

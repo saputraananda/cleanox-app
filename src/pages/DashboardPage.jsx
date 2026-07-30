@@ -123,7 +123,7 @@ export default function DashboardPage() {
   const [filterType, setFilterType] = useState('bulan'); // 'bulan' | 'rentang' | 'tahun'
   const [selectedPeriod, setSelectedPeriod] = useState({ yr: '', mo: '' });
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-  
+
   // Set default dateRange to 26th of last month to 25th of current month
   const [dateRange, setDateRange] = useState(() => {
     const now = new Date();
@@ -133,8 +133,8 @@ export default function DashboardPage() {
     let startYear = currentYear;
     let startMonth = currentMonth - 1;
     if (startMonth === 0) {
-        startMonth = 12;
-        startYear = currentYear - 1;
+      startMonth = 12;
+      startYear = currentYear - 1;
     }
     const startDate = `${startYear}-${String(startMonth).padStart(2, '0')}-26`;
     const endDate = `${currentYear}-${String(currentMonth).padStart(2, '0')}-25`;
@@ -187,7 +187,7 @@ export default function DashboardPage() {
           const now = new Date();
           setSelectedPeriod({ yr: now.getFullYear(), mo: now.getMonth() + 1 });
         }
-        
+
         const fetchedOutlets = data.outlets || [];
         setOutletsList(fetchedOutlets);
       })
@@ -201,7 +201,7 @@ export default function DashboardPage() {
   // Fetch dashboard data when filters change
   useEffect(() => {
     if (!showDashboard) return;
-    
+
     if (filterType === 'bulan' && (!selectedPeriod.yr || !selectedPeriod.mo)) return;
     if (filterType === 'rentang' && (!dateRange.startDate || !dateRange.endDate)) return;
     if (filterType === 'tahun' && !selectedYear) return;
@@ -577,17 +577,17 @@ export default function DashboardPage() {
             const statusInfo = !hasTarget
               ? { label: 'Target Belum Diset', color: 'text-slate-400', bgBadge: 'bg-slate-100', ring: 'bg-slate-200' }
               : pct >= 100
-              ? { label: 'Target Tercapai! 🎉', color: 'text-emerald-600', bgBadge: 'bg-emerald-50', ring: 'bg-emerald-500' }
-              : pct >= 75
-              ? { label: 'On Track', color: 'text-blue-600', bgBadge: 'bg-blue-50', ring: 'bg-blue-500' }
-              : pct >= 50
-              ? { label: 'Perlu Dikejar', color: 'text-amber-600', bgBadge: 'bg-amber-50', ring: 'bg-amber-500' }
-              : { label: 'Perlu Perhatian', color: 'text-rose-600', bgBadge: 'bg-rose-50', ring: 'bg-rose-500' };
+                ? { label: 'Target Tercapai! 🎉', color: 'text-emerald-600', bgBadge: 'bg-emerald-50', ring: 'bg-emerald-500' }
+                : pct >= 75
+                  ? { label: 'On Track', color: 'text-blue-600', bgBadge: 'bg-blue-50', ring: 'bg-blue-500' }
+                  : pct >= 50
+                    ? { label: 'Perlu Dikejar', color: 'text-amber-600', bgBadge: 'bg-amber-50', ring: 'bg-amber-500' }
+                    : { label: 'Perlu Perhatian', color: 'text-rose-600', bgBadge: 'bg-rose-50', ring: 'bg-rose-500' };
             const barColor = !hasTarget ? 'from-slate-300 to-slate-400'
               : pct >= 100 ? 'from-emerald-400 to-emerald-600'
-              : pct >= 75 ? 'from-blue-400 to-indigo-600'
-              : pct >= 50 ? 'from-amber-400 to-orange-500'
-              : 'from-rose-400 to-rose-600';
+                : pct >= 75 ? 'from-blue-400 to-indigo-600'
+                  : pct >= 50 ? 'from-amber-400 to-orange-500'
+                    : 'from-rose-400 to-rose-600';
 
             return (
               <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
@@ -836,9 +836,10 @@ export default function DashboardPage() {
               </div>
 
               {/* Segment & Leaderboard Grid */}
+              {/*
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
-                {/* Leaderboard */}
+                // Leaderboard
                 <div className="lg:col-span-12 bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4 flex flex-col">
                   <div>
                     <h3 className="text-sm font-bold text-slate-800">Performa Pembuat Nota</h3>
@@ -894,8 +895,10 @@ export default function DashboardPage() {
                 </div>
 
               </div>
+              */}
 
               {/* Detail Table */}
+              {/*
               <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
@@ -919,7 +922,7 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                {/* Table container */}
+                // Table container
                 <div className="overflow-x-auto rounded-xl border border-slate-200/60">
                   <table className="w-full border-collapse text-left text-xs text-slate-650">
                     <thead>
@@ -987,7 +990,7 @@ export default function DashboardPage() {
                   </table>
                 </div>
 
-                {/* Table Pagination */}
+                // Table Pagination
                 {totalPages > 1 && (
                   <div className="flex items-center justify-between pt-3 border-t border-slate-100">
                     <p className="text-[10px] text-slate-450">
@@ -1033,6 +1036,7 @@ export default function DashboardPage() {
                 )}
 
               </div>
+              */}
 
             </div>
           )}
@@ -1158,9 +1162,10 @@ export default function DashboardPage() {
                 </div>
 
                 {/* Charts Row */}
+                {/*
                 {rows.length > 0 && (
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-                    {/* Stacked Bar Chart */}
+                    // Stacked Bar Chart
                     <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
                       <div className="flex items-center justify-between mb-4">
                         <div>
@@ -1196,7 +1201,7 @@ export default function DashboardPage() {
                       </div>
                     </div>
 
-                    {/* Donut Chart */}
+                    // Donut Chart
                     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5 flex flex-col">
                       <div className="mb-4">
                         <h3 className="text-sm font-bold text-slate-800">Komposisi Pembayaran</h3>
@@ -1239,8 +1244,10 @@ export default function DashboardPage() {
                     </div>
                   </div>
                 )}
+                */}
 
                 {/* Per-Outlet Detail Table */}
+                {/*
                 <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
                   <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
                     <div>
@@ -1303,6 +1310,7 @@ export default function DashboardPage() {
                     </table>
                   </div>
                 </div>
+                */}
 
                 {/* Cleanox Only Detail Transactions Table */}
                 {(() => {
@@ -1374,11 +1382,10 @@ export default function DashboardPage() {
                                   <td className="px-4 py-2.5 text-slate-550 font-medium">{displayOutletName(row.outlet)}</td>
                                   <td className="px-4 py-2.5 text-slate-450 font-medium">{formatDateTime(row.waktu_pembayaran)}</td>
                                   <td className="px-4 py-2.5">
-                                    <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-bold ${
-                                      row.jenis_bayar === 'Tunai'
+                                    <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-bold ${row.jenis_bayar === 'Tunai'
                                         ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
                                         : 'bg-violet-50 text-violet-700 border border-violet-100'
-                                    }`}>
+                                      }`}>
                                       {row.jenis_bayar}
                                     </span>
                                   </td>
@@ -1417,11 +1424,10 @@ export default function DashboardPage() {
                                 <button
                                   key={pg}
                                   onClick={() => setCleanoxCurrentPage(pg)}
-                                  className={`w-6 h-6 flex items-center justify-center rounded-lg text-[10px] font-bold border transition-all ${
-                                    cleanoxCurrentPage === pg
+                                  className={`w-6 h-6 flex items-center justify-center rounded-lg text-[10px] font-bold border transition-all ${cleanoxCurrentPage === pg
                                       ? 'bg-indigo-600 border-indigo-650 text-white shadow-sm'
                                       : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-                                  }`}
+                                    }`}
                                 >
                                   {pg}
                                 </button>

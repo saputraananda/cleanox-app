@@ -18,7 +18,7 @@ const app = express();
 
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+    origin: process.env.CORS_ORIGIN || 'http://localhost:5175',
     credentials: true,
   })
 );
@@ -39,7 +39,7 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 6000;
 app.listen(PORT, () => {
   console.log(`🚀  Server running on http://localhost:${PORT}`);
   console.log(`🌍  Mode: ${process.env.NODE_ENV || 'development (NODE_ENV not set)'}`);
