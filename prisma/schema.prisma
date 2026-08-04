@@ -1,0 +1,139 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+model mst_category {
+  id           Int            @id @default(autoincrement())
+  name         String         @unique(map: "name") @db.VarChar(100)
+  created_at   DateTime?      @default(now()) @db.Timestamp(0)
+  mst_services mst_services[]
+}
+
+model mst_role {
+  id          Int           @id @default(autoincrement()) @db.UnsignedInt
+  employee_id Int           @unique(map: "uq_leader_employee") @db.UnsignedInt
+  role        mst_role_role @default(produksi)
+  created_at  DateTime      @default(now()) @db.DateTime(0)
+  updated_at  DateTime      @default(now()) @db.DateTime(0)
+}
+
+model mst_services {
+  id             Int                         @id @default(autoincrement())
+  name           String                      @db.VarChar(200)
+  price          Decimal                     @db.Decimal(15, 2)
+  satuan_id      Int?
+  satuan_name    String?                     @db.VarChar(100)
+  category_id    Int?
+  duration_value Int?
+  duration_unit  mst_services_duration_unit?
+  status         String?                     @default("Aktif") @db.VarChar(20)
+  created_at     DateTime?                   @default(now()) @db.Timestamp(0)
+  updated_at     DateTime?                   @default(now()) @db.Timestamp(0)
+  mst_category   mst_category?               @relation(fields: [category_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "mst_services_ibfk_1")
+
+  @@index([category_id], map: "category_id")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model mst_target_cleanox {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  outlet     String?   @db.VarChar(100)
+  tahun      Int       @db.UnsignedSmallInt
+  bulan      Int       @db.UnsignedTinyInt
+  nominal    Int       @default(0)
+  created_at DateTime? @default(now()) @db.Timestamp(0)
+  updated_at DateTime? @default(now()) @db.Timestamp(0)
+
+  @@unique([outlet, tahun, bulan], map: "uniq_outlet_tahun_bulan")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model tr_rekap_transaksi_reguler_waschen {
+  id                     BigInt                                     @id @default(autoincrement()) @db.UnsignedBigInt
+  no_nota                String                                     @db.VarChar(50)
+  customer_nama          String?                                    @db.VarChar(255)
+  customer_telepon       String?                                    @db.VarChar(50)
+  alamat_customer        String?                                    @db.Text
+  progress_pengerjaan    String?                                    @db.VarChar(100)
+  status                 tr_rekap_transaksi_reguler_waschen_status?
+  updated_by             String?                                    @db.VarChar(100)
+  updated_at             DateTime?                                  @default(now()) @db.DateTime(0)
+  outlet                 String                                     @db.VarChar(100)
+  tgl_terima             DateTime?                                  @db.DateTime(0)
+  tgl_selesai            DateTime?                                  @db.DateTime(0)
+  subtotal               Decimal?                                   @db.Decimal(15, 2)
+  tambahan_express       Decimal?                                   @db.Decimal(15, 2)
+  diskon                 Decimal?                                   @db.Decimal(15, 2)
+  pajak                  Decimal?                                   @db.Decimal(15, 2)
+  biaya_service          Decimal?                                   @db.Decimal(15, 2)
+  total_tagihan          Decimal?                                   @db.Decimal(15, 2)
+  jenis                  String?                                    @db.VarChar(50)
+  pembayaran             String?                                    @db.VarChar(50)
+  pengambilan            String?                                    @db.Text
+  tgl_pengambilan        DateTime?                                  @db.DateTime(0)
+  pembuat_nota           String?                                    @db.VarChar(50)
+  keterangan_nota        String?                                    @db.Text
+  jenis_layanan          String?                                    @db.VarChar(100)
+  nama_item              String?                                    @db.VarChar(255)
+  jumlah                 Decimal?                                   @db.Decimal(15, 2)
+  satuan_item            String?                                    @db.VarChar(50)
+  total                  Decimal?                                   @db.Decimal(15, 2)
+  jumlah_item            Int                                        @default(1)
+  jumlah_item_asal       Int?
+  item_ke                Int                                        @default(1)
+  keterangan             String?                                    @db.Text
+  pickup_by              Json?
+  pickup_at              DateTime?                                  @db.DateTime(0)
+  pickup_evidance_file   String?                                    @db.VarChar(255)
+  pickup_evidance_path   String?                                    @db.VarChar(500)
+  cuci_jemur_by          Json?
+  cuci_jemur_at          DateTime?                                  @db.DateTime(0)
+  cuci_jemur_deadline_at DateTime?                                  @db.DateTime(0)
+  on_hold                Boolean                                    @default(false)
+  isContinue             Boolean?
+  continue_by            String?                                    @db.VarChar(100)
+  catatan_cuci_jemur     String?                                    @db.Text
+  cuci_jemur_file        String?                                    @db.VarChar(255)
+  cuci_jemur_path        String?                                    @db.VarChar(500)
+  packing_by             Json?
+  packing_at             DateTime?                                  @db.DateTime(0)
+  packing_evidance_file  String?                                    @db.VarChar(255)
+  packing_evidance_path  String?                                    @db.VarChar(500)
+  pengantaran_by         Json?
+  pengantaran_at         DateTime?                                  @db.DateTime(0)
+  pengantaran_file       String?                                    @db.VarChar(255)
+  pengantaran_path       String?                                    @db.VarChar(500)
+  catatan_by_cleanox     String?                                    @db.Text
+
+  @@unique([no_nota, nama_item(length: 100), jumlah, total, item_ke], map: "uq_nota_item_jumlah_total_itemke")
+  @@index([no_nota], map: "idx_no_nota")
+  @@index([no_nota, item_ke], map: "idx_no_nota_itemke")
+  @@index([on_hold], map: "idx_on_hold")
+  @@index([outlet, tgl_terima, tgl_selesai], map: "idx_outlet")
+  @@index([status], map: "idx_status")
+  @@index([tgl_terima, tgl_selesai], map: "idx_tgl_terima")
+}
+
+enum mst_role_role {
+  produksi
+  frontliner
+}
+
+enum tr_rekap_transaksi_reguler_waschen_status {
+  Pickup
+  Cuci_Jemur  @map("Cuci Jemur")
+  Packing
+  Pengantaran
+}
+
+enum mst_services_duration_unit {
+  jam
+  hari
+  minggu
+  bulan
+}

@@ -39,3 +39,4 @@ Thumbs.db
 *.tsbuildinfo
 
 *agent
+/src/generated/prisma
