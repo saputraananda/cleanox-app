@@ -1,4 +1,4 @@
-# Dependencies
+﻿# Dependencies
 node_modules/
 
 # Build output (dist di-commit agar Hostinger Passenger bisa serve React)
@@ -45,5 +45,3 @@ Thumbs.db
 .agents/
 .claude/
 .windsurf/
-docs/
-plans/
