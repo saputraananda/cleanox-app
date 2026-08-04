@@ -2,6 +2,19 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import cleanoxPool, { aloraPool as pool } from '../db/cleanox.js';
 
+const getEmployeeContext = async (employeeId) => {
+  const [empRows] = await pool.query(
+    'SELECT company_id, exit_date FROM mst_employee WHERE employee_id = ?',
+    [employeeId]
+  );
+
+  const employee = empRows[0] || null;
+  const companyId = employee?.company_id ?? null;
+  const isManagement = companyId === 1 && employee?.exit_date === null;
+
+  return { companyId, isManagement };
+};
+
 
 
 /* ── Register ─────────────────────────────────────────── */
@@ -93,12 +106,7 @@ export const login = async (req, res) => {
       return res.status(401).json({ message: 'Username atau password salah' });
     }
 
-    // Ambil role dynamically: company_id = 1 & exit_date IS NULL -> management
-    const [empRows] = await pool.query(
-      'SELECT company_id, exit_date FROM mst_employee WHERE employee_id = ?',
-      [user.id]
-    );
-    const isManagement = empRows.length > 0 && empRows[0].company_id === 1 && empRows[0].exit_date === null;
+    const { companyId, isManagement } = await getEmployeeContext(user.id);
 
     const [roleRows] = await cleanoxPool.query(
       'SELECT role FROM mst_role WHERE employee_id = ?',
@@ -107,7 +115,15 @@ export const login = async (req, res) => {
     const userRole = roleRows.length > 0 ? roleRows[0].role : 'frontliner';
 
     const token = jwt.sign(
-      { id: user.id, email: user.email, role: userRole, name: user.name, username: user.username, isManagement },
+      {
+        id: user.id,
+        email: user.email,
+        role: userRole,
+        name: user.name,
+        username: user.username,
+        isManagement,
+        company_id: companyId,
+      },
       process.env.SESSION_SECRET,
       { expiresIn: '7d' }
     );
@@ -122,6 +138,7 @@ export const login = async (req, res) => {
         role: userRole,
         avatar: user.avatar,
         isManagement,
+        company_id: companyId,
       },
     });
   } catch (err) {
@@ -142,12 +159,7 @@ export const getMe = async (req, res) => {
     }
     const user = rows[0];
 
-    // Ambil role dynamically: company_id = 1 & exit_date IS NULL -> management
-    const [empRows] = await pool.query(
-      'SELECT company_id, exit_date FROM mst_employee WHERE employee_id = ?',
-      [user.id]
-    );
-    const isManagement = empRows.length > 0 && empRows[0].company_id === 1 && empRows[0].exit_date === null;
+    const { companyId, isManagement } = await getEmployeeContext(user.id);
 
     const [roleRows] = await cleanoxPool.query(
       'SELECT role FROM mst_role WHERE employee_id = ?',
@@ -160,6 +172,7 @@ export const getMe = async (req, res) => {
         ...user,
         role: userRole,
         isManagement,
+        company_id: companyId,
       },
     });
   } catch (err) {

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, AlertCircle, Loader2 } from 'lucide-react';
 import api from '../utils/api.js';
-import { setAuth } from '../utils/auth.js';
+import { getLandingRoute, setAuth } from '../utils/auth.js';
 import cleanoxLogo from '../assets/cleanox.png';
 import AuthHeroPanel from '../components/AuthHeroPanel.jsx';
 
@@ -20,7 +20,7 @@ export default function LoginPage() {
     try {
       const { data } = await api.post('/auth/login', form);
       setAuth(data.token, data.user);
-      navigate('/dashboard');
+      navigate(getLandingRoute(data.user), { replace: true });
     } catch (err) {
       setError(err.response?.data?.message || 'Login gagal. Silakan coba lagi.');
     } finally {

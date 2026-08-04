@@ -17,6 +17,11 @@ export const getUser = () => {
   }
 };
 
+export const getLandingRoute = (user = getUser()) => {
+  if (user?.company_id === 3) return '/mobile-worker';
+  return '/dashboard';
+};
+
 export const clearAuth = async () => {
   const token = localStorage.getItem(TOKEN_KEY);
   if (token) {
