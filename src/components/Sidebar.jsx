@@ -3,6 +3,7 @@ import {
   LayoutDashboard,
   Sparkles,
   Factory,
+  ClipboardList,
   Users,
   TrendingUp,
   X,
@@ -12,6 +13,7 @@ import { getUser } from '../utils/auth.js';
 
 const NAV_ITEMS = [
   { label: 'Beranda',            icon: LayoutDashboard, to: '/dashboard',                     roles: ['admin', 'management', 'produksi', 'frontliner'] },
+  { label: 'POS Admin',          icon: ClipboardList,   to: '/pos-transactions',              roles: ['admin', 'management'] },
   { label: 'Cleanox',            icon: Sparkles,        to: '/cleanox',                       roles: ['admin', 'management'] },
   { label: 'Cleanox By Waschen', icon: Factory,         to: '/cleanox-by-waschen-production',  roles: ['admin', 'management', 'produksi', 'frontliner'] },
 ];

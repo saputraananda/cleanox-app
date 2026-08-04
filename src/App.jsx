@@ -4,6 +4,9 @@ import LoginPage from './pages/LoginPage.jsx';
 import RegisterPage from './pages/RegisterPage.jsx';
 import DashboardPage from './pages/DashboardPage.jsx';
 import CleanoxByWaschenProductionPage from './pages/CleanoxByWaschenProductionPage.jsx';
+import PosTransactionsPage from './pages/PosTransactionsPage.jsx';
+import PosTransactionCreatePage from './pages/PosTransactionCreatePage.jsx';
+import PosTransactionDetailPage from './pages/PosTransactionDetailPage.jsx';
 import Layout from './components/Layout.jsx';
 
 const MobileWorkerShell = () => (
@@ -62,6 +65,36 @@ export default function App() {
         element={
           <PrivateRoute companyIds={[3]}>
             <MobileWorkerShell />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/pos-transactions"
+        element={
+          <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>
+            <Layout>
+              <PosTransactionsPage />
+            </Layout>
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/pos-transactions/new"
+        element={
+          <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>
+            <Layout>
+              <PosTransactionCreatePage />
+            </Layout>
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/pos-transactions/:id"
+        element={
+          <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>
+            <Layout>
+              <PosTransactionDetailPage />
+            </Layout>
           </PrivateRoute>
         }
       />

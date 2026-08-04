@@ -19,7 +19,8 @@ import {
   ShoppingBag,
   CreditCard,
   Wallet,
-  BarChart2
+  BarChart2,
+  ClipboardList
 } from 'lucide-react';
 import { getUser } from '../utils/auth.js';
 import api from '../utils/api.js';
@@ -76,6 +77,17 @@ const MONTHS_ID = [
 ];
 
 const MENU_CARDS = [
+  {
+    id: 'pos-admin',
+    title: 'POS Admin',
+    description: 'Input transaksi POS baru, assignment worker, dan pantau tracking POS.',
+    icon: ClipboardList,
+    gradient: 'from-sky-500 to-indigo-600',
+    ring: 'ring-sky-200',
+    soon: false,
+    to: '/pos-transactions',
+    roles: ['admin', 'management'],
+  },
   {
     id: 'cleanox',
     title: 'Cleanox',
