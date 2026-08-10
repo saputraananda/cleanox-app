@@ -394,7 +394,13 @@ export const getEmployees = async (_req, res) => {
     }
 
     const [rows] = await aloraPool.query(
-      `SELECT id, name FROM users WHERE id IN (?) AND name <> 'Tim Produksi Cleanox' ORDER BY name`,
+      `SELECT u.id, u.name 
+       FROM users u
+       INNER JOIN mst_employee e ON u.id = e.employee_id
+       WHERE u.id IN (?) 
+         AND u.name <> 'Tim Produksi Cleanox' 
+         AND e.exit_date IS NULL 
+       ORDER BY u.name`,
       [employeeIds]
     );
     return res.json({ employees: rows });
