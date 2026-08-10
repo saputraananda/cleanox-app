@@ -1,16 +1,25 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Menu, LogOut, ChevronDown, User } from 'lucide-react';
+import { Menu, LogOut, ChevronDown } from 'lucide-react';
+import BodyPortal from './BodyPortal.jsx';
 import { getUser, clearAuth } from '../utils/auth.js';
 
 export default function Header({ onMenuToggle }) {
   const [open, setOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const navigate = useNavigate();
   const user = getUser();
 
   const handleLogout = async () => {
-    await clearAuth();
-    navigate('/login');
+    if (loggingOut) return;
+    setLoggingOut(true);
+    setOpen(false);
+    try {
+      await clearAuth();
+      navigate('/login', { replace: true });
+    } finally {
+      setLoggingOut(false);
+    }
   };
 
   const initials = user?.name
@@ -23,8 +32,8 @@ export default function Header({ onMenuToggle }) {
 
   return (
     <header className="h-16 bg-white border-b border-gray-100 flex items-center justify-between px-4 flex-shrink-0 z-10">
-      {/* Left: hamburger */}
       <button
+        type="button"
         onClick={onMenuToggle}
         className="p-2 rounded-lg hover:bg-gray-100 transition-colors text-gray-500 hover:text-gray-700"
         aria-label="Toggle menu"
@@ -32,9 +41,9 @@ export default function Header({ onMenuToggle }) {
         <Menu className="w-5 h-5" />
       </button>
 
-      {/* Right: user dropdown */}
       <div className="relative">
         <button
+          type="button"
           onClick={() => setOpen((v) => !v)}
           className="flex items-center gap-2.5 py-1.5 pl-2 pr-3 rounded-xl hover:bg-gray-100 transition-colors"
         >
@@ -51,26 +60,36 @@ export default function Header({ onMenuToggle }) {
         </button>
 
         {open && (
-          <>
+          <BodyPortal>
             <div
-              className="fixed inset-0 z-10"
+              className="fixed inset-0 z-[60]"
               onClick={() => setOpen(false)}
+              aria-hidden
             />
-            <div className="absolute right-0 top-full mt-2 w-52 bg-white rounded-xl shadow-lg border border-gray-100 z-20 overflow-hidden animate-fade-in">
+            <div
+              className="fixed z-[70] w-52 bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden"
+              style={{
+                top: '4.25rem',
+                right: '1rem',
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
               <div className="px-4 py-3 border-b border-gray-50">
                 <p className="text-sm font-semibold text-gray-900 truncate">{user?.name}</p>
                 <p className="text-xs text-gray-400 truncate">{user?.email}</p>
               </div>
 
               <button
+                type="button"
                 onClick={handleLogout}
-                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                disabled={loggingOut}
+                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors disabled:opacity-60"
               >
                 <LogOut className="w-4 h-4" />
-                Logout
+                {loggingOut ? 'Keluar...' : 'Logout'}
               </button>
             </div>
-          </>
+          </BodyPortal>
         )}
       </div>
     </header>

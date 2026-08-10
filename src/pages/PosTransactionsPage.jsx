@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, RefreshCw, Search, ArrowRight } from 'lucide-react';
+import { RefreshCw, Search, ArrowRight, SlidersHorizontal } from 'lucide-react';
 import api from '../utils/api.js';
 
 const formatCurrency = (value) =>
@@ -14,6 +14,7 @@ const formatCurrency = (value) =>
 const formatDateTime = (value) => {
   if (!value) return '-';
   return new Date(value).toLocaleString('id-ID', {
+    timeZone: 'Asia/Jakarta',
     day: '2-digit',
     month: 'short',
     year: 'numeric',
@@ -53,10 +54,10 @@ export default function PosTransactionsPage() {
 
   const summaryCards = useMemo(
     () => [
-      { label: 'Transaksi Masuk', value: summary?.incoming_transactions || 0 },
-      { label: 'Transaksi Aktif', value: summary?.active_transactions || 0 },
-      { label: 'Selesai', value: summary?.completed_transactions || 0 },
-      { label: 'Total Omzet', value: formatCurrency(summary?.total_revenue || 0) },
+      { label: 'Incoming', value: summary?.incoming_transactions || 0 },
+      { label: 'Active', value: summary?.active_transactions || 0 },
+      { label: 'Completed', value: summary?.completed_transactions || 0 },
+      { label: 'Total Revenue', value: formatCurrency(summary?.total_revenue || 0) },
     ],
     [summary]
   );
@@ -70,8 +71,8 @@ export default function PosTransactionsPage() {
     <div className="max-w-7xl mx-auto p-6 space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-brand-500">POS Admin</p>
-          <h1 className="text-2xl font-bold text-slate-900 mt-1">Transaksi POS Cleanox</h1>
+          <p className="text-[9.5px] font-semibold uppercase tracking-[.14em] text-blue-700">Cleanox Only</p>
+          <h1 className="text-[22px] font-extrabold tracking-[-0.01em] text-slate-900 mt-1">Riwayat Transaksi</h1>
           <p className="text-sm text-slate-500 mt-2">
             Jalur transaksi POS baru yang terpisah dari tracking produksi existing.
           </p>
@@ -85,13 +86,6 @@ export default function PosTransactionsPage() {
             <RefreshCw className="w-4 h-4" />
             Refresh
           </button>
-          <Link
-            to="/pos-transactions/new"
-            className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700"
-          >
-            <Plus className="w-4 h-4" />
-            Transaksi Baru
-          </Link>
         </div>
       </div>
 
@@ -120,18 +114,20 @@ export default function PosTransactionsPage() {
             onChange={(e) => setStatus(e.target.value)}
             className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
           >
-            <option value="">Semua Status</option>
+            <option value="">All Statuses</option>
             <option value="Draft">Draft</option>
-            <option value="Menunggu_Konfirmasi">Menunggu Konfirmasi</option>
-            <option value="Dijadwalkan">Dijadwalkan</option>
-            <option value="Dalam_Proses">Dalam Proses</option>
-            <option value="Selesai">Selesai</option>
-            <option value="Dibatalkan">Dibatalkan</option>
+            <option value="Assigned">Assigned</option>
+            <option value="Waiting_Confirmation">Waiting Confirmation</option>
+            <option value="Scheduled">Scheduled</option>
+            <option value="In_Progress">In Progress</option>
+            <option value="Completed">Completed</option>
+            <option value="Cancelled">Cancelled</option>
           </select>
           <button
             type="submit"
-            className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
+            className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
           >
+            <SlidersHorizontal className="w-4 h-4" />
             Terapkan
           </button>
         </form>
@@ -142,9 +138,9 @@ export default function PosTransactionsPage() {
           <div className="py-14 text-center text-sm text-slate-500">Memuat transaksi POS...</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
+            <table className="min-w-full text-[15px]">
               <thead>
-                <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-400">
+                <tr className="border-b border-slate-200 text-left text-sm uppercase tracking-wide text-slate-400">
                   <th className="px-3 py-3">No Transaksi</th>
                   <th className="px-3 py-3">Customer</th>
                   <th className="px-3 py-3">Tanggal Layanan</th>
@@ -169,26 +165,28 @@ export default function PosTransactionsPage() {
                       <td className="px-3 py-3 font-semibold text-brand-700">{row.transaction_no}</td>
                       <td className="px-3 py-3">
                         <div className="font-medium text-slate-800">{row.customer_name}</div>
-                        <div className="text-xs text-slate-400">{row.customer_phone || '-'}</div>
+                        <div className="text-sm text-slate-400">{row.customer_phone || '-'}</div>
                       </td>
                       <td className="px-3 py-3 text-slate-600">{formatDateTime(row.service_date)}</td>
                       <td className="px-3 py-3 text-slate-600">{row.total_people}</td>
                       <td className="px-3 py-3 text-slate-600">{row.total_items}</td>
                       <td className="px-3 py-3 text-slate-600">{row.total_workers}</td>
                       <td className="px-3 py-3">
-                        <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+                        <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-sm font-semibold text-slate-700">
                           {row.status}
                         </span>
                       </td>
                       <td className="px-3 py-3 text-right font-semibold text-slate-900">
-                        {formatCurrency(row.final_amount)}
+                        {row.pricing_pending
+                          ? 'Pending jam'
+                          : formatCurrency(row.final_amount)}
                       </td>
                       <td className="px-3 py-3 text-right">
                         <Link
-                          to={`/pos-transactions/${row.id}`}
-                          className="inline-flex items-center gap-1 text-sm font-semibold text-brand-600 hover:text-brand-700"
+                          to={`/cleanox-only/transactions/${row.id}`}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-[10px] border border-blue-200 bg-blue-50 text-blue-700 transition duration-150 hover:-translate-y-0.5 hover:bg-blue-100 active:scale-[.95]"
+                          aria-label="Detail transaksi"
                         >
-                          Detail
                           <ArrowRight className="w-4 h-4" />
                         </Link>
                       </td>

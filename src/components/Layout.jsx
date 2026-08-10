@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import Sidebar from './Sidebar.jsx';
+import BodyPortal from './BodyPortal.jsx';
 import Header from './Header.jsx';
 
 export default function Layout({ children }) {
@@ -10,10 +11,12 @@ export default function Layout({ children }) {
     <div className="flex h-screen overflow-hidden bg-slate-50">
       {/* Mobile overlay */}
       {mobileOpen && (
-        <div
-          className="fixed inset-0 bg-black/40 z-20 lg:hidden"
-          onClick={() => setMobileOpen(false)}
-        />
+        <BodyPortal>
+          <div
+            className="fixed inset-0 bg-black/40 z-20 lg:hidden"
+            onClick={() => setMobileOpen(false)}
+          />
+        </BodyPortal>
       )}
 
       <Sidebar

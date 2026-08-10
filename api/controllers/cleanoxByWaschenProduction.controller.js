@@ -11,7 +11,7 @@ const OUTLET_NUMBER = {
   'Waschen Canadian': '+62 851-8818-8391',
 };
 
-/* ── WhatsApp notification Mention ───────────────────────── */
+/* â”€â”€ WhatsApp notification Mention â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 const OUTLET_MENTION = {
   'Waschen Laundry Raffles Hills': ['6289530162883@c.us', '6289501426161@c.us'],
   'Waschen Citra Grand': ['6289616020108@c.us', '6285715225947@c.us'],
@@ -88,13 +88,13 @@ async function sendOnHoldWaNotification({ id, no_nota, customer_nama, nama_item,
     : null;
 
   const text =
-    `🚨WARNING STATUS TERTUNDA🚨\n\n` +
+    `ðŸš¨WARNING STATUS TERTUNDAðŸš¨\n\n` +
     `No Nota : ${no_nota || '-'}\n` +
     `Nama Customer : ${customer_nama || '-'}\n` +
     `Nama Item : ${nama_item || '-'}\n` +
     `Cabang : ${outletShort}\n` +
     (deepLink ? `\nLink : ${deepLink}\n` : '') +
-    `\nMohon dicek yaa! Terima kasih 🙏` +
+    `\nMohon dicek yaa! Terima kasih ðŸ™` +
     (mentionText ? `\n${mentionText}` : '');
 
   const body = {
@@ -124,7 +124,7 @@ async function sendOnHoldWaNotification({ id, no_nota, customer_nama, nama_item,
 
       if (resp.ok) {
         console.log(`[production/onHold] WA notification sent to group (attempt ${attempt})`);
-        return; // success — stop retrying
+        return; // success â€” stop retrying
       }
 
       const errText = await resp.text().catch(() => '(no body)');
@@ -146,7 +146,7 @@ async function sendOnHoldWaNotification({ id, no_nota, customer_nama, nama_item,
   console.error('[production/onHold] WA notification gave up after all attempts');
 }
 
-/* ── Send notification to customer after pengantaran_at + delay ──────── */
+/* â”€â”€ Send notification to customer after pengantaran_at + delay â”€â”€â”€â”€â”€â”€â”€â”€ */
 // items = array of { id, nama_item } untuk grouping per no_nota
 async function sendPengantaranNotificationToCustomer({
   no_nota,
@@ -184,41 +184,41 @@ async function sendPengantaranNotificationToCustomer({
   let text;
   if (isLunas) {
     text =
-      `Halo Kak, Kami dari Cleanox by Waschen 😊\n` +
+      `Halo Kak, Kami dari Cleanox by Waschen ðŸ˜Š\n` +
       `Khusus layanan pencucian item besar seperti karpet, stroller, boneka, dll.\n\n` +
-      `Minox ingin menginformasikan bahwa item Kakak sudah selesai diproses & siap diambil di ${outlet || '-'} 🙌\n\n` +
+      `Minox ingin menginformasikan bahwa item Kakak sudah selesai diproses & siap diambil di ${outlet || '-'} ðŸ™Œ\n\n` +
       `Detail:\n` +
       `* Nama: ${customer_nama || '-'}\n` +
       `* No. Nota: ${no_nota || '-'}\n` +
       `* Item:\n${itemList}\n` +
       `* Status: Lunas\n\n` +
-      `Item bisa langsung diambil atau dijadwalkan pengantaran 🚚\n` +
+      `Item bisa langsung diambil atau dijadwalkan pengantaran ðŸšš\n` +
       `Jadwal pengantaran:\n` +
       `* Selasa\n` +
       `* Kamis\n` +
       `* Sabtu\n\n` +
-      `Mohon konfirmasinya agar item tetap dalam kondisi fresh & siap digunakan ✨\n` +
-      `Terima kasih 🙏`;
+      `Mohon konfirmasinya agar item tetap dalam kondisi fresh & siap digunakan âœ¨\n` +
+      `Terima kasih ðŸ™`;
   } else {
     text =
-      `Halo Kak, Kami dari Cleanox by Waschen 😊\n` +
+      `Halo Kak, Kami dari Cleanox by Waschen ðŸ˜Š\n` +
       `Khusus layanan pencucian item besar seperti karpet, stroller, boneka, dll.\n\n` +
-      `Minox ingin menginformasikan bahwa item Kakak sudah selesai diproses & siap diambil di ${outlet || '-'} 🙌\n\n` +
+      `Minox ingin menginformasikan bahwa item Kakak sudah selesai diproses & siap diambil di ${outlet || '-'} ðŸ™Œ\n\n` +
       `Detail:\n` +
       `* Nama: ${customer_nama || '-'}\n` +
       `* No. Nota: ${no_nota || '-'}\n` +
       `* Item:\n${itemList}\n` +
       `* Total Tagihan: ${formattedTagihan}\n\n` +
-      `Untuk mempercepat proses pengambilan, Kakak bisa langsung konfirmasi pembayaran melalui WhatsApp cabang di bawah ini ya 👇\n` +
-      `👉 ${waLink}\n\n` +
-      `Setelah pembayaran, item bisa langsung diambil atau dijadwalkan pengantaran 🚚\n\n` +
+      `Untuk mempercepat proses pengambilan, Kakak bisa langsung konfirmasi pembayaran melalui WhatsApp cabang di bawah ini ya ðŸ‘‡\n` +
+      `ðŸ‘‰ ${waLink}\n\n` +
+      `Setelah pembayaran, item bisa langsung diambil atau dijadwalkan pengantaran ðŸšš\n\n` +
       `Jadwal pengantaran:\n` +
       `* Selasa\n` +
       `* Kamis\n` +
       `* Sabtu\n\n` +
       `Catatan:\n` +
-      `Item akan diprioritaskan untuk pengantaran setelah pembayaran dikonfirmasi ya Kak 🙏\n\n` +
-      `Terima kasih 🙏`;
+      `Item akan diprioritaskan untuk pengantaran setelah pembayaran dikonfirmasi ya Kak ðŸ™\n\n` +
+      `Terima kasih ðŸ™`;
   }
 
   // Allow admin to override the generated text with a custom message
@@ -260,7 +260,7 @@ async function sendPengantaranNotificationToCustomer({
   }
 }
 
-/* ── Scheduler: check pengantaran_at + delay and send notification ──── */
+/* â”€â”€ Scheduler: check pengantaran_at + delay and send notification â”€â”€â”€â”€ */
 export async function runPengantaranNotificationScheduler() {
   const waUrl = process.env.ALORA_WA_URL;
   const waSession = process.env.ALORA_WA_CLEANOX_SESSION;
@@ -344,7 +344,7 @@ export async function runPengantaranNotificationScheduler() {
   }
 }
 
-/* ── SSE client store ─────────────────────────────────── */
+/* â”€â”€ SSE client store â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 const sseClients = new Set();
 
 export const subscribeEvents = (req, res) => {
@@ -365,7 +365,7 @@ const broadcast = (payload) => {
 const STATUS_VALUES = ['Pickup', 'Cuci Jemur', 'Packing', 'Pengantaran'];
 const FILTER_STATUS_VALUES = [...STATUS_VALUES, 'Tertunda'];
 
-/* ── Get distinct outlets ─────────────────────────────── */
+/* â”€â”€ Get distinct outlets â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 export const getOutlets = async (_req, res) => {
   try {
     const [rows] = await cleanoxPool.query(
@@ -381,7 +381,7 @@ export const getOutlets = async (_req, res) => {
   }
 };
 
-/* ── Get employees (for tracking modal) — role 'produksi' or 'cleanox' ── */
+/* â”€â”€ Get employees (for tracking modal) â€” role 'produksi' or 'cleanox' â”€â”€ */
 export const getEmployees = async (_req, res) => {
   try {
     const [roles] = await cleanoxPool.query(
@@ -404,7 +404,7 @@ export const getEmployees = async (_req, res) => {
   }
 };
 
-/* ── Get production data — per ITEM (not per nota) ────── */
+/* â”€â”€ Get production data â€” per ITEM (not per nota) â”€â”€â”€â”€â”€â”€ */
 export const getData = async (req, res) => {
   const {
     date_start,
@@ -535,7 +535,7 @@ export const getData = async (req, res) => {
   }
 };
 
-/* ── Get tracking detail for one item row ─────────────── */
+/* â”€â”€ Get tracking detail for one item row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 export const getTracking = async (req, res) => {
   const { id } = req.query;
   if (!id) {
@@ -601,7 +601,7 @@ export const getTracking = async (req, res) => {
       const done = Number(notaStats?.done || 0);
       all_nota_complete = total > 0 && done === total;
     } else {
-      // Single item with no nota — complete if this item itself has pengantaran_at
+      // Single item with no nota â€” complete if this item itself has pengantaran_at
       all_nota_complete = !!row.pengantaran_at;
     }
 
@@ -612,7 +612,7 @@ export const getTracking = async (req, res) => {
   }
 };
 
-/* ── Update tracking stage ────────────────────────────── */
+/* â”€â”€ Update tracking stage â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 const STAGE_COLUMNS = {
   Pickup: { by: 'pickup_by', at: 'pickup_at' },
   'Cuci Jemur': { by: 'cuci_jemur_by', at: 'cuci_jemur_at' },
@@ -708,7 +708,7 @@ export const updateTracking = async (req, res) => {
     return res.status(500).json({ message: 'Gagal mengupdate tracking', error: err.message });
   }
 };
-/* ── Clear (delete) a tracking stage — admin only ───────── */
+/* â”€â”€ Clear (delete) a tracking stage â€” admin only â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 const STAGE_ORDER = ['Pickup', 'Cuci Jemur', 'Packing', 'Pengantaran'];
 
 export const clearTracking = async (req, res) => {
@@ -788,7 +788,7 @@ export const clearTracking = async (req, res) => {
   }
 };
 
-/* ── Update / delete catatan_by_cleanox ───────────────── */
+/* â”€â”€ Update / delete catatan_by_cleanox â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 export const updateCatatan = async (req, res) => {
   const { id, catatan } = req.body;
 
@@ -818,7 +818,7 @@ export const updateCatatan = async (req, res) => {
   }
 };
 
-/* ── On-hold request from Cleanox (Cuci Jemur) ───────── */
+/* â”€â”€ On-hold request from Cleanox (Cuci Jemur) â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 export const requestOnHold = async (req, res) => {
   const { id } = req.body;
   if (!id) {
@@ -879,7 +879,7 @@ export const requestOnHold = async (req, res) => {
   }
 };
 
-/* ── Frontliner decision (Lanjut/Batal) ─────────────── */
+/* â”€â”€ Frontliner decision (Lanjut/Batal) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 export const decideCuciJemur = async (req, res) => {
   const { id, decision, catatan } = req.body;
   if (!id || !decision) {
@@ -946,7 +946,7 @@ export const decideCuciJemur = async (req, res) => {
   }
 };
 
-/* ── Delete item(s) — admin only ─────────────────────── */
+/* â”€â”€ Delete item(s) â€” admin only â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 export const deleteItem = async (req, res) => {
   const { id, scope } = req.body; // scope: 'item' | 'nota'
   if (!id) {
@@ -1018,7 +1018,7 @@ export const deleteItem = async (req, res) => {
   }
 };
 
-/* ── Check how many items share the same no_nota ──────── */
+/* â”€â”€ Check how many items share the same no_nota â”€â”€â”€â”€â”€â”€â”€â”€ */
 export const getNotaItemCount = async (req, res) => {
   const { id } = req.query;
   if (!id) return res.status(400).json({ message: 'id wajib diisi' });
@@ -1049,7 +1049,7 @@ export const getNotaItemCount = async (req, res) => {
   }
 };
 
-/* ── Manual customer notification (Admin only) ───────── */
+/* â”€â”€ Manual customer notification (Admin only) â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 export const sendManualCustomerNotification = async (req, res) => {
   const { id, custom_text } = req.body;
   if (!id) return res.status(400).json({ message: 'id wajib diisi' });
@@ -1106,7 +1106,7 @@ export const sendManualCustomerNotification = async (req, res) => {
 
 export const getAvailablePeriods = async (req, res) => {
   try {
-    // Billing period: tgl_terima >= 26 → belongs to NEXT month's period
+    // Billing period: tgl_terima >= 26 â†’ belongs to NEXT month's period
     const [rows] = await cleanoxPool.query(
       `SELECT DISTINCT
          CASE

@@ -37,6 +37,7 @@ import {
   MessageSquare,
   Send,
 } from 'lucide-react';
+import BodyPortal from '../components/BodyPortal.jsx';
 import Swal from 'sweetalert2';
 import { useSearchParams } from 'react-router-dom';
 import api from '../utils/api.js';
@@ -595,7 +596,8 @@ function CameraModal({ show, onCapture, onClose }) {
   if (!show) return null;
 
   return (
-    <div className="fixed inset-0 z-[200] flex flex-col bg-black" onClick={(e) => e.stopPropagation()}>
+    <BodyPortal>
+      <div className="fixed inset-0 z-[200] flex flex-col bg-black" onClick={(e) => e.stopPropagation()}>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 bg-black/80 flex-shrink-0">
         <button onClick={onClose} className="flex items-center gap-1.5 text-white/70 hover:text-white text-sm transition-colors">
@@ -665,7 +667,8 @@ function CameraModal({ show, onCapture, onClose }) {
           </div>
         )}
       </div>
-    </div>
+      </div>
+    </BodyPortal>
   );
 }
 
@@ -851,16 +854,18 @@ function EvidanceSection({ itemId, stage, evidancePath, evidanceFile, userRole, 
 
       {/* Fullscreen image preview */}
       {showPreview && preview && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
-          onClick={() => { setShowPreview(false); URL.revokeObjectURL(preview); setPreview(null); }}>
-          <div className="relative max-w-3xl max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
-            <button onClick={() => { setShowPreview(false); URL.revokeObjectURL(preview); setPreview(null); }}
-              className="absolute -top-3 -right-3 w-8 h-8 rounded-full bg-white shadow-lg flex items-center justify-center hover:bg-gray-100 transition-colors z-10">
-              <X className="w-4 h-4 text-gray-600" />
-            </button>
-            <img src={preview} alt="Preview" className="max-w-full max-h-[85vh] rounded-xl shadow-2xl object-contain" />
+        <BodyPortal>
+          <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+            onClick={() => { setShowPreview(false); URL.revokeObjectURL(preview); setPreview(null); }}>
+            <div className="relative max-w-3xl max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+              <button onClick={() => { setShowPreview(false); URL.revokeObjectURL(preview); setPreview(null); }}
+                className="absolute -top-3 -right-3 w-8 h-8 rounded-full bg-white shadow-lg flex items-center justify-center hover:bg-gray-100 transition-colors z-10">
+                <X className="w-4 h-4 text-gray-600" />
+              </button>
+              <img src={preview} alt="Preview" className="max-w-full max-h-[85vh] rounded-xl shadow-2xl object-contain" />
+            </div>
           </div>
-        </div>
+        </BodyPortal>
       )}
 
       {/* Live camera modal */}
@@ -1138,8 +1143,9 @@ function TrackingModal({ show, onClose, row, userRole, isManagement }) {
     : -1;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
-      <div
+    <BodyPortal>
+      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
+        <div
         className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col animate-fade-in"
         onClick={(e) => e.stopPropagation()}
       >
@@ -1637,18 +1643,18 @@ function TrackingModal({ show, onClose, row, userRole, isManagement }) {
             </>
           )}
         </div>
-      </div>
+        </div>
 
-      {/* On Hold Confirmation Modal */}
-      {showOnHoldConfirm && (
-        <div
-          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
-          onClick={() => setShowOnHoldConfirm(false)}
-        >
+        {/* On Hold Confirmation Modal */}
+        {showOnHoldConfirm && (
           <div
-            className="bg-white rounded-2xl shadow-2xl w-full max-w-sm animate-fade-in"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+            onClick={() => setShowOnHoldConfirm(false)}
           >
+            <div
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-sm animate-fade-in"
+              onClick={(e) => e.stopPropagation()}
+            >
             <div className="px-5 pt-5 pb-4">
               <div className="flex items-center gap-3 mb-3">
                 <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center flex-shrink-0">
@@ -1680,20 +1686,20 @@ function TrackingModal({ show, onClose, row, userRole, isManagement }) {
                 Ya, On Hold
               </button>
             </div>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Validation Alert Modal */}
-      {validationMsg && (
-        <div
-          className="fixed inset-0 z-[300] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
-          onClick={() => setValidationMsg(null)}
-        >
+        {/* Validation Alert Modal */}
+        {validationMsg && (
           <div
-            className="bg-white rounded-2xl shadow-2xl w-full max-w-xs animate-fade-in"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-[300] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+            onClick={() => setValidationMsg(null)}
           >
+            <div
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-xs animate-fade-in"
+              onClick={(e) => e.stopPropagation()}
+            >
             <div className="px-5 pt-5 pb-4">
               <div className="flex items-center gap-3 mb-3">
                 <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
@@ -1714,20 +1720,20 @@ function TrackingModal({ show, onClose, row, userRole, isManagement }) {
                 Mengerti
               </button>
             </div>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Notification Preview Modal */}
-      {showNotifPreview && tracking && (
-        <div
-          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
-          onClick={() => { if (!sendingNotif) setShowNotifPreview(false); }}
-        >
+        {/* Notification Preview Modal */}
+        {showNotifPreview && tracking && (
           <div
-            className="bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col max-h-[85vh] animate-fade-in"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+            onClick={() => { if (!sendingNotif) setShowNotifPreview(false); }}
           >
+            <div
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col max-h-[85vh] animate-fade-in"
+              onClick={(e) => e.stopPropagation()}
+            >
             {/* Header */}
             <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
               <div>
@@ -1810,10 +1816,11 @@ function TrackingModal({ show, onClose, row, userRole, isManagement }) {
                 {notifSent ? 'Terkirim!' : sendingNotif ? 'Mengirim...' : 'Kirim Notifikasi'}
               </button>
             </div>
+            </div>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </BodyPortal>
   );
 }
 

@@ -15,6 +15,10 @@ export const cleanoxPool = mysql.createPool({
   ssl: { rejectUnauthorized: false },
 });
 
+cleanoxPool.on('connection', (connection) => {
+  connection.query("SET time_zone = '+07:00'");
+});
+
 export const aloraPool = mysql.createPool({
   host: process.env.DB_HOST,
   port: Number(process.env.DB_PORT) || 3306,

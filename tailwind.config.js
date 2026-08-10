@@ -4,7 +4,7 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
+        sans: ['"Plus Jakarta Sans"', 'Poppins', 'sans-serif'],
       },
       colors: {
         brand: {
@@ -22,11 +22,17 @@ export default {
       },
       animation: {
         'fade-in':  'fadeIn 0.15s ease-in-out',
+        fadeIn: 'fadeIn 0.15s ease-out',
+        scaleUp: 'scaleUp 0.18s ease-out',
         'slide-up': 'slideUp 0.3s ease-out',
         'loadbar':  'loadbar 1.4s ease-in-out infinite',
       },
       keyframes: {
         fadeIn:  { from: { opacity: '0' }, to: { opacity: '1' } },
+        scaleUp: {
+          from: { opacity: '0', transform: 'scale(0.96)' },
+          to: { opacity: '1', transform: 'scale(1)' },
+        },
         slideUp: { from: { opacity: '0', transform: 'translateY(8px)' }, to: { opacity: '1', transform: 'translateY(0)' } },
         loadbar: { '0%': { backgroundPosition: '200% 0' }, '100%': { backgroundPosition: '-200% 0' } },
       },

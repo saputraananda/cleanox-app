@@ -9,6 +9,15 @@ import cleanoxByWaschenProductionRoutes from './api/routes/cleanoxByWaschenProdu
 import evidanceRoutes from './api/routes/evidance.routes.js';
 import dashboardCleanoxRoutes from './api/routes/DashboardCleanox.routes.js';
 import posTransactionsRoutes from './api/routes/posTransactions.routes.js';
+import posCustomersRoutes from './api/routes/posCustomers.routes.js';
+import posMasterRoutes from './api/routes/posMaster.routes.js';
+import posDashboardRoutes from './api/routes/posDashboard.routes.js';
+import posWaschenReferralRoutes from './api/routes/posWaschenReferral.routes.js';
+import wilayahRoutes from './api/routes/wilayah.routes.js';
+import mobileAttendanceRoutes from './api/routes/mobileAttendance.routes.js';
+import mobileTasksRoutes from './api/routes/mobileTasks.routes.js';
+import mobileKebersihanRoutes from './api/routes/mobileKebersihan.routes.js';
+import mobileRiwayatRoutes from './api/routes/mobileRiwayat.routes.js';
 
 dotenv.config();
 
@@ -32,6 +41,15 @@ app.use('/api/cleanox-by-waschen-production', cleanoxByWaschenProductionRoutes);
 app.use('/api/evidance', evidanceRoutes);
 app.use('/api/dashboard-cleanox', dashboardCleanoxRoutes);
 app.use('/api/pos-transactions', posTransactionsRoutes);
+app.use('/api/pos-customers', posCustomersRoutes);
+app.use('/api/pos-master', posMasterRoutes);
+app.use('/api/pos-dashboard', posDashboardRoutes);
+app.use('/api/pos-waschen-referral', posWaschenReferralRoutes);
+app.use('/api/wilayah', wilayahRoutes);
+app.use('/api/mobile-attendance', mobileAttendanceRoutes);
+app.use('/api/mobile-tasks', mobileTasksRoutes);
+app.use('/api/mobile-kebersihan', mobileKebersihanRoutes);
+app.use('/api/mobile-riwayat', mobileRiwayatRoutes);
 
 /* ── Serve built React app in production ─────────────── */
 if (process.env.NODE_ENV === 'production') {

@@ -1,25 +1,27 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { isAuthenticated, getUser, getLandingRoute } from './utils/auth.js';
 import LoginPage from './pages/LoginPage.jsx';
 import RegisterPage from './pages/RegisterPage.jsx';
 import DashboardPage from './pages/DashboardPage.jsx';
 import CleanoxByWaschenProductionPage from './pages/CleanoxByWaschenProductionPage.jsx';
+import CleanoxOnlyCalendarPage from './pages/CleanoxOnlyCalendarPage.jsx';
+import CleanoxOnlyDashboardPage from './pages/CleanoxOnlyDashboardPage.jsx';
 import PosTransactionsPage from './pages/PosTransactionsPage.jsx';
 import PosTransactionCreatePage from './pages/PosTransactionCreatePage.jsx';
 import PosTransactionDetailPage from './pages/PosTransactionDetailPage.jsx';
+import PosCustomersPage from './pages/PosCustomersPage.jsx';
+import PosWaschenReferralPage from './pages/PosWaschenReferralPage.jsx';
+import PosPricesPage from './pages/PosPricesPage.jsx';
+import PosPromosPage from './pages/PosPromosPage.jsx';
+import MobileWorkerHomePage from './pages/MobileWorkerHomePage.jsx';
+import MobileWorkerAttendancePage from './pages/MobileWorkerAttendancePage.jsx';
+import MobileWorkerTasksPage from './pages/MobileWorkerTasksPage.jsx';
+import MobileWorkerTaskSurveyPage from './pages/MobileWorkerTaskSurveyPage.jsx';
+import MobileWorkerKebersihanPage from './pages/MobileWorkerKebersihanPage.jsx';
+import MobileWorkerProfilePage from './pages/MobileWorkerProfilePage.jsx';
+import MobileWorkerRiwayatPage from './pages/MobileWorkerRiwayatPage.jsx';
+import MobileWorkerCalendarPage from './pages/MobileWorkerCalendarPage.jsx';
 import Layout from './components/Layout.jsx';
-
-const MobileWorkerShell = () => (
-  <div className="min-h-[100dvh] bg-slate-100 flex items-center justify-center px-6">
-    <div className="w-full max-w-md rounded-3xl bg-white shadow-sm border border-slate-200 p-8 text-center">
-      <p className="text-sm font-semibold tracking-[0.2em] uppercase text-brand-500">Company ID 3</p>
-      <h1 className="mt-3 text-2xl font-bold text-slate-900">Mobile Worker</h1>
-      <p className="mt-3 text-sm leading-6 text-slate-500">
-        Jalur mobile worker sudah aktif di auth. Halaman fitur attendance, task, dan kebersihan akan disambungkan pada fase berikutnya.
-      </p>
-    </div>
-  </div>
-);
 
 const PrivateRoute = ({ children, roles, companyIds }) => {
   if (!isAuthenticated()) return <Navigate to="/login" replace />;
@@ -39,6 +41,11 @@ const PrivateRoute = ({ children, roles, companyIds }) => {
 
 const PublicRoute = ({ children }) =>
   !isAuthenticated() ? children : <Navigate to={getLandingRoute()} replace />;
+
+const RedirectPosDetail = () => {
+  const { id } = useParams();
+  return <Navigate to={`/cleanox-only/transactions/${id}`} replace />;
+};
 
 export default function App() {
   return (
@@ -64,40 +71,67 @@ export default function App() {
         path="/mobile-worker"
         element={
           <PrivateRoute companyIds={[3]}>
-            <MobileWorkerShell />
+            <MobileWorkerHomePage />
           </PrivateRoute>
         }
       />
       <Route
-        path="/pos-transactions"
+        path="/mobile-worker/attendance"
         element={
-          <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>
-            <Layout>
-              <PosTransactionsPage />
-            </Layout>
+          <PrivateRoute companyIds={[3]}>
+            <MobileWorkerAttendancePage />
           </PrivateRoute>
         }
       />
       <Route
-        path="/pos-transactions/new"
+        path="/mobile-worker/tasks"
         element={
-          <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>
-            <Layout>
-              <PosTransactionCreatePage />
-            </Layout>
+          <PrivateRoute companyIds={[3]}>
+            <MobileWorkerTasksPage />
           </PrivateRoute>
         }
       />
       <Route
-        path="/pos-transactions/:id"
+        path="/mobile-worker/tasks/:assignmentId/survey"
         element={
-          <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>
-            <Layout>
-              <PosTransactionDetailPage />
-            </Layout>
+          <PrivateRoute companyIds={[3]}>
+            <MobileWorkerTaskSurveyPage />
           </PrivateRoute>
         }
       />
+      <Route
+        path="/mobile-worker/kebersihan"
+        element={
+          <PrivateRoute companyIds={[3]}>
+            <MobileWorkerKebersihanPage />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/mobile-worker/calendar"
+        element={
+          <PrivateRoute companyIds={[3]}>
+            <MobileWorkerCalendarPage />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/mobile-worker/profile"
+        element={
+          <PrivateRoute companyIds={[3]}>
+            <MobileWorkerProfilePage />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/mobile-worker/riwayat"
+        element={
+          <PrivateRoute companyIds={[3]}>
+            <MobileWorkerRiwayatPage />
+          </PrivateRoute>
+        }
+      />
+
       <Route
         path="/dashboard"
         element={
@@ -108,27 +142,121 @@ export default function App() {
           </PrivateRoute>
         }
       />
+
       <Route
-        path="/cleanox"
+        path="/cleanox-only/dashboard"
         element={
-          <PrivateRoute roles={['admin', 'management']}>
+          <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>
             <Layout>
-              <div className="p-8 text-center">
-                <p className="text-2xl font-bold text-gray-700">Cleanox</p>
-                <p className="text-gray-400 mt-2">Coming soon…</p>
-              </div>
+              <CleanoxOnlyDashboardPage />
             </Layout>
           </PrivateRoute>
         }
       />
-      {/* (hapus) dulu ada /cleanox-by-waschen */}
       <Route
-        path="/cleanox-by-waschen-production"
+        path="/cleanox-only/transactions"
         element={
-          <PrivateRoute>
-            <Layout><CleanoxByWaschenProductionPage /></Layout>
+          <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>
+            <Layout>
+              <PosTransactionsPage />
+            </Layout>
           </PrivateRoute>
         }
+      />
+      <Route
+        path="/cleanox-only/transactions/new"
+        element={
+          <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>
+            <Layout>
+              <PosTransactionCreatePage />
+            </Layout>
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/cleanox-only/transactions/:id"
+        element={
+          <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>
+            <Layout>
+              <PosTransactionDetailPage />
+            </Layout>
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/cleanox-only/customers"
+        element={
+          <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>
+            <Layout>
+              <PosCustomersPage />
+            </Layout>
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/cleanox-only/waschen-referral"
+        element={
+          <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>
+            <Layout>
+              <PosWaschenReferralPage />
+            </Layout>
+          </PrivateRoute>
+        }
+      />
+
+      <Route
+        path="/cleanox-only/prices"
+        element={
+          <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>
+            <Layout>
+              <PosPricesPage />
+            </Layout>
+          </PrivateRoute>
+        }
+      />
+
+      <Route
+        path="/cleanox-only/promos"
+        element={
+          <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>
+            <Layout>
+              <PosPromosPage />
+            </Layout>
+          </PrivateRoute>
+        }
+      />
+
+      <Route
+        path="/cleanox-only/calendar"
+        element={
+          <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>
+            <Layout>
+              <CleanoxOnlyCalendarPage />
+            </Layout>
+          </PrivateRoute>
+        }
+      />
+
+      <Route
+        path="/cleanox-by-waschen/dashboard"
+        element={
+          <PrivateRoute>
+            <Layout>
+              <CleanoxByWaschenProductionPage />
+            </Layout>
+          </PrivateRoute>
+        }
+      />
+
+      <Route path="/cleanox-by-waschen/calendar" element={<Navigate to="/cleanox-only/calendar" replace />} />
+
+      <Route path="/pos-transactions" element={<Navigate to="/cleanox-only/transactions" replace />} />
+      <Route path="/pos-transactions/new" element={<Navigate to="/cleanox-only/transactions/new" replace />} />
+      <Route path="/pos-transactions/:id" element={<RedirectPosDetail />} />
+      <Route path="/cleanox" element={<Navigate to="/cleanox-only/dashboard" replace />} />
+      <Route
+        path="/cleanox-by-waschen-production"
+        element={<Navigate to="/cleanox-by-waschen/dashboard" replace />}
       />
 
       <Route path="*" element={<Navigate to={getLandingRoute()} replace />} />

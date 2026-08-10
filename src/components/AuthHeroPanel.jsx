@@ -8,7 +8,7 @@ import team4 from '../assets/CleanoxTeam4.webp';
 import team5 from '../assets/CleanoxTeam5.webp';
 import team6 from '../assets/CleanoxTeam6.webp';
 
-const SLIDES = [
+export const AUTH_HERO_SLIDES = [
   { img: team0, caption: 'Tim profesional kami siap memberikan pelayanan terbaik' },
   { img: team1, caption: 'Kualitas premium, kepuasan pelanggan adalah prioritas kami' },
   { img: team4, caption: 'Melayani dengan sepenuh hati' },
@@ -22,14 +22,14 @@ export default function AuthHeroPanel() {
   const [current, setCurrent] = useState(0);
 
   useEffect(() => {
-    const id = setInterval(() => setCurrent((c) => (c + 1) % SLIDES.length), 4500);
+    const id = setInterval(() => setCurrent((c) => (c + 1) % AUTH_HERO_SLIDES.length), 4500);
     return () => clearInterval(id);
   }, []);
 
   return (
     <div className="hidden lg:flex relative w-[55%] flex-shrink-0 overflow-hidden bg-brand-900 select-none">
       {/* Background images — crossfade */}
-      {SLIDES.map((slide, i) => (
+      {AUTH_HERO_SLIDES.map((slide, i) => (
         <img
           key={i}
           src={slide.img}
@@ -74,13 +74,13 @@ export default function AuthHeroPanel() {
               Tim Cleanox Alora
             </span>
             <h2 className="text-white text-2xl xl:text-3xl font-bold leading-snug max-w-[300px] drop-shadow-sm">
-              {SLIDES[current].caption}
+              {AUTH_HERO_SLIDES[current].caption}
             </h2>
           </div>
 
           {/* Dot indicators */}
           <div className="flex items-center gap-1.5">
-            {SLIDES.map((_, i) => (
+            {AUTH_HERO_SLIDES.map((_, i) => (
               <button
                 key={i}
                 onClick={() => setCurrent(i)}

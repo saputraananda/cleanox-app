@@ -1,15 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { Download, FileSpreadsheet, ArrowLeft, Save, Copy, Send, ImagePlus, X } from 'lucide-react';
 import api from '../utils/api.js';
-
-const STATUS_OPTIONS = [
-  'Draft',
-  'Menunggu_Konfirmasi',
-  'Dijadwalkan',
-  'Dalam_Proses',
-  'Selesai',
-  'Dibatalkan',
-];
+import { buildCustomerOrderMessage } from '../utils/posCustomerOrderMessage.js';
+import { buildGroupOrderMessage } from '../utils/posGroupOrderMessage.js';
+import {
+  isGeneralCleaningCategory,
+  transactionHasGeneralCleaning,
+} from '../utils/posGeneralCleaningBilling.js';
+import { downloadPosEReceiptPdf, loadImageAsDataUrl } from '../utils/posEReceipt.js';
+import { downloadPosInternalInvoicePdf } from '../utils/posInternalInvoicePdf.js';
+import PosTakehomeStageTimeline from '../components/PosTakehomeStageTimeline.jsx';
+import cleanoxLogo from '../assets/cleanox.png';
 
 const formatCurrency = (value) =>
   new Intl.NumberFormat('id-ID', {
@@ -22,6 +24,7 @@ const formatCurrency = (value) =>
 const formatDateTime = (value) => {
   if (!value) return '-';
   return new Date(value).toLocaleString('id-ID', {
+    timeZone: 'Asia/Jakarta',
     day: '2-digit',
     month: 'short',
     year: 'numeric',
@@ -30,42 +33,167 @@ const formatDateTime = (value) => {
   });
 };
 
+const toDateKeyJakarta = (value) => {
+  if (!value) return null;
+  const match = String(value).match(/^(\d{4}-\d{2}-\d{2})/);
+  if (match) return match[1];
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+};
+
+const todayKeyJakarta = () =>
+  new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+
+const addDaysKey = (dateKey, days) => {
+  if (!dateKey) return null;
+  const [y, m, d] = dateKey.split('-').map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  date.setUTCDate(date.getUTCDate() + Number(days || 0));
+  return date.toISOString().slice(0, 10);
+};
+
+const toDatetimeLocalValue = (value) => {
+  const raw = String(value || '');
+  const match = raw.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})/);
+  if (match) return `${match[1]}T${match[2]}:${match[3]}`;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const key = toDateKeyJakarta(date);
+  const timeParts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Jakarta',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const hour = timeParts.find((p) => p.type === 'hour')?.value || '08';
+  const minute = timeParts.find((p) => p.type === 'minute')?.value || '00';
+  return key ? `${key}T${hour}:${minute}` : '';
+};
+
+const evidencePreviewKey = (assignmentId, kind, photo, index) =>
+  `${assignmentId}-${kind}-${photo?.id ?? photo?.photo_file ?? index}`;
+
 export default function PosTransactionDetailPage() {
   const { id } = useParams();
   const [detail, setDetail] = useState(null);
   const [workers, setWorkers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [statusForm, setStatusForm] = useState({ status: '', title: '', description: '' });
-  const [groupForm, setGroupForm] = useState({ recipient: '', message: '' });
-  const [customerForm, setCustomerForm] = useState({ recipient: '', message: '' });
+  const [groupForm, setGroupForm] = useState({ recipient: '' });
   const [assignmentIds, setAssignmentIds] = useState([]);
+  const [receiptLoading, setReceiptLoading] = useState(false);
+  const [invoiceLoading, setInvoiceLoading] = useState(false);
+  const [evidencePreviewMap, setEvidencePreviewMap] = useState({});
+  const evidencePreviewMapRef = useRef({});
+  const [customerPreviewMap, setCustomerPreviewMap] = useState({});
+  const customerPreviewMapRef = useRef({});
+  const [takehomePreviewMap, setTakehomePreviewMap] = useState({});
+  const takehomePreviewMapRef = useRef({});
+  const customerFileInputRef = useRef(null);
+  const [customerPhotoUploading, setCustomerPhotoUploading] = useState(false);
+  const [scheduleDateInput, setScheduleDateInput] = useState('');
+  const [cancelNote, setCancelNote] = useState('');
+  const [scheduleSubmitting, setScheduleSubmitting] = useState(false);
+  const [scheduleSuccess, setScheduleSuccess] = useState('');
+  const [scheduleConfirm, setScheduleConfirm] = useState(null);
+
+  const refreshBlobPreviews = async (entries, setMap) => {
+    const next = {};
+    await Promise.all(
+      [...entries.entries()].map(async ([key, photoPath]) => {
+        try {
+          const rawPath = String(photoPath || '')
+            .replace(/^\/api/, '')
+            .replace(/^\//, '');
+          const blobRes = await api.get(rawPath, { responseType: 'blob' });
+          next[key] = URL.createObjectURL(blobRes.data);
+        } catch {
+          // preview optional
+        }
+      })
+    );
+
+    setMap((prev) => {
+      Object.values(prev).forEach((url) => {
+        if (typeof url === 'string' && url.startsWith('blob:')) URL.revokeObjectURL(url);
+      });
+      return next;
+    });
+  };
+
+  const refreshEvidencePreviews = async (assignmentList = []) => {
+    const needed = new Map();
+    for (const assignment of assignmentList) {
+      const assignmentId = assignment.id;
+      (assignment.before_photos || []).forEach((photo, index) => {
+        if (!photo?.photo_path) return;
+        needed.set(evidencePreviewKey(assignmentId, 'before', photo, index), photo.photo_path);
+      });
+      (assignment.after_photos || []).forEach((photo, index) => {
+        if (!photo?.photo_path) return;
+        needed.set(evidencePreviewKey(assignmentId, 'after', photo, index), photo.photo_path);
+      });
+    }
+    await refreshBlobPreviews(needed, setEvidencePreviewMap);
+  };
+
+  const refreshCustomerPreviews = async (photos = []) => {
+    const needed = new Map();
+    for (const photo of photos) {
+      if (!photo?.id || !photo?.photo_path) continue;
+      needed.set(String(photo.id), photo.photo_path);
+    }
+    await refreshBlobPreviews(needed, setCustomerPreviewMap);
+  };
+
+  const refreshTakehomePreviews = async (progress) => {
+    const needed = new Map();
+    for (const stage of progress?.stages || []) {
+      if (!stage?.photo_path) continue;
+      needed.set(stage.photo_path, stage.photo_path);
+    }
+    await refreshBlobPreviews(needed, setTakehomePreviewMap);
+  };
 
   const loadData = async () => {
     setLoading(true);
     setError('');
     try {
-      const [detailRes, workerRes] = await Promise.all([
-        api.get(`/pos-transactions/${id}`),
-        api.get('/pos-transactions/workers'),
-      ]);
+      const detailRes = await api.get(`/pos-transactions/${id}`);
       const nextDetail = detailRes.data;
+      const serviceDate = nextDetail.transaction?.service_date;
+      const workerRes = await api.get('/pos-transactions/workers', {
+        params: serviceDate
+          ? { service_date: serviceDate, exclude_transaction_id: id }
+          : {},
+      });
       setDetail(nextDetail);
       setWorkers(workerRes.data.workers || []);
-      setAssignmentIds((nextDetail.assignments || []).map((row) => Number(row.employee_id)));
-      setStatusForm((prev) => ({ ...prev, status: nextDetail.transaction.status || 'Draft' }));
-      setGroupForm({
-        recipient: '',
-        message:
-          nextDetail.transaction.group_message_template ||
-          `Transaksi ${nextDetail.transaction.transaction_no} untuk ${nextDetail.transaction.customer_name} sudah dijadwalkan.`,
-      });
-      setCustomerForm({
-        recipient: nextDetail.transaction.customer_phone || '',
-        message:
-          nextDetail.transaction.customer_message_template ||
-          `Halo ${nextDetail.transaction.customer_name}, transaksi ${nextDetail.transaction.transaction_no} sedang kami proses.`,
-      });
+      setAssignmentIds(
+        (nextDetail.assignments || [])
+          .filter((row) => ['Assigned', 'In_Schedule', 'On_Progress'].includes(row.assignment_status))
+          .map((row) => Number(row.employee_id))
+      );
+      setGroupForm({ recipient: '' });
+      setScheduleDateInput(toDatetimeLocalValue(nextDetail.transaction?.service_date));
+      setCancelNote('');
+      setScheduleSuccess('');
+      await Promise.all([
+        refreshEvidencePreviews(nextDetail.assignments || []),
+        refreshCustomerPreviews(nextDetail.customer_photos || []),
+        refreshTakehomePreviews(nextDetail.takehome_progress),
+      ]);
     } catch (err) {
       setError(err.response?.data?.message || 'Gagal memuat detail transaksi POS');
     } finally {
@@ -77,18 +205,126 @@ export default function PosTransactionDetailPage() {
     loadData();
   }, [id]);
 
+  useEffect(() => {
+    evidencePreviewMapRef.current = evidencePreviewMap;
+  }, [evidencePreviewMap]);
+
+  useEffect(() => {
+    customerPreviewMapRef.current = customerPreviewMap;
+  }, [customerPreviewMap]);
+
+  useEffect(() => {
+    takehomePreviewMapRef.current = takehomePreviewMap;
+  }, [takehomePreviewMap]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(evidencePreviewMapRef.current).forEach((url) => {
+        if (typeof url === 'string' && url.startsWith('blob:')) URL.revokeObjectURL(url);
+      });
+      Object.values(customerPreviewMapRef.current).forEach((url) => {
+        if (typeof url === 'string' && url.startsWith('blob:')) URL.revokeObjectURL(url);
+      });
+      Object.values(takehomePreviewMapRef.current).forEach((url) => {
+        if (typeof url === 'string' && url.startsWith('blob:')) URL.revokeObjectURL(url);
+      });
+    };
+  }, []);
+
   const itemSummary = useMemo(() => {
     if (!detail) return '';
     return detail.items.map((item) => `${item.service_name} x${item.qty}`).join(', ');
   }, [detail]);
 
-  const handleStatusSubmit = async (e) => {
-    e.preventDefault();
+  const customerMessagePreview = useMemo(() => {
+    if (!detail?.transaction) return '';
+    const { transaction, items } = detail;
+    if (!items?.length) {
+      return (
+        transaction.customer_message_template ||
+        `Halo ${transaction.customer_name}, transaksi ${transaction.transaction_no} sedang kami proses.`
+      );
+    }
+
+    return buildCustomerOrderMessage({
+      customerName: transaction.customer_name,
+      customerPhone: transaction.customer_phone,
+      customerAddress: transaction.customer_address,
+      serviceDate: transaction.service_date,
+      items: items.map((item) => ({
+        service_name: item.service_name,
+        qty: item.qty,
+        base_price: item.base_price_snapshot,
+        original_price: item.original_price_snapshot,
+        final_price_per_unit: item.final_price_snapshot,
+        line_total: item.line_total,
+        promo_type: item.promo_type_snapshot,
+        promo_value: item.promo_value_snapshot,
+        category_name: item.category_name || null,
+      })),
+      totalPeople: transaction.total_people,
+      finalAmount: transaction.final_amount,
+      pricingFinalized: Boolean(transaction.pricing_finalized_at),
+    });
+  }, [detail]);
+
+  const groupMessagePreview = useMemo(() => {
+    if (!detail?.transaction) return '';
+    const { transaction, items, assignments } = detail;
+    if (!items?.length) {
+      return (
+        transaction.group_message_template ||
+        `Transaksi ${transaction.transaction_no} untuk ${transaction.customer_name} sudah dijadwalkan.`
+      );
+    }
+
+    const assignmentWorkers = (assignments || []).map((row) => {
+      const workerFromMaster = workers.find(
+        (worker) => Number(worker.employee_id) === Number(row.employee_id)
+      );
+      return {
+        full_name: row.employee_name,
+        phone_number: row.employee_phone || workerFromMaster?.phone_number || null,
+      };
+    });
+
+    return buildGroupOrderMessage({
+      customerName: transaction.customer_name,
+      customerPhone: transaction.customer_phone,
+      customerAddress: transaction.customer_address,
+      serviceDate: transaction.service_date,
+      items: items.map((item) => ({
+        service_name: item.service_name,
+        qty: item.qty,
+        base_price: item.base_price_snapshot,
+        original_price: item.original_price_snapshot,
+        final_price_per_unit: item.final_price_snapshot,
+        line_total: item.line_total,
+        promo_type: item.promo_type_snapshot,
+        promo_value: item.promo_value_snapshot,
+        category_name: item.category_name || null,
+      })),
+      totalPeople: transaction.total_people,
+      notes: transaction.notes,
+      finalAmount: transaction.final_amount,
+      pricingFinalized: Boolean(transaction.pricing_finalized_at),
+      workers: assignmentWorkers,
+    });
+  }, [detail, workers]);
+
+  const handleCopyCustomerMessage = async () => {
     try {
-      await api.patch(`/pos-transactions/${id}/status`, statusForm);
-      await loadData();
-    } catch (err) {
-      setError(err.response?.data?.message || 'Gagal memperbarui status');
+      await navigator.clipboard.writeText(customerMessagePreview);
+    } catch {
+      setError('Gagal menyalin pesan customer');
+    }
+  };
+
+  const handleCopyGroupMessage = async () => {
+    try {
+      await navigator.clipboard.writeText(groupMessagePreview);
+    } catch {
+      setError('Gagal menyalin pesan group');
     }
   };
 
@@ -102,23 +338,63 @@ export default function PosTransactionDetailPage() {
     }
   };
 
-  const handleSendGroup = async (e) => {
-    e.preventDefault();
+  const handleDownloadEReceipt = async () => {
+    if (!detail?.transaction) return;
+    setReceiptLoading(true);
+    setError('');
     try {
-      await api.post(`/pos-transactions/${id}/notify-group`, groupForm);
-      await loadData();
+      let logoDataUrl = null;
+      try {
+        logoDataUrl = await loadImageAsDataUrl(cleanoxLogo);
+      } catch {
+        logoDataUrl = null;
+      }
+      await downloadPosEReceiptPdf({
+        transaction: detail.transaction,
+        items: detail.items || [],
+        logoDataUrl,
+      });
     } catch (err) {
-      setError(err.response?.data?.message || 'Gagal mengirim pesan group');
+      setError(err.message || 'Gagal membuat e-receipt PDF');
+    } finally {
+      setReceiptLoading(false);
     }
   };
 
-  const handleSendCustomer = async (e) => {
+  const handleDownloadInternalInvoice = async () => {
+    if (!detail?.transaction) return;
+    setInvoiceLoading(true);
+    setError('');
+    try {
+      let logoDataUrl = null;
+      try {
+        logoDataUrl = await loadImageAsDataUrl(cleanoxLogo);
+      } catch {
+        logoDataUrl = null;
+      }
+      await downloadPosInternalInvoicePdf({
+        transaction: detail.transaction,
+        items: detail.items || [],
+        assignments: detail.assignments || [],
+        logoDataUrl,
+      });
+    } catch (err) {
+      setError(err.message || 'Gagal membuat invoice internal PDF');
+    } finally {
+      setInvoiceLoading(false);
+    }
+  };
+
+  const handleSendGroup = async (e) => {
     e.preventDefault();
     try {
-      await api.post(`/pos-transactions/${id}/notify-customer`, customerForm);
+      await api.post(`/pos-transactions/${id}/notify-group`, {
+        recipient: groupForm.recipient,
+        message: groupMessagePreview,
+      });
       await loadData();
     } catch (err) {
-      setError(err.response?.data?.message || 'Gagal mengirim pesan customer');
+      setError(err.response?.data?.message || 'Gagal mengirim pesan group');
     }
   };
 
@@ -130,27 +406,170 @@ export default function PosTransactionDetailPage() {
     return <div className="max-w-7xl mx-auto p-6 text-sm text-rose-600">Detail transaksi tidak ditemukan.</div>;
   }
 
-  const { transaction, items, assignments, tracking, notifications } = detail;
+  const { transaction, items, assignments, tracking, customer_photos: customerPhotos = [], takehome_progress: takehomeProgress } = detail;
+  const isTakeHome = String(transaction.service_mode || 'home_service') === 'take_home';
+  const serviceDateKey = toDateKeyJakarta(transaction.service_date);
+  const tomorrowKey = addDaysKey(todayKeyJakarta(), 1);
+  const hasProgressOrDone = (assignments || []).some((row) =>
+    ['On_Progress', 'Done'].includes(row.assignment_status)
+  );
+  const isTerminalStatus = ['Completed', 'Cancelled'].includes(transaction.status);
+  const hasGc = transactionHasGeneralCleaning(items);
+  const canReschedule =
+    !isTerminalStatus &&
+    Boolean(serviceDateKey) &&
+    serviceDateKey >= tomorrowKey &&
+    !hasProgressOrDone;
+  const canCancel = !isTerminalStatus;
+  const canUploadCustomerPhotos =
+    transaction.status !== 'Cancelled' && customerPhotos.length < 10;
+
+  const handleCustomerPhotosSelected = async (event) => {
+    const files = Array.from(event.target.files || []).filter((file) => /^image\//.test(file.type));
+    event.target.value = '';
+    if (files.length === 0 || customerPhotoUploading) return;
+
+    const remaining = Math.max(0, 10 - customerPhotos.length);
+    if (remaining === 0) {
+      setError('Maksimal 10 foto referensi customer');
+      return;
+    }
+
+    const toUpload = files.slice(0, remaining);
+    setCustomerPhotoUploading(true);
+    setError('');
+    try {
+      for (const file of toUpload) {
+        const formData = new FormData();
+        formData.append('photo', file);
+        await api.post(`/pos-transactions/${id}/customer-photos`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+      }
+      await loadData();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Gagal mengunggah foto referensi customer');
+    } finally {
+      setCustomerPhotoUploading(false);
+    }
+  };
+
+  const handleDeleteCustomerPhoto = async (photoId) => {
+    if (customerPhotoUploading) return;
+    setCustomerPhotoUploading(true);
+    setError('');
+    try {
+      await api.delete(`/pos-transactions/${id}/customer-photos/${photoId}`);
+      await loadData();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Gagal menghapus foto referensi customer');
+    } finally {
+      setCustomerPhotoUploading(false);
+    }
+  };
+
+  let rescheduleBlockedReason = '';
+  if (isTerminalStatus) rescheduleBlockedReason = 'Completed/cancelled transactions cannot be rescheduled.';
+  else if (hasProgressOrDone) rescheduleBlockedReason = 'Cannot reschedule: a worker is On Progress or Done.';
+  else if (serviceDateKey && serviceDateKey < tomorrowKey) {
+    rescheduleBlockedReason = 'Reschedule is only allowed at least 1 day before the service date.';
+  }
+
+  const handleRescheduleSubmit = async () => {
+    if (!scheduleDateInput || scheduleSubmitting) return;
+    setScheduleSubmitting(true);
+    setError('');
+    setScheduleSuccess('');
+    try {
+      await api.patch(`/pos-transactions/${id}/reschedule`, {
+        service_date: scheduleDateInput,
+      });
+      setScheduleSuccess('Jadwal layanan berhasil dipindah. Pekerja akan mendapat notifikasi.');
+      setScheduleConfirm(null);
+      await loadData();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Gagal memindah jadwal');
+    } finally {
+      setScheduleSubmitting(false);
+    }
+  };
+
+  const handleCancelSubmit = async () => {
+    if (scheduleSubmitting) return;
+    setScheduleSubmitting(true);
+    setError('');
+    setScheduleSuccess('');
+    try {
+      await api.patch(`/pos-transactions/${id}/cancel`, { note: cancelNote || undefined });
+      setScheduleSuccess('Transaction cancelled. Active assignments were cancelled.');
+      setScheduleConfirm(null);
+      await loadData();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Gagal membatalkan transaksi');
+    } finally {
+      setScheduleSubmitting(false);
+    }
+  };
 
   return (
     <div className="max-w-7xl mx-auto p-6 space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
         <div>
-          <Link to="/pos-transactions" className="text-sm font-semibold text-brand-600 hover:text-brand-700">
+          <Link to="/cleanox-only/transactions" className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-700 hover:text-blue-800">
+            <ArrowLeft className="w-4 h-4" />
             Kembali ke daftar POS
           </Link>
           <h1 className="mt-2 text-2xl font-bold text-slate-900">{transaction.transaction_no}</h1>
           <p className="mt-1 text-sm text-slate-500">{transaction.customer_name} • {itemSummary}</p>
         </div>
-        <div className="rounded-2xl bg-slate-900 px-5 py-4 text-white">
-          <p className="text-xs uppercase tracking-wide text-slate-300">Total Akhir</p>
-          <p className="mt-1 text-2xl font-bold">{formatCurrency(transaction.final_amount)}</p>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          <button
+            type="button"
+            onClick={handleDownloadEReceipt}
+            disabled={receiptLoading || invoiceLoading}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-60"
+          >
+            <Download className="w-4 h-4" />
+            {receiptLoading ? 'Menyiapkan PDF...' : 'Unduh E-Receipt'}
+          </button>
+          <button
+            type="button"
+            onClick={handleDownloadInternalInvoice}
+            disabled={invoiceLoading || receiptLoading}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-900 hover:bg-emerald-100 disabled:opacity-60"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            {invoiceLoading ? 'Menyiapkan PDF...' : 'Invoice Internal A4'}
+          </button>
+          <div className="rounded-2xl bg-slate-900 px-5 py-4 text-white">
+            <p className="text-xs uppercase tracking-wide text-slate-300">Total Akhir</p>
+            {hasGc && !transaction.pricing_finalized_at ? (
+              <>
+                <p className="mt-1 text-lg font-bold leading-snug">Menyesuaikan jam pengerjaan</p>
+                <p className="mt-1 text-xs text-slate-300">Nota tersedia setelah Done</p>
+              </>
+            ) : (
+              <>
+                <p className="mt-1 text-2xl font-bold">{formatCurrency(transaction.final_amount)}</p>
+                {transaction.billing_hours != null && (
+                  <p className="mt-1 text-xs text-slate-300">
+                    Durasi: {Number(transaction.billing_hours)} jam
+                  </p>
+                )}
+              </>
+            )}
+          </div>
         </div>
       </div>
 
       {error && <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</div>}
+      {scheduleSuccess && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+          {scheduleSuccess}
+        </div>
+      )}
 
-      <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+      <div className="grid gap-6">
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
           <h2 className="text-lg font-semibold text-slate-900">Ringkasan Transaksi</h2>
           <div className="grid gap-4 md:grid-cols-2">
@@ -169,15 +588,85 @@ export default function PosTransactionDetailPage() {
               <p className="mt-1 font-semibold text-slate-900">{transaction.status}</p>
             </div>
             <div>
+              <p className="text-xs uppercase tracking-wide text-slate-400">Mode Layanan</p>
+              <p className="mt-1">
+                <span
+                  className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${
+                    isTakeHome
+                      ? 'bg-violet-50 text-violet-700 border border-violet-200'
+                      : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                  }`}
+                >
+                  {isTakeHome ? 'Take Home' : 'Home Service'}
+                </span>
+              </p>
+            </div>
+            <div>
               <p className="text-xs uppercase tracking-wide text-slate-400">Catatan</p>
               <p className="mt-1 text-sm text-slate-600">{transaction.notes || '-'}</p>
             </div>
           </div>
 
+          <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 space-y-4">
+            <div>
+              <p className="text-sm font-semibold text-slate-900">Ubah / Batalkan Jadwal</p>
+              <p className="mt-1 text-xs text-slate-500">
+                Setelah konfirmasi customer via WA: pindahkan tanggal (minimal H−1) atau batalkan transaksi.
+                Reschedule tidak meminta accept ulang dari pekerja.
+              </p>
+            </div>
+
+            <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-end">
+              <div>
+                <label className="text-xs font-semibold text-slate-600">Tanggal layanan baru</label>
+                <input
+                  type="datetime-local"
+                  value={scheduleDateInput}
+                  onChange={(e) => setScheduleDateInput(e.target.value)}
+                  disabled={!canReschedule || scheduleSubmitting}
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm disabled:opacity-60"
+                />
+              </div>
+              <button
+                type="button"
+                disabled={!canReschedule || scheduleSubmitting || !scheduleDateInput}
+                onClick={() => setScheduleConfirm({ type: 'reschedule' })}
+                className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+              >
+                Simpan jadwal baru
+              </button>
+            </div>
+            {!canReschedule && rescheduleBlockedReason && (
+              <p className="text-xs text-amber-700">{rescheduleBlockedReason}</p>
+            )}
+
+            <div className="border-t border-slate-200 pt-4 space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-slate-600">Catatan pembatalan (opsional)</label>
+                <input
+                  type="text"
+                  value={cancelNote}
+                  onChange={(e) => setCancelNote(e.target.value)}
+                  disabled={!canCancel || scheduleSubmitting}
+                  placeholder="Contoh: customer batal via WA"
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm disabled:opacity-60"
+                />
+              </div>
+              <button
+                type="button"
+                disabled={!canCancel || scheduleSubmitting}
+                onClick={() => setScheduleConfirm({ type: 'cancel' })}
+                className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+              >
+                Batalkan transaksi
+              </button>
+            </div>
+          </div>
+
           <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="min-w-full text-sm">
+            <table className="min-w-full text-[15px]">
               <thead>
-                <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-400">
+                <tr className="border-b border-slate-200 text-left text-sm uppercase tracking-wide text-slate-400">
                   <th className="px-3 py-3">Service</th>
                   <th className="px-3 py-3">Qty</th>
                   <th className="px-3 py-3">Promo</th>
@@ -186,68 +675,69 @@ export default function PosTransactionDetailPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {items.map((item) => (
+                {items.map((item) => {
+                  const isGc = isGeneralCleaningCategory(item.category_name);
+                  const pendingGc = isGc && !transaction.pricing_finalized_at;
+                  return (
                   <tr key={item.id}>
                     <td className="px-3 py-3 font-medium text-slate-800">{item.service_name}</td>
-                    <td className="px-3 py-3 text-slate-600">{item.qty}</td>
+                    <td className="px-3 py-3 text-slate-600">
+                      {pendingGc ? '—' : item.qty}
+                      {isGc && transaction.pricing_finalized_at ? ' jam' : ''}
+                    </td>
                     <td className="px-3 py-3 text-slate-600">{item.promo_name_snapshot || '-'}</td>
-                    <td className="px-3 py-3 text-right text-slate-700">{formatCurrency(item.final_price_snapshot)}</td>
-                    <td className="px-3 py-3 text-right font-semibold text-slate-900">{formatCurrency(item.line_total)}</td>
+                    <td className="px-3 py-3 text-right text-slate-700">
+                      {item.original_price_snapshot != null && (
+                        <div className="text-[12px] text-slate-400 line-through">
+                          {formatCurrency(item.original_price_snapshot)}
+                        </div>
+                      )}
+                      {formatCurrency(item.final_price_snapshot)}
+                      {isGc ? ' / jam' : ''}
+                    </td>
+                    <td className="px-3 py-3 text-right font-semibold text-slate-900">
+                      {pendingGc ? 'Pending jam' : formatCurrency(item.line_total)}
+                    </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
         </section>
-
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
-          <h2 className="text-lg font-semibold text-slate-900">Update Status</h2>
-          <form onSubmit={handleStatusSubmit} className="space-y-3">
-            <select
-              value={statusForm.status}
-              onChange={(e) => setStatusForm({ ...statusForm, status: e.target.value })}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-400"
-            >
-              {STATUS_OPTIONS.map((option) => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </select>
-            <input
-              value={statusForm.title}
-              onChange={(e) => setStatusForm({ ...statusForm, title: e.target.value })}
-              placeholder="Judul tracking"
-              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-400"
-            />
-            <textarea
-              rows={3}
-              value={statusForm.description}
-              onChange={(e) => setStatusForm({ ...statusForm, description: e.target.value })}
-              placeholder="Catatan perubahan status"
-              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-400"
-            />
-            <button className="rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700">
-              Simpan Status
-            </button>
-          </form>
-        </section>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-6">
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
-          <h2 className="text-lg font-semibold text-slate-900">Assignment Worker</h2>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold text-slate-900">Assignment Worker</h2>
+            {(assignments || []).some((item) => item.assignment_status === 'Rejected') && (
+              <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-bold text-amber-700 border border-amber-200">
+                Ada reject menunggu plotting
+              </span>
+            )}
+          </div>
           <form onSubmit={handleAssignmentSubmit} className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">
               {workers.map((worker) => {
                 const checked = assignmentIds.includes(Number(worker.employee_id));
+                const busy = Boolean(worker.is_busy) && !checked;
                 return (
                   <label
                     key={worker.employee_id}
-                    className={`rounded-xl border p-3 cursor-pointer ${checked ? 'border-brand-500 bg-brand-50' : 'border-slate-200'}`}
+                    className={`rounded-xl border p-3 ${
+                      checked
+                        ? 'border-brand-500 bg-brand-50 cursor-pointer'
+                        : busy
+                          ? 'border-amber-200 bg-amber-50/70 cursor-not-allowed'
+                          : 'border-slate-200 cursor-pointer'
+                    }`}
                   >
                     <input
                       type="checkbox"
                       className="hidden"
                       checked={checked}
+                      disabled={busy}
                       onChange={() =>
                         setAssignmentIds((prev) =>
                           checked
@@ -258,11 +748,17 @@ export default function PosTransactionDetailPage() {
                     />
                     <div className="font-semibold text-slate-800">{worker.full_name}</div>
                     <div className="text-xs text-slate-500">{worker.phone_number || 'Tanpa nomor WA'}</div>
+                    {busy && (
+                      <div className="mt-1 text-[11px] font-semibold text-amber-700">
+                        Sibuk: {worker.busy_reason || 'tugas aktif di tanggal ini'}
+                      </div>
+                    )}
                   </label>
                 );
               })}
             </div>
-            <button className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+            <button className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+              <Save className="w-4 h-4" />
               Simpan Assignment
             </button>
           </form>
@@ -270,61 +766,187 @@ export default function PosTransactionDetailPage() {
           <div className="rounded-xl border border-slate-200 p-4">
             <p className="text-sm font-semibold text-slate-900">Worker aktif pada transaksi ini</p>
             <ul className="mt-3 space-y-2 text-sm text-slate-600">
-              {assignments.length === 0 ? (
+              {(assignments || []).filter((item) =>
+                ['Assigned', 'In_Schedule', 'On_Progress'].includes(item.assignment_status)
+              ).length === 0 ? (
                 <li>Belum ada worker ditugaskan.</li>
               ) : (
-                assignments.map((item) => (
-                  <li key={item.id}>
-                    {item.employee_name} • {item.assignment_status}
-                  </li>
-                ))
+                (assignments || [])
+                  .filter((item) =>
+                    ['Assigned', 'In_Schedule', 'On_Progress'].includes(item.assignment_status)
+                  )
+                  .map((item) => (
+                    <li key={item.id}>
+                      {item.employee_name} • {item.assignment_status}
+                    </li>
+                  ))
               )}
             </ul>
           </div>
+
+          {(assignments || []).some((item) => item.assignment_status === 'Done') && (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-4">
+              <p className="text-sm font-semibold text-slate-900">Worker selesai (Done)</p>
+              <ul className="mt-3 space-y-2 text-sm text-slate-600">
+                {(assignments || [])
+                  .filter((item) => item.assignment_status === 'Done')
+                  .map((item) => (
+                    <li key={item.id}>
+                      {item.employee_name} • Done
+                      {item.completed_at ? ` • ${formatDateTime(item.completed_at)}` : ''}
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          )}
+
+          {(assignments || []).some((item) => item.assignment_status === 'Rejected') && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+              <p className="text-sm font-semibold text-slate-900">Riwayat reject / menunggu re-plot</p>
+              <ul className="mt-3 space-y-3 text-sm text-slate-700">
+                {(assignments || [])
+                  .filter((item) => item.assignment_status === 'Rejected')
+                  .map((item) => (
+                    <li key={item.id} className="rounded-lg border border-amber-100 bg-white p-3 space-y-1">
+                      <div className="font-semibold text-slate-900">{item.employee_name} • Rejected</div>
+                      <div className="text-slate-600">Alasan: {item.assignment_note || '—'}</div>
+                      <div className="text-slate-600">
+                        Rekomendasi: {item.recommended_employee_name || '—'}
+                      </div>
+                      <div className="text-xs text-slate-400">
+                        {item.responded_at ? formatDateTime(item.responded_at) : '—'}
+                      </div>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          )}
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
-          <h2 className="text-lg font-semibold text-slate-900">Notifikasi</h2>
+          <h2 className="text-lg font-semibold text-slate-900">Pesan & Notifikasi</h2>
 
-          <form onSubmit={handleSendGroup} className="space-y-3 rounded-xl border border-slate-200 p-4">
-            <p className="font-semibold text-slate-900">Kirim ke Group</p>
-            <input
-              value={groupForm.recipient}
-              onChange={(e) => setGroupForm({ ...groupForm, recipient: e.target.value })}
-              placeholder="Group ID / nomor WA"
-              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-400"
-            />
-            <textarea
-              rows={4}
-              value={groupForm.message}
-              onChange={(e) => setGroupForm({ ...groupForm, message: e.target.value })}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-400"
-            />
-            <button className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800">
-              Kirim Pesan Group
-            </button>
-          </form>
+          <div className="grid gap-4 md:grid-cols-2">
+            <form onSubmit={handleSendGroup} className="flex h-full flex-col space-y-3 rounded-xl border border-slate-200 p-4">
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-semibold text-slate-900">Kirim ke Group</p>
+                <button
+                  type="button"
+                  onClick={handleCopyGroupMessage}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-[10px] border border-slate-200 bg-white text-slate-600 transition duration-150 hover:-translate-y-0.5 hover:bg-slate-50 active:scale-[.95]"
+                  aria-label="Salin pesan group"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <input
+                value={groupForm.recipient}
+                onChange={(e) => setGroupForm({ ...groupForm, recipient: e.target.value })}
+                placeholder="Group ID / nomor WA"
+                className="w-full rounded-xl border border-slate-200 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-400"
+              />
+              <pre className="min-h-[140px] flex-1 whitespace-pre-wrap rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3.5 font-sans text-[12.5px] leading-relaxed text-slate-700">
+                {groupMessagePreview}
+              </pre>
+              <p className="text-xs text-slate-400">
+                Format pesan tidak dapat diubah — isi mengikuti data transaksi.
+              </p>
+              <button className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800">
+                <Send className="w-4 h-4" />
+                Kirim Pesan Group
+              </button>
+            </form>
 
-          <form onSubmit={handleSendCustomer} className="space-y-3 rounded-xl border border-slate-200 p-4">
-            <p className="font-semibold text-slate-900">Kirim ke Customer</p>
-            <input
-              value={customerForm.recipient}
-              onChange={(e) => setCustomerForm({ ...customerForm, recipient: e.target.value })}
-              placeholder="Nomor customer"
-              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-400"
-            />
-            <textarea
-              rows={4}
-              value={customerForm.message}
-              onChange={(e) => setCustomerForm({ ...customerForm, message: e.target.value })}
-              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-brand-400"
-            />
-            <button className="rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700">
-              Kirim Pesan Customer
-            </button>
-          </form>
+            <div className="flex h-full flex-col space-y-3 rounded-xl border border-slate-200 p-4">
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-semibold text-slate-900">Pesan Customer</p>
+                <button
+                  type="button"
+                  onClick={handleCopyCustomerMessage}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-[10px] border border-slate-200 bg-white text-slate-600 transition duration-150 hover:-translate-y-0.5 hover:bg-slate-50 active:scale-[.95]"
+                  aria-label="Salin pesan customer"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <pre className="min-h-[140px] flex-1 whitespace-pre-wrap rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3.5 font-sans text-[12.5px] leading-relaxed text-slate-700">
+                {customerMessagePreview}
+              </pre>
+              <p className="text-xs text-slate-400">
+                Format pesan tidak dapat diubah — salin lalu kirim manual via WhatsApp.
+              </p>
+            </div>
+          </div>
         </section>
       </div>
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Referensi Customer</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Foto before dari customer — terlihat pekerja di mobile sebagai acuan · {customerPhotos.length}/10
+            </p>
+          </div>
+          <div>
+            <input
+              ref={customerFileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={handleCustomerPhotosSelected}
+            />
+            <button
+              type="button"
+              disabled={!canUploadCustomerPhotos || customerPhotoUploading}
+              onClick={() => customerFileInputRef.current?.click()}
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-800 shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <ImagePlus className="h-4 w-4" />
+              {customerPhotoUploading ? 'Mengunggah...' : 'Tambah foto'}
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4">
+          {customerPhotos.length === 0 ? (
+            <p className="text-sm text-slate-500">Belum ada foto referensi customer.</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+              {customerPhotos.map((photo) => (
+                <div key={photo.id} className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+                  {transaction.status !== 'Cancelled' && (
+                    <button
+                      type="button"
+                      disabled={customerPhotoUploading}
+                      onClick={() => handleDeleteCustomerPhoto(photo.id)}
+                      className="absolute right-1.5 top-1.5 z-[1] inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/65 text-white shadow-lg disabled:opacity-60"
+                      aria-label="Hapus foto referensi"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                  {customerPreviewMap[String(photo.id)] ? (
+                    <img
+                      src={customerPreviewMap[String(photo.id)]}
+                      alt="Referensi customer"
+                      className="h-36 w-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-36 w-full items-center justify-center text-xs text-slate-400">
+                      Memuat...
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        {transaction.status === 'Cancelled' && (
+          <p className="mt-3 text-xs text-amber-700">Transaction cancelled — customer reference upload is disabled.</p>
+        )}
+      </section>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -347,27 +969,148 @@ export default function PosTransactionDetailPage() {
           </div>
         </section>
 
+        {isTakeHome ? (
+          <PosTakehomeStageTimeline
+            transactionId={transaction.id}
+            progress={takehomeProgress}
+            previewMap={takehomePreviewMap}
+            workers={workers}
+            disabled={transaction.status === 'Cancelled'}
+            onUpdated={async (nextProgress) => {
+              setDetail((prev) => (prev ? { ...prev, takehome_progress: nextProgress } : prev));
+              await refreshTakehomePreviews(nextProgress);
+            }}
+          />
+        ) : (
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="text-lg font-semibold text-slate-900">Log Notifikasi</h2>
-          <div className="mt-4 space-y-3">
-            {notifications.length === 0 ? (
-              <p className="text-sm text-slate-500">Belum ada notifikasi terkirim.</p>
+          <h2 className="text-lg font-semibold text-slate-900">Bukti Pengerjaan</h2>
+          <div className="mt-4 space-y-4">
+            {(assignments || []).length === 0 ? (
+              <p className="text-sm text-slate-500">Belum ada assignment pekerja.</p>
             ) : (
-              notifications.map((item) => (
-                <div key={item.id} className="rounded-xl border border-slate-200 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="font-semibold text-slate-900">{item.channel}</p>
-                    <span className="text-xs font-semibold text-slate-500">{item.delivery_status}</span>
+              (assignments || []).map((assignment) => {
+                const beforePhotos = assignment.before_photos || [];
+                const afterPhotos = assignment.after_photos || [];
+                return (
+                  <div key={assignment.id} className="rounded-xl border border-slate-200 p-4 space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="font-semibold text-slate-900">{assignment.employee_name || 'Pekerja'}</p>
+                      <span className="text-xs font-semibold text-slate-500">{assignment.assignment_status}</span>
+                    </div>
+
+                    <div className="space-y-2">
+                      <p className="text-sm font-semibold text-slate-800">Before</p>
+                      {beforePhotos.length === 0 ? (
+                        <p className="text-sm text-slate-500">Belum ada foto before</p>
+                      ) : (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                          {beforePhotos.map((photo, index) => {
+                            const key = evidencePreviewKey(assignment.id, 'before', photo, index);
+                            const preview = evidencePreviewMap[key];
+                            return preview ? (
+                              <img
+                                key={key}
+                                src={preview}
+                                alt={`Before ${assignment.employee_name || ''}`}
+                                className="h-28 w-full rounded-xl object-cover border border-slate-200"
+                              />
+                            ) : (
+                              <div key={key} className="h-28 w-full rounded-xl bg-slate-200 animate-pulse" />
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      <p className="text-sm font-semibold text-slate-800">After</p>
+                      {afterPhotos.length === 0 ? (
+                        <p className="text-sm text-slate-500">Belum ada foto after</p>
+                      ) : (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                          {afterPhotos.map((photo, index) => {
+                            const key = evidencePreviewKey(assignment.id, 'after', photo, index);
+                            const preview = evidencePreviewMap[key];
+                            return preview ? (
+                              <img
+                                key={key}
+                                src={preview}
+                                alt={`After ${assignment.employee_name || ''}`}
+                                className="h-28 w-full rounded-xl object-cover border border-slate-200"
+                              />
+                            ) : (
+                              <div key={key} className="h-28 w-full rounded-xl bg-slate-200 animate-pulse" />
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <p className="mt-1 text-sm text-slate-600">{item.recipient}</p>
-                  <p className="mt-2 text-sm text-slate-500 whitespace-pre-wrap">{item.message}</p>
-                  <p className="mt-2 text-xs text-slate-400">{formatDateTime(item.sent_at || item.created_at)}</p>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </section>
+        )}
       </div>
+
+      {scheduleConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl space-y-4">
+            {scheduleConfirm.type === 'reschedule' ? (
+              <>
+                <h3 className="text-lg font-semibold text-slate-900">Pindahkan jadwal?</h3>
+                <p className="text-sm text-slate-600">
+                  Tanggal lama: <span className="font-semibold">{formatDateTime(transaction.service_date)}</span>
+                  <br />
+                  Tanggal baru:{' '}
+                  <span className="font-semibold">
+                    {formatDateTime(scheduleDateInput.replace('T', ' '))}
+                  </span>
+                </p>
+                <p className="text-xs text-slate-500">
+                  Status assignment pekerja tidak diubah. Pekerja akan mendapat notifikasi di Home & Riwayat.
+                </p>
+              </>
+            ) : (
+              <>
+                <h3 className="text-lg font-semibold text-slate-900">Cancel transaction?</h3>
+                <p className="text-sm text-slate-600">
+                  Status becomes <span className="font-semibold">Cancelled</span>. Active assignments
+                  (Assigned / In Schedule / On Progress) become <span className="font-semibold">Cancelled</span>.
+                </p>
+                {cancelNote && (
+                  <p className="text-sm text-slate-500">Note: {cancelNote}</p>
+                )}
+              </>
+            )}
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                disabled={scheduleSubmitting}
+                onClick={() => setScheduleConfirm(null)}
+                className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={scheduleSubmitting}
+                onClick={() =>
+                  scheduleConfirm.type === 'reschedule' ? handleRescheduleSubmit() : handleCancelSubmit()
+                }
+                className={`rounded-xl px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60 ${
+                  scheduleConfirm.type === 'cancel'
+                    ? 'bg-rose-600 hover:bg-rose-700'
+                    : 'bg-slate-900 hover:bg-slate-800'
+                }`}
+              >
+                {scheduleSubmitting ? 'Menyimpan...' : 'Konfirmasi'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

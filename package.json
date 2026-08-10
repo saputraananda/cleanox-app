@@ -8,7 +8,10 @@
     "dev:client": "vite",
     "build": "vite build",
     "start": "node server.js",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "prisma:seed": "node prisma/seed.js",
+    "prisma:seed:build-wilayah": "node prisma/seed/build-jabodetabek-data.js",
+    "prisma:seed:customers": "node prisma/seed/seed-test-customers.js"
   },
   "dependencies": {
     "@prisma/client": "^7.9.1",
@@ -21,6 +24,7 @@
     "exceljs": "^4.4.0",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
+    "jspdf": "^4.2.1",
     "lucide-react": "^0.378.0",
     "multer": "^2.2.0",
     "mysql2": "^3.9.7",

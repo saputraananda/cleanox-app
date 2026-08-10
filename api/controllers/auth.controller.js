@@ -4,15 +4,20 @@ import cleanoxPool, { aloraPool as pool } from '../db/cleanox.js';
 
 const getEmployeeContext = async (employeeId) => {
   const [empRows] = await pool.query(
-    'SELECT company_id, exit_date FROM mst_employee WHERE employee_id = ?',
+    `SELECT e.company_id, e.exit_date, e.employee_code, c.company_name
+     FROM mst_employee e
+     LEFT JOIN mst_company c ON c.company_id = e.company_id
+     WHERE e.employee_id = ?`,
     [employeeId]
   );
 
   const employee = empRows[0] || null;
   const companyId = employee?.company_id ?? null;
   const isManagement = companyId === 1 && employee?.exit_date === null;
+  const employeeCode = employee?.employee_code || null;
+  const companyName = employee?.company_name || null;
 
-  return { companyId, isManagement };
+  return { companyId, isManagement, employeeCode, companyName };
 };
 
 
@@ -106,7 +111,7 @@ export const login = async (req, res) => {
       return res.status(401).json({ message: 'Username atau password salah' });
     }
 
-    const { companyId, isManagement } = await getEmployeeContext(user.id);
+    const { companyId, isManagement, employeeCode, companyName } = await getEmployeeContext(user.id);
 
     const [roleRows] = await cleanoxPool.query(
       'SELECT role FROM mst_role WHERE employee_id = ?',
@@ -123,6 +128,8 @@ export const login = async (req, res) => {
         username: user.username,
         isManagement,
         company_id: companyId,
+        company_name: companyName,
+        employee_code: employeeCode,
       },
       process.env.SESSION_SECRET,
       { expiresIn: '7d' }
@@ -139,6 +146,8 @@ export const login = async (req, res) => {
         avatar: user.avatar,
         isManagement,
         company_id: companyId,
+        company_name: companyName,
+        employee_code: employeeCode,
       },
     });
   } catch (err) {
@@ -159,7 +168,7 @@ export const getMe = async (req, res) => {
     }
     const user = rows[0];
 
-    const { companyId, isManagement } = await getEmployeeContext(user.id);
+    const { companyId, isManagement, employeeCode, companyName } = await getEmployeeContext(user.id);
 
     const [roleRows] = await cleanoxPool.query(
       'SELECT role FROM mst_role WHERE employee_id = ?',
@@ -173,6 +182,8 @@ export const getMe = async (req, res) => {
         role: userRole,
         isManagement,
         company_id: companyId,
+        company_name: companyName,
+        employee_code: employeeCode,
       },
     });
   } catch (err) {

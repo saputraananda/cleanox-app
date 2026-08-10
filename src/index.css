@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Poppins:wght@400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -8,6 +10,7 @@
   }
   body {
     @apply bg-slate-50 text-gray-900 font-sans antialiased;
+    font-family: 'Plus Jakarta Sans', 'Poppins', sans-serif;
   }
   ::-webkit-scrollbar {
     width: 6px;
@@ -25,6 +28,10 @@
 }
 
 @layer components {
+  .mobile-worker-font {
+    font-family: 'Plus Jakarta Sans', 'Poppins', sans-serif;
+  }
+
   .btn-primary {
     @apply inline-flex items-center justify-center gap-1.5 bg-brand-700 hover:bg-brand-800 active:bg-brand-900
       text-white font-medium text-sm py-2 px-4 rounded-lg transition-all duration-200
