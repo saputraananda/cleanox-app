@@ -22,7 +22,7 @@ const SORE_MIN_MINUTE = 9 * 60 + 1; // 09:01
 const SORE_MAX_MINUTE = 19 * 60; // 19:00 inclusive
 
 /** TEMP: bypass jam + syarat grooming untuk sesi pagi (uji upload). Set false untuk lock kembali. */
-const TEMP_BYPASS_KEBERSIHAN_PAGI_LOCK = false;
+const TEMP_BYPASS_KEBERSIHAN_PAGI_LOCK = true;
 
 const upload = multer({
   storage: multer.memoryStorage(),

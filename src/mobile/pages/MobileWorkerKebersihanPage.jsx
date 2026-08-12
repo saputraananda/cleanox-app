@@ -11,7 +11,7 @@ const SESSIONS = [
 ];
 
 /** TEMP: bypass jam/grooming lock sesi pagi di UI — set false untuk lock kembali */
-const TEMP_BYPASS_KEBERSIHAN_PAGI_LOCK = false;
+const TEMP_BYPASS_KEBERSIHAN_PAGI_LOCK = true;
 
 function initialSessionFromSearch(searchParams) {
   const raw = String(searchParams.get('session') || '').toLowerCase();
