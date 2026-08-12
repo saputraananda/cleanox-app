@@ -5,6 +5,7 @@ import {
   checkInAttendance,
   checkOutAttendance,
   submitGroomingPhotos,
+  deleteGroomingPhoto,
   getTodayAttendanceStatus,
   serveAttendanceFile,
   getRekapMonth,
@@ -42,6 +43,7 @@ router.get('/rekap', getRekapMonth);
 router.get('/rekap/day', getRekapDay);
 router.post('/check-in', handleUpload, checkInAttendance);
 router.post('/grooming', handleUpload, submitGroomingPhotos);
+router.delete('/grooming/photo', deleteGroomingPhoto);
 router.post('/check-out', handleUpload, checkOutAttendance);
 
 export default router;

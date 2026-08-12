@@ -9,6 +9,27 @@ import MobileConfirmDialog from '@mobile/components/MobileConfirmDialog.jsx';
 const MONTHS_ID_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
 const pad2 = (n) => String(n).padStart(2, '0');
 
+function normalizePhotoPath(path) {
+  return String(path || '')
+    .replace(/^\/api/, '')
+    .replace(/^\//, '');
+}
+
+function revokeBlobUrl(url) {
+  if (typeof url === 'string' && url.startsWith('blob:')) URL.revokeObjectURL(url);
+}
+
+async function fetchPhotoBlobUrl(path) {
+  const normalized = normalizePhotoPath(path);
+  if (!normalized) return '';
+  try {
+    const blobRes = await api.get(normalized, { responseType: 'blob' });
+    return URL.createObjectURL(blobRes.data);
+  } catch {
+    return '';
+  }
+}
+
 const formatDateTime = (value) => {
   if (!value) return '-';
 
@@ -31,6 +52,22 @@ const formatDateTime = (value) => {
   return `${pad2(date.getDate())} ${MONTHS_ID_SHORT[date.getMonth()]} ${date.getFullYear()}, ${pad2(date.getHours())}.${pad2(date.getMinutes())}`;
 };
 
+function LihatFotoButton({ onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="mt-2 w-full h-[30px] rounded-[9px] border border-emerald-200 bg-emerald-50 text-emerald-800 text-[10.5px] font-bold tracking-[.02em] flex items-center justify-center gap-1 transition hover:bg-emerald-100 active:scale-[.98]"
+    >
+      <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M1.5 10s3.2-5 8.5-5 8.5 5 8.5 5-3.2 5-8.5 5-8.5-5-8.5-5z" />
+        <circle cx="10" cy="10" r="2.4" />
+      </svg>
+      Lihat Foto
+    </button>
+  );
+}
+
 export default function MobileWorkerAttendancePage() {
   const [attendance, setAttendance] = useState(null);
   const [checkInFile, setCheckInFile] = useState(null);
@@ -45,9 +82,14 @@ export default function MobileWorkerAttendancePage() {
   const [cameraTarget, setCameraTarget] = useState(null);
   const [checkInPreviewUrl, setCheckInPreviewUrl] = useState('');
   const [checkoutProofPreviewUrl, setCheckoutProofPreviewUrl] = useState('');
+  const [savedCheckInPhotoUrl, setSavedCheckInPhotoUrl] = useState('');
+  const [savedCheckOutPhotoUrl, setSavedCheckOutPhotoUrl] = useState('');
+  const [photoPreview, setPhotoPreview] = useState(null);
   const [activeLeave, setActiveLeave] = useState(null);
   const checkInPreviewUrlRef = useRef('');
   const checkoutProofPreviewUrlRef = useRef('');
+  const savedCheckInPhotoUrlRef = useRef('');
+  const savedCheckOutPhotoUrlRef = useRef('');
 
   const leaveLocksAttendance = Boolean(
     activeLeave
@@ -62,8 +104,28 @@ export default function MobileWorkerAttendancePage() {
         api.get('/mobile-attendance/today-status'),
         api.get('/mobile-leave/today').catch(() => ({ data: { leave: null } })),
       ]);
-      setAttendance(attendanceData.attendance || null);
+      const row = attendanceData.attendance || null;
+      setAttendance(row);
       setActiveLeave(leaveRes.data?.leave || null);
+
+      const checkInPath =
+        attendanceData.check_in_photo?.path || row?.check_in_photo_path || '';
+      const checkOutPath =
+        attendanceData.check_out_photo?.path || row?.check_out_photo_path || '';
+
+      const [nextInUrl, nextOutUrl] = await Promise.all([
+        checkInPath ? fetchPhotoBlobUrl(checkInPath) : Promise.resolve(''),
+        checkOutPath ? fetchPhotoBlobUrl(checkOutPath) : Promise.resolve(''),
+      ]);
+
+      setSavedCheckInPhotoUrl((prev) => {
+        revokeBlobUrl(prev);
+        return nextInUrl;
+      });
+      setSavedCheckOutPhotoUrl((prev) => {
+        revokeBlobUrl(prev);
+        return nextOutUrl;
+      });
     } catch (err) {
       setError(err.response?.data?.message || 'Gagal mengambil status attendance');
     } finally {
@@ -126,18 +188,28 @@ export default function MobileWorkerAttendancePage() {
   }, [checkoutProofPreviewUrl]);
 
   useEffect(() => {
+    savedCheckInPhotoUrlRef.current = savedCheckInPhotoUrl;
+  }, [savedCheckInPhotoUrl]);
+
+  useEffect(() => {
+    savedCheckOutPhotoUrlRef.current = savedCheckOutPhotoUrl;
+  }, [savedCheckOutPhotoUrl]);
+
+  useEffect(() => {
     return () => {
-      if (typeof checkInPreviewUrlRef.current === 'string' && checkInPreviewUrlRef.current.startsWith('blob:')) {
-        URL.revokeObjectURL(checkInPreviewUrlRef.current);
-      }
-      if (
-        typeof checkoutProofPreviewUrlRef.current === 'string'
-        && checkoutProofPreviewUrlRef.current.startsWith('blob:')
-      ) {
-        URL.revokeObjectURL(checkoutProofPreviewUrlRef.current);
-      }
+      revokeBlobUrl(checkInPreviewUrlRef.current);
+      revokeBlobUrl(checkoutProofPreviewUrlRef.current);
+      revokeBlobUrl(savedCheckInPhotoUrlRef.current);
+      revokeBlobUrl(savedCheckOutPhotoUrlRef.current);
     };
   }, []);
+
+  const openPhotoPreview = (url, title) => {
+    if (!url) return;
+    setPhotoPreview({ url, title });
+  };
+
+  const closePhotoPreview = () => setPhotoPreview(null);
 
   const handleCheckIn = async (e) => {
     e.preventDefault();
@@ -256,10 +328,16 @@ export default function MobileWorkerAttendancePage() {
                 <div className="rounded-[14px] border border-slate-100 bg-[#FAFBFC] p-3">
                   <p className="text-[10px] uppercase tracking-[.06em] text-slate-400 font-bold">Check In</p>
                   <p className="mt-1 text-[14px] font-extrabold text-slate-900">{formatDateTime(attendance?.check_in_at)}</p>
+                  {attendance?.check_in_at && savedCheckInPhotoUrl ? (
+                    <LihatFotoButton onClick={() => openPhotoPreview(savedCheckInPhotoUrl, 'Foto In')} />
+                  ) : null}
                 </div>
                 <div className="rounded-[14px] border border-slate-100 bg-[#FAFBFC] p-3">
                   <p className="text-[10px] uppercase tracking-[.06em] text-slate-400 font-bold">Check Out</p>
                   <p className="mt-1 text-[14px] font-extrabold text-slate-900">{formatDateTime(attendance?.check_out_at)}</p>
+                  {attendance?.check_out_at && savedCheckOutPhotoUrl ? (
+                    <LihatFotoButton onClick={() => openPhotoPreview(savedCheckOutPhotoUrl, 'Foto Out')} />
+                  ) : null}
                 </div>
               </div>
             )}
@@ -302,13 +380,22 @@ export default function MobileWorkerAttendancePage() {
                   <div className="relative mt-3">
                     <button
                       type="button"
-                      onClick={() => handleCheckInFileChange(null)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCheckInFileChange(null);
+                      }}
                       className="absolute right-2 top-2 z-[1] inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/65 text-white shadow-lg"
                       aria-label="Hapus foto in"
                     >
                       <X className="w-4 h-4" />
                     </button>
-                    <img src={checkInPreviewUrl} alt="Foto In" className="h-40 w-full rounded-2xl object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => openPhotoPreview(checkInPreviewUrl, 'Foto In')}
+                      className="block w-full text-left"
+                    >
+                      <img src={checkInPreviewUrl} alt="Foto In" className="h-40 w-full rounded-2xl object-cover" />
+                    </button>
                   </div>
                 )}
               </div>
@@ -359,17 +446,26 @@ export default function MobileWorkerAttendancePage() {
                   <div className="relative mt-3">
                     <button
                       type="button"
-                      onClick={() => handleCheckoutProofChange(null)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCheckoutProofChange(null);
+                      }}
                       className="absolute right-2 top-2 z-[1] inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/65 text-white shadow-lg"
                       aria-label="Hapus foto out"
                     >
                       <X className="w-4 h-4" />
                     </button>
-                    <img
-                      src={checkoutProofPreviewUrl}
-                      alt="Foto Out"
-                      className="h-40 w-full rounded-2xl object-cover"
-                    />
+                    <button
+                      type="button"
+                      onClick={() => openPhotoPreview(checkoutProofPreviewUrl, 'Foto Out')}
+                      className="block w-full text-left"
+                    >
+                      <img
+                        src={checkoutProofPreviewUrl}
+                        alt="Foto Out"
+                        className="h-40 w-full rounded-2xl object-cover"
+                      />
+                    </button>
                   </div>
                 )}
               </div>
@@ -400,6 +496,10 @@ export default function MobileWorkerAttendancePage() {
       <MobileCameraCapture
         open={Boolean(cameraTarget)}
         title={cameraTarget ? `Ambil ${cameraTarget.label}` : 'Ambil Foto'}
+        variant="ikm"
+        initialFacingMode="user"
+        confirmLabel="Ambil Foto"
+        includeLocation={false}
         onClose={() => setCameraTarget(null)}
         onCapture={(file) => {
           const key = cameraTarget?.key;
@@ -413,6 +513,43 @@ export default function MobileWorkerAttendancePage() {
           }
         }}
       />
+
+      {photoPreview ? (
+        <div
+          className="fixed inset-0 z-[210] flex items-center justify-center bg-black/75 px-3 py-4"
+          onClick={closePhotoPreview}
+        >
+          <div
+            className="w-full max-w-[430px] max-h-[calc(100dvh-24px)] bg-white rounded-[18px] overflow-hidden shadow-[0_12px_60px_rgba(0,0,0,.35)] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+              <div className="text-[13px] font-extrabold text-slate-900 truncate pr-3">
+                {photoPreview.title || 'Foto Absensi'}
+              </div>
+              <button
+                type="button"
+                className="w-9 h-9 rounded-[12px] grid place-items-center border border-slate-200 bg-white text-slate-600"
+                onClick={closePhotoPreview}
+                aria-label="Tutup"
+              >
+                <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M5 5l10 10M15 5L5 15" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-3 sm:p-4 overflow-y-auto">
+              <div className="rounded-[16px] overflow-hidden bg-slate-100 border border-slate-200">
+                <img
+                  src={photoPreview.url}
+                  alt={photoPreview.title || 'Foto absensi'}
+                  className="w-full h-auto max-h-[72dvh] object-contain"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <MobileConfirmDialog
         open={photoRequirementAlertOpen}

@@ -11,13 +11,24 @@ function formatCoord(value) {
   return Number(value).toFixed(5);
 }
 
-function LiveTimestamp() {
+function LiveTimestamp({ align = 'right' }) {
   const [ts, setTs] = useState(() => formatStamp(new Date()));
 
   useEffect(() => {
     const id = setInterval(() => setTs(formatStamp(new Date())), 1000);
     return () => clearInterval(id);
   }, []);
+
+  if (align === 'left') {
+    return (
+      <div
+        className="absolute left-3 bottom-3 px-2.5 py-1.5 rounded-xl text-white pointer-events-none select-none"
+        style={{ background: 'rgba(0,0,0,0.55)' }}
+      >
+        <div className="text-[11px] font-extrabold">{ts}</div>
+      </div>
+    );
+  }
 
   return (
     <div className="absolute bottom-3 right-3 px-2.5 py-1 rounded-[6px] bg-black/55 text-white text-[12px] font-mono font-bold pointer-events-none select-none">
@@ -27,7 +38,8 @@ function LiveTimestamp() {
 }
 
 /**
- * In-browser take-photo modal (IKM-style) with burned-in timestamp.
+ * In-browser take-photo modal with burned-in timestamp.
+ * variant="ikm" → white portrait sheet (Absensi); default → dark 4/3 shutter UI.
  * Optional GPS via includeLocation → onCapture(file, meta?).
  */
 export default function MobileCameraCapture({
@@ -37,6 +49,8 @@ export default function MobileCameraCapture({
   onClose,
   initialFacingMode = 'environment',
   includeLocation = false,
+  variant = 'default',
+  confirmLabel = 'Ambil Foto',
 }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -47,6 +61,7 @@ export default function MobileCameraCapture({
   const [gpsStatus, setGpsStatus] = useState('idle');
   const [gpsMeta, setGpsMeta] = useState(null);
   const [gpsError, setGpsError] = useState('');
+  const isIkm = variant === 'ikm';
 
   useEffect(() => {
     if (!open) return undefined;
@@ -193,15 +208,16 @@ export default function MobileCameraCapture({
     const maxTextWidth = Math.max(...lines.map((line) => ctx.measureText(line).width));
     const pad = 10;
     const boxHeight = lines.length * fontSize + (lines.length - 1) * lineGap + pad;
-    const boxX = canvas.width - maxTextWidth - pad * 2 - 6;
+    const boxX = isIkm ? pad + 6 : canvas.width - maxTextWidth - pad * 2 - 6;
     const boxY = canvas.height - boxHeight - pad - 6;
+    const textX = isIkm ? boxX + pad : canvas.width - maxTextWidth - pad - 6;
 
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
     ctx.fillRect(boxX, boxY, maxTextWidth + pad * 2, boxHeight);
     ctx.fillStyle = '#ffffff';
     lines.forEach((line, index) => {
       const textY = boxY + pad + fontSize * (index + 1) + lineGap * index - 4;
-      ctx.fillText(line, canvas.width - maxTextWidth - pad - 6, textY);
+      ctx.fillText(line, textX, textY);
     });
 
     canvas.toBlob(
@@ -232,6 +248,157 @@ export default function MobileCameraCapture({
   const captureDisabled =
     !ready || Boolean(camError) || (includeLocation && gpsStatus !== 'ready');
 
+  const flipButton = (
+    <button
+      type="button"
+      onClick={flipCamera}
+      disabled={Boolean(camError)}
+      className={
+        isIkm
+          ? 'absolute top-2 right-2 w-9 h-9 rounded-full bg-black/50 grid place-items-center text-white disabled:opacity-30'
+          : 'w-11 h-11 rounded-full bg-white/10 text-white/70 grid place-items-center hover:bg-white/20 hover:text-white transition disabled:opacity-30'
+      }
+      aria-label="Balik kamera"
+    >
+      {isIkm ? (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M20 7h-3.5L14 4h-4L7.5 7H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1z" />
+          <circle cx="12" cy="13" r="3" />
+        </svg>
+      ) : (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M1 4v6h6" />
+          <path d="M23 20v-6h-6" />
+          <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15" />
+        </svg>
+      )}
+    </button>
+  );
+
+  const videoBlock = (
+    <>
+      <video
+        ref={videoRef}
+        className={isIkm ? 'w-full h-full object-cover' : 'absolute inset-0 w-full h-full object-cover'}
+        style={facingMode === 'user' ? { transform: 'scaleX(-1)' } : undefined}
+        playsInline
+        muted
+        autoPlay={isIkm || undefined}
+        onLoadedMetadata={
+          isIkm
+            ? () => {
+                setReady(true);
+                videoRef.current?.play?.().catch(() => {});
+              }
+            : undefined
+        }
+        onCanPlay={isIkm ? () => setReady(true) : undefined}
+      />
+      {ready ? <LiveTimestamp align={isIkm ? 'left' : 'right'} /> : null}
+      {isIkm ? flipButton : null}
+      {includeLocation ? (
+        <div className={`absolute ${isIkm ? 'top-12' : 'top-3'} left-3 right-3 text-[10.5px] font-semibold`}>
+          <div
+            className={`inline-flex max-w-full rounded-[8px] px-2.5 py-1.5 ${
+              gpsStatus === 'ready'
+                ? 'bg-emerald-500/80 text-white'
+                : gpsStatus === 'error'
+                  ? 'bg-rose-500/80 text-white'
+                  : 'bg-black/55 text-white/85'
+            }`}
+          >
+            {gpsStatus === 'ready'
+              ? `GPS siap · ${formatCoord(gpsMeta?.latitude)}, ${formatCoord(gpsMeta?.longitude)}`
+              : gpsStatus === 'error'
+                ? `GPS gagal · ${gpsError || 'aktifkan izin lokasi'}`
+                : 'Mengambil lokasi GPS...'}
+          </div>
+        </div>
+      ) : null}
+      <canvas ref={canvasRef} className="hidden" />
+    </>
+  );
+
+  if (isIkm) {
+    return createPortal(
+      <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/70 px-3 pb-[max(12px,env(safe-area-inset-bottom))] pt-3 sm:p-4">
+        <div className="w-full max-w-[430px] max-h-[calc(100dvh-24px)] bg-white rounded-[18px] overflow-hidden shadow-[0_12px_60px_rgba(0,0,0,.35)] flex flex-col">
+          <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
+            <div className="text-[13px] font-extrabold text-slate-900 truncate pr-3">{title}</div>
+            <button
+              type="button"
+              onClick={handleClose}
+              className="w-9 h-9 rounded-[12px] grid place-items-center border border-slate-200 bg-white text-slate-600"
+              aria-label="Tutup kamera"
+            >
+              <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M5 5l10 10M15 5L5 15" />
+              </svg>
+            </button>
+          </div>
+
+          <div className="p-3 sm:p-4 overflow-y-auto">
+            {camError ? (
+              <div className="mb-3 text-[11.5px] font-semibold px-3 py-2 rounded-xl bg-red-50 text-red-900 border border-red-100">
+                {camError}
+              </div>
+            ) : null}
+
+            <div className="rounded-[16px] overflow-hidden bg-black relative aspect-[3/4] sm:aspect-[4/5]">
+              {camError ? (
+                <div className="absolute inset-0 flex items-center justify-center px-6 text-center">
+                  <div className="text-white/50 text-[11px] leading-relaxed">Kamera tidak tersedia</div>
+                </div>
+              ) : (
+                videoBlock
+              )}
+            </div>
+
+            {!ready && !camError ? (
+              <div className="mt-2 text-[11px] font-semibold text-slate-500">Menyiapkan kamera…</div>
+            ) : null}
+
+            <div className="mt-3 text-[11px] text-slate-500 font-medium leading-[1.5]">
+              Foto diambil langsung dari kamera dan akan otomatis diberi timestamp.
+            </div>
+            {includeLocation ? (
+              <div className="mt-2 text-[11px] font-semibold text-slate-600">
+                {gpsStatus === 'ready'
+                  ? `GPS siap · ${formatCoord(gpsMeta?.latitude)}, ${formatCoord(gpsMeta?.longitude)}`
+                  : gpsStatus === 'error'
+                    ? `GPS gagal · ${gpsError || 'aktifkan izin lokasi'}`
+                    : 'Mengambil lokasi GPS...'}
+              </div>
+            ) : null}
+
+            <div className="mt-3 grid grid-cols-2 gap-2 sticky bottom-0 bg-white pt-1.5">
+              <button
+                type="button"
+                onClick={handleClose}
+                className="h-[40px] rounded-[12px] border border-slate-200 bg-white text-slate-700 text-[12px] font-extrabold"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={capture}
+                disabled={captureDisabled}
+                className="h-[40px] rounded-[12px] bg-[#163A22] text-white text-[12px] font-extrabold disabled:opacity-50"
+              >
+                {!ready
+                  ? 'Menyiapkan...'
+                  : includeLocation && gpsStatus !== 'ready'
+                    ? 'Menyiapkan GPS...'
+                    : confirmLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>,
+      document.body
+    );
+  }
+
   return createPortal(
     <div className="fixed inset-0 z-[200] bg-black/75 flex items-center justify-center p-4">
       <div className="w-full max-w-[360px] bg-black rounded-2xl overflow-hidden shadow-2xl flex flex-col">
@@ -259,36 +426,7 @@ export default function MobileCameraCapture({
               </div>
             </div>
           ) : (
-            <>
-              <video
-                ref={videoRef}
-                className="absolute inset-0 w-full h-full object-cover"
-                style={facingMode === 'user' ? { transform: 'scaleX(-1)' } : undefined}
-                playsInline
-                muted
-              />
-              {ready ? <LiveTimestamp /> : null}
-              {includeLocation ? (
-                <div className="absolute top-3 left-3 right-3 text-[10.5px] font-semibold">
-                  <div
-                    className={`inline-flex max-w-full rounded-[8px] px-2.5 py-1.5 ${
-                      gpsStatus === 'ready'
-                        ? 'bg-emerald-500/80 text-white'
-                        : gpsStatus === 'error'
-                          ? 'bg-rose-500/80 text-white'
-                          : 'bg-black/55 text-white/85'
-                    }`}
-                  >
-                    {gpsStatus === 'ready'
-                      ? `GPS siap · ${formatCoord(gpsMeta?.latitude)}, ${formatCoord(gpsMeta?.longitude)}`
-                      : gpsStatus === 'error'
-                        ? `GPS gagal · ${gpsError || 'aktifkan izin lokasi'}`
-                        : 'Mengambil lokasi GPS...'}
-                  </div>
-                </div>
-              ) : null}
-              <canvas ref={canvasRef} className="hidden" />
-            </>
+            videoBlock
           )}
         </div>
 
@@ -314,19 +452,7 @@ export default function MobileCameraCapture({
             <div className="w-[52px] h-[52px] rounded-full bg-white" />
           </button>
 
-          <button
-            type="button"
-            onClick={flipCamera}
-            disabled={Boolean(camError)}
-            className="w-11 h-11 rounded-full bg-white/10 text-white/70 grid place-items-center hover:bg-white/20 hover:text-white transition disabled:opacity-30"
-            aria-label="Balik kamera"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M1 4v6h6" />
-              <path d="M23 20v-6h-6" />
-              <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15" />
-            </svg>
-          </button>
+          {flipButton}
         </div>
       </div>
     </div>,

@@ -80,6 +80,30 @@ async function savePhoto(workerId, attendanceDate, fieldName, file) {
   };
 }
 
+function deleteAttendanceDiskFile(fileName) {
+  if (!fileName) return;
+  const fullPath = path.join(ATTENDANCE_BASE, path.basename(String(fileName)));
+  if (fs.existsSync(fullPath)) {
+    try {
+      fs.unlinkSync(fullPath);
+    } catch {
+      // ignore disk cleanup failure
+    }
+  }
+}
+
+function resolveGroomingMeta(fieldOrType) {
+  const raw = String(fieldOrType || '').toLowerCase().trim();
+  return PHOTO_TYPE_META.find(
+    (m) => m.field === raw || m.photo_type === raw || m.field === `${raw}_photo`
+  ) || null;
+}
+
+function groomingUploadedCount(row) {
+  if (!row) return 0;
+  return PHOTO_TYPE_META.filter((meta) => Boolean(row[meta.fileCol])).length;
+}
+
 function isGroomingComplete(row) {
   if (!row) return false;
   return PHOTO_TYPE_META.every((meta) => Boolean(row[meta.fileCol]));
@@ -122,10 +146,14 @@ export const getTodayAttendanceStatus = async (req, res) => {
     const checkInPhoto = row?.check_in_photo_file
       ? { file: row.check_in_photo_file, path: row.check_in_photo_path }
       : null;
+    const checkOutPhoto = row?.check_out_photo_file
+      ? { file: row.check_out_photo_file, path: row.check_out_photo_path }
+      : null;
 
     return res.json({
       attendance: row || null,
       check_in_photo: checkInPhoto,
+      check_out_photo: checkOutPhoto,
       grooming_complete: groomingComplete,
       grooming_photos: buildGroomingPhotos(row),
       required_check_in_photos: REQUIRED_CHECK_IN_PHOTOS,
@@ -217,15 +245,28 @@ export const submitGroomingPhotos = async (req, res) => {
   const today = todayDateString();
   const files = req.files || {};
 
-  for (const fieldName of GROOMING_FIELDS) {
-    if (!files[fieldName]?.[0]) {
-      return res.status(400).json({ message: `Foto ${fieldName} wajib diunggah` });
-    }
+  const uploadedFields = GROOMING_FIELDS.filter((fieldName) => files[fieldName]?.[0]);
+  const bodyMeta = resolveGroomingMeta(req.body?.photo_type || req.body?.field);
+
+  let meta = null;
+  if (uploadedFields.length === 1) {
+    meta = resolveGroomingMeta(uploadedFields[0]);
+  } else if (uploadedFields.length === 0 && bodyMeta && files[bodyMeta.field]?.[0]) {
+    meta = bodyMeta;
+  }
+
+  if (!meta || uploadedFields.length !== 1) {
+    return res.status(400).json({ message: 'Unggah tepat satu foto grooming' });
+  }
+
+  const file = files[meta.field]?.[0];
+  if (!file) {
+    return res.status(400).json({ message: 'Unggah tepat satu foto grooming' });
   }
 
   try {
     const [[existing]] = await cleanoxPool.query(
-      `SELECT id, check_in_at
+      `SELECT *
        FROM tr_worker_attendance
        WHERE worker_id = ? AND attendance_date = ?`,
       [workerId, today]
@@ -235,40 +276,93 @@ export const submitGroomingPhotos = async (req, res) => {
       return res.status(400).json({ message: 'Lakukan Foto In / check-in terlebih dahulu sebelum foto grooming' });
     }
 
-    const fullBody = await savePhoto(workerId, today, 'full_body', files.full_body_photo[0]);
-    const side = await savePhoto(workerId, today, 'side', files.side_photo[0]);
-    const back = await savePhoto(workerId, today, 'back', files.back_photo[0]);
-    const hand = await savePhoto(workerId, today, 'hand', files.hand_photo[0]);
+    const saved = await savePhoto(workerId, today, meta.photo_type, file);
+    const oldFile = existing[meta.fileCol];
+    if (oldFile && String(oldFile) !== String(saved.file)) {
+      deleteAttendanceDiskFile(oldFile);
+    }
 
     await cleanoxPool.query(
       `UPDATE tr_worker_attendance
-       SET full_body_photo_file = ?,
-           full_body_photo_path = ?,
-           side_photo_file = ?,
-           side_photo_path = ?,
-           back_photo_file = ?,
-           back_photo_path = ?,
-           hand_photo_file = ?,
-           hand_photo_path = ?,
+       SET \`${meta.fileCol}\` = ?,
+           \`${meta.pathCol}\` = ?,
            updated_at = NOW()
        WHERE id = ?`,
-      [
-        fullBody.file,
-        fullBody.path,
-        side.file,
-        side.path,
-        back.file,
-        back.path,
-        hand.file,
-        hand.path,
-        existing.id,
-      ]
+      [saved.file, saved.path, existing.id]
     );
 
-    return res.json({ message: 'Foto grooming berhasil disimpan' });
+    const [[row]] = await cleanoxPool.query(
+      `SELECT * FROM tr_worker_attendance WHERE id = ?`,
+      [existing.id]
+    );
+
+    return res.status(201).json({
+      message: 'Foto grooming berhasil disimpan',
+      photo_type: meta.photo_type,
+      field: meta.field,
+      photo_path: saved.path,
+      grooming_complete: isGroomingComplete(row),
+      uploaded_count: groomingUploadedCount(row),
+      required_count: PHOTO_TYPE_META.length,
+    });
   } catch (error) {
     console.error('[mobileAttendance/submitGroomingPhotos]', error.message);
     return res.status(500).json({ message: 'Gagal menyimpan foto grooming' });
+  }
+};
+
+export const deleteGroomingPhoto = async (req, res) => {
+  const workerId = req.user?.id;
+  const today = todayDateString();
+  const meta = resolveGroomingMeta(req.body?.photo_type || req.body?.field);
+
+  if (!meta) {
+    return res.status(400).json({ message: 'photo_type atau field grooming tidak valid' });
+  }
+
+  try {
+    const [[existing]] = await cleanoxPool.query(
+      `SELECT *
+       FROM tr_worker_attendance
+       WHERE worker_id = ? AND attendance_date = ?`,
+      [workerId, today]
+    );
+
+    if (!existing?.check_in_at) {
+      return res.status(400).json({ message: 'Lakukan Foto In / check-in terlebih dahulu sebelum menghapus foto grooming' });
+    }
+
+    const oldFile = existing[meta.fileCol];
+    if (!oldFile) {
+      return res.status(404).json({ message: 'Foto grooming tidak ditemukan' });
+    }
+
+    await cleanoxPool.query(
+      `UPDATE tr_worker_attendance
+       SET \`${meta.fileCol}\` = NULL,
+           \`${meta.pathCol}\` = NULL,
+           updated_at = NOW()
+       WHERE id = ?`,
+      [existing.id]
+    );
+
+    deleteAttendanceDiskFile(oldFile);
+
+    const [[row]] = await cleanoxPool.query(
+      `SELECT * FROM tr_worker_attendance WHERE id = ?`,
+      [existing.id]
+    );
+
+    return res.json({
+      message: 'Foto grooming berhasil dihapus',
+      photo_type: meta.photo_type,
+      grooming_complete: isGroomingComplete(row),
+      uploaded_count: groomingUploadedCount(row),
+      required_count: PHOTO_TYPE_META.length,
+    });
+  } catch (error) {
+    console.error('[mobileAttendance/deleteGroomingPhoto]', error.message);
+    return res.status(500).json({ message: 'Gagal menghapus foto grooming' });
   }
 };
 

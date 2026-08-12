@@ -4,6 +4,7 @@ import { ArrowLeft, Camera, CheckCircle2, Lock, Save, Sparkles, Trash2, X } from
 import api from '@shared/utils/api.js';
 import MobileWorkerBottomNav from '@mobile/components/MobileWorkerBottomNav.jsx';
 import MobileCameraCapture from '@mobile/components/MobileCameraCapture.jsx';
+import MobileConfirmDialog from '@mobile/components/MobileConfirmDialog.jsx';
 
 const SESSIONS = [
   { key: 'pagi', label: 'Pagi', hint: '07:00 – 09:00 WIB' },
@@ -18,6 +19,22 @@ function initialSessionFromSearch(searchParams) {
   return raw === 'sore' || raw === 'pagi' ? raw : 'pagi';
 }
 
+function LihatFotoButton({ onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="mt-3 w-full h-[30px] rounded-[9px] border border-emerald-200 bg-emerald-50 text-emerald-800 text-[10.5px] font-bold tracking-[.02em] flex items-center justify-center gap-1 transition hover:bg-emerald-100 active:scale-[.98]"
+    >
+      <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M1.5 10s3.2-5 8.5-5 8.5 5 8.5 5-3.2 5-8.5 5-8.5-5-8.5-5z" />
+        <circle cx="10" cy="10" r="2.4" />
+      </svg>
+      Lihat Foto
+    </button>
+  );
+}
+
 export default function MobileWorkerKebersihanPage() {
   const [searchParams] = useSearchParams();
   const [session, setSession] = useState(() => initialSessionFromSearch(searchParams));
@@ -30,6 +47,9 @@ export default function MobileWorkerKebersihanPage() {
   const [draftFilesMap, setDraftFilesMap] = useState({});
   const [draftPreviewMap, setDraftPreviewMap] = useState({});
   const [cameraTarget, setCameraTarget] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
   const previewMapRef = useRef({});
   const draftPreviewMapRef = useRef({});
 
@@ -138,6 +158,13 @@ export default function MobileWorkerKebersihanPage() {
     return 'Belum mulai';
   })();
 
+  const openPhotoPreview = (url, title) => {
+    if (!url) return;
+    setPhotoPreview({ url, title });
+  };
+
+  const closePhotoPreview = () => setPhotoPreview(null);
+
   const uploadAreaPhoto = async (areaId, file) => {
     if (!file) return;
     setError('');
@@ -163,6 +190,28 @@ export default function MobileWorkerKebersihanPage() {
       setError(err.response?.data?.message || 'Gagal mengunggah foto kebersihan');
     } finally {
       setUploadingAreaId(null);
+    }
+  };
+
+  const confirmDeleteSavedPhoto = async () => {
+    if (!deleteTarget?.areaId) return;
+    setError('');
+    setSuccess('');
+    setDeleting(true);
+    try {
+      const { data } = await api.delete('/mobile-kebersihan/photo', {
+        data: { session, area_id: deleteTarget.areaId },
+      });
+      clearDraftForArea(deleteTarget.areaId);
+      setSuccess(
+        `Foto ${deleteTarget.areaName || 'area'} dihapus (${data.uploaded_count || 0}/4).`
+      );
+      setDeleteTarget(null);
+      await loadStatus(session);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Gagal menghapus foto kebersihan');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -299,6 +348,7 @@ export default function MobileWorkerKebersihanPage() {
               const draftFile = draftFilesMap[area.area_id];
               const done = Boolean(area.photo);
               const uploading = uploadingAreaId === area.area_id;
+              const showSavedDelete = done && canCapture && !draftFile;
 
               return (
                 <div
@@ -328,7 +378,7 @@ export default function MobileWorkerKebersihanPage() {
                   {canCapture && (
                     <button
                       type="button"
-                      disabled={Boolean(uploadingAreaId)}
+                      disabled={Boolean(uploadingAreaId) || deleting}
                       onClick={() =>
                         setCameraTarget({ areaId: area.area_id, areaName: area.name || 'Area' })
                       }
@@ -344,26 +394,41 @@ export default function MobileWorkerKebersihanPage() {
                       {draftFile && canCapture && (
                         <button
                           type="button"
-                          onClick={() => clearDraftForArea(area.area_id)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            clearDraftForArea(area.area_id);
+                          }}
                           className="absolute right-2 top-2 z-[1] inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/65 text-white shadow-lg transition hover:bg-black/80"
                           aria-label={`Hapus draft foto ${area.name}`}
                         >
                           <X className="w-4 h-4" />
                         </button>
                       )}
-                      <img
-                        src={preview}
-                        alt={area.name}
-                        className="h-40 w-full rounded-2xl object-cover"
-                      />
+                      <button
+                        type="button"
+                        onClick={() => openPhotoPreview(preview, area.name || 'Foto Area')}
+                        className="block w-full text-left"
+                      >
+                        <img
+                          src={preview}
+                          alt={area.name}
+                          className="h-40 w-full rounded-2xl object-cover"
+                        />
+                      </button>
                     </div>
                   )}
+
+                  {preview ? (
+                    <LihatFotoButton
+                      onClick={() => openPhotoPreview(preview, area.name || 'Foto Area')}
+                    />
+                  ) : null}
 
                   {draftFile && canCapture && (
                     <div className="mt-3 grid grid-cols-2 gap-2">
                       <button
                         type="button"
-                        disabled={uploading}
+                        disabled={uploading || deleting}
                         onClick={() => clearDraftForArea(area.area_id)}
                         className="inline-flex h-[40px] items-center justify-center gap-1.5 rounded-[12px] border border-rose-200 bg-rose-50 px-3 text-[12px] font-bold text-rose-700 transition hover:bg-rose-100 disabled:opacity-60"
                       >
@@ -372,7 +437,7 @@ export default function MobileWorkerKebersihanPage() {
                       </button>
                       <button
                         type="button"
-                        disabled={uploading}
+                        disabled={uploading || deleting}
                         onClick={() => uploadAreaPhoto(area.area_id, draftFile)}
                         className="inline-flex h-[40px] items-center justify-center gap-1.5 rounded-[12px] bg-[#163A22] px-3 text-[12px] font-bold text-white transition hover:bg-[#20492C] disabled:opacity-60"
                       >
@@ -380,6 +445,23 @@ export default function MobileWorkerKebersihanPage() {
                         {uploading ? 'Menyimpan...' : 'Simpan Foto'}
                       </button>
                     </div>
+                  )}
+
+                  {showSavedDelete && (
+                    <button
+                      type="button"
+                      disabled={deleting || Boolean(uploadingAreaId)}
+                      onClick={() =>
+                        setDeleteTarget({
+                          areaId: area.area_id,
+                          areaName: area.name || 'Area',
+                        })
+                      }
+                      className="mt-3 w-full inline-flex h-[40px] items-center justify-center gap-1.5 rounded-[12px] border border-rose-200 bg-rose-50 px-3 text-[12px] font-bold text-rose-700 transition hover:bg-rose-100 disabled:opacity-60"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Hapus Foto
+                    </button>
                   )}
                 </div>
               );
@@ -393,6 +475,10 @@ export default function MobileWorkerKebersihanPage() {
       <MobileCameraCapture
         open={Boolean(cameraTarget)}
         title={cameraTarget ? `Ambil Foto ${cameraTarget.areaName}` : 'Ambil Foto'}
+        variant="ikm"
+        initialFacingMode="environment"
+        confirmLabel="Ambil Foto"
+        includeLocation={false}
         onClose={() => setCameraTarget(null)}
         onCapture={async (file) => {
           const areaId = cameraTarget?.areaId;
@@ -407,6 +493,60 @@ export default function MobileWorkerKebersihanPage() {
             return next;
           });
         }}
+      />
+
+      {photoPreview ? (
+        <div
+          className="fixed inset-0 z-[210] flex items-center justify-center bg-black/75 px-3 py-4"
+          onClick={closePhotoPreview}
+        >
+          <div
+            className="w-full max-w-[430px] max-h-[calc(100dvh-24px)] bg-white rounded-[18px] overflow-hidden shadow-[0_12px_60px_rgba(0,0,0,.35)] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+              <div className="text-[13px] font-extrabold text-slate-900 truncate pr-3">
+                {photoPreview.title || 'Foto Kebersihan'}
+              </div>
+              <button
+                type="button"
+                className="w-9 h-9 rounded-[12px] grid place-items-center border border-slate-200 bg-white text-slate-600"
+                onClick={closePhotoPreview}
+                aria-label="Tutup"
+              >
+                <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M5 5l10 10M15 5L5 15" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-3 sm:p-4 overflow-y-auto">
+              <div className="rounded-[16px] overflow-hidden bg-slate-100 border border-slate-200">
+                <img
+                  src={photoPreview.url}
+                  alt={photoPreview.title || 'Foto kebersihan'}
+                  className="w-full h-auto max-h-[72dvh] object-contain"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <MobileConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="Hapus Foto Area?"
+        description={
+          deleteTarget
+            ? `Foto ${deleteTarget.areaName} akan dihapus dari program dan file. Status kebersihan bisa kembali ke In Progress.`
+            : ''
+        }
+        variant="danger"
+        confirmLabel={deleting ? 'Menghapus...' : 'Ya, Hapus'}
+        cancelLabel="Batal"
+        busy={deleting}
+        onConfirm={confirmDeleteSavedPhoto}
+        onCancel={() => !deleting && setDeleteTarget(null)}
+        onClose={() => !deleting && setDeleteTarget(null)}
       />
     </div>
   );

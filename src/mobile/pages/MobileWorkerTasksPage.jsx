@@ -88,9 +88,34 @@ const collectEvidencePhotos = (taskList = []) => {
         map.set(`customer-${photo.id}`, photo.photo_path);
       }
     }
+    if (evidence.arrival_photo_path && task.assignment_id) {
+      map.set(`arrival-${task.assignment_id}`, evidence.arrival_photo_path);
+    }
   }
   return map;
 };
+
+function normalizePhotoPath(path) {
+  return String(path || '')
+    .replace(/^\/api/, '')
+    .replace(/^\//, '');
+}
+
+function LihatFotoButton({ onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="mt-1.5 w-full h-[30px] rounded-[9px] border border-emerald-200 bg-emerald-50 text-emerald-800 text-[10.5px] font-bold tracking-[.02em] flex items-center justify-center gap-1 transition hover:bg-emerald-100 active:scale-[.98]"
+    >
+      <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M1.5 10s3.2-5 8.5-5 8.5 5 8.5 5-3.2 5-8.5 5-8.5-5-8.5-5z" />
+        <circle cx="10" cy="10" r="2.4" />
+      </svg>
+      Lihat Foto
+    </button>
+  );
+}
 
 export default function MobileWorkerTasksPage() {
   const navigate = useNavigate();
@@ -110,6 +135,7 @@ export default function MobileWorkerTasksPage() {
   const [cameraTarget, setCameraTarget] = useState(null);
   const [evidenceAlert, setEvidenceAlert] = useState(null);
   const [photoPreviewMap, setPhotoPreviewMap] = useState({});
+  const [photoPreview, setPhotoPreview] = useState(null);
   const photoPreviewMapRef = useRef({});
 
   const refreshPhotoPreviews = async (taskList) => {
@@ -439,6 +465,35 @@ export default function MobileWorkerTasksPage() {
     }
   };
 
+  const closePhotoPreview = () => setPhotoPreview(null);
+
+  const openPhotoPreviewFromMap = async (mapKey, title, photoPath) => {
+    const existing = photoPreviewMap[mapKey];
+    if (existing) {
+      setPhotoPreview({ url: existing, title });
+      return;
+    }
+    if (!photoPath) {
+      setError('Foto belum bisa ditampilkan.');
+      return;
+    }
+    try {
+      const blobRes = await api.get(normalizePhotoPath(photoPath), { responseType: 'blob' });
+      const url = URL.createObjectURL(blobRes.data);
+      setPhotoPreviewMap((prev) => {
+        const next = { ...prev };
+        if (typeof next[mapKey] === 'string' && next[mapKey].startsWith('blob:')) {
+          URL.revokeObjectURL(next[mapKey]);
+        }
+        next[mapKey] = url;
+        return next;
+      });
+      setPhotoPreview({ url, title });
+    } catch {
+      setError('Gagal memuat foto.');
+    }
+  };
+
   const confirmCopy = CONFIRM_COPY[confirmDialog?.type] || CONFIRM_COPY.accept;
 
   return (
@@ -631,15 +686,38 @@ export default function MobileWorkerTasksPage() {
                               )}
                             </div>
                             {stage.filled && (
-                              preview ? (
-                                <img
-                                  src={preview}
-                                  alt={stage.label}
-                                  className="h-28 w-full rounded-xl object-cover"
+                              <>
+                                {preview ? (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      openPhotoPreviewFromMap(
+                                        `takehome-${stage.key}`,
+                                        stage.label,
+                                        stage.photo_path
+                                      )
+                                    }
+                                    className="block w-full text-left"
+                                  >
+                                    <img
+                                      src={preview}
+                                      alt={stage.label}
+                                      className="h-28 w-full rounded-xl object-cover"
+                                    />
+                                  </button>
+                                ) : (
+                                  <div className="h-28 w-full rounded-xl bg-slate-200 animate-pulse" />
+                                )}
+                                <LihatFotoButton
+                                  onClick={() =>
+                                    openPhotoPreviewFromMap(
+                                      `takehome-${stage.key}`,
+                                      stage.label,
+                                      stage.photo_path
+                                    )
+                                  }
                                 />
-                              ) : (
-                                <div className="h-28 w-full rounded-xl bg-slate-200 animate-pulse" />
-                              )
+                              </>
                             )}
                             {isNext && (
                               <button
@@ -709,6 +787,40 @@ export default function MobileWorkerTasksPage() {
 
                   {task.assignment_status === 'On_Progress' && !isTakeHomeTask(task) && (
                     <div className="space-y-3">
+                      {(evidence.arrival_photo_path || photoPreviewMap[`arrival-${task.assignment_id}`]) && (
+                        <div className="rounded-[14px] border border-slate-200 bg-[#FAFBFC] p-3 space-y-2">
+                          <p className="text-[12px] font-extrabold text-slate-800">Foto Kedatangan</p>
+                          {photoPreviewMap[`arrival-${task.assignment_id}`] ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openPhotoPreviewFromMap(
+                                  `arrival-${task.assignment_id}`,
+                                  'Foto Kedatangan',
+                                  evidence.arrival_photo_path
+                                )
+                              }
+                              className="block w-full text-left"
+                            >
+                              <img
+                                src={photoPreviewMap[`arrival-${task.assignment_id}`]}
+                                alt="Foto kedatangan"
+                                className="h-28 w-full rounded-xl object-cover"
+                              />
+                            </button>
+                          ) : null}
+                          <LihatFotoButton
+                            onClick={() =>
+                              openPhotoPreviewFromMap(
+                                `arrival-${task.assignment_id}`,
+                                'Foto Kedatangan',
+                                evidence.arrival_photo_path
+                              )
+                            }
+                          />
+                        </div>
+                      )}
+
                       {(customerPhotos || []).length > 0 && (
                         <div className="rounded-[14px] border border-sky-200 bg-sky-50/50 p-3 space-y-2">
                           <div>
@@ -720,18 +832,39 @@ export default function MobileWorkerTasksPage() {
                           <div className="grid grid-cols-2 gap-2">
                             {(customerPhotos || []).map((photo) => {
                               const preview = photoPreviewMap[`customer-${photo.id}`];
-                              return preview ? (
-                                <img
-                                  key={photo.id}
-                                  src={preview}
-                                  alt="Referensi customer"
-                                  className="h-28 w-full rounded-xl object-cover"
-                                />
-                              ) : (
-                                <div
-                                  key={photo.id}
-                                  className="h-28 w-full rounded-xl bg-slate-200 animate-pulse"
-                                />
+                              return (
+                                <div key={photo.id}>
+                                  {preview ? (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        openPhotoPreviewFromMap(
+                                          `customer-${photo.id}`,
+                                          'Referensi Customer',
+                                          photo.photo_path
+                                        )
+                                      }
+                                      className="block w-full text-left"
+                                    >
+                                      <img
+                                        src={preview}
+                                        alt="Referensi customer"
+                                        className="h-28 w-full rounded-xl object-cover"
+                                      />
+                                    </button>
+                                  ) : (
+                                    <div className="h-28 w-full rounded-xl bg-slate-200 animate-pulse" />
+                                  )}
+                                  <LihatFotoButton
+                                    onClick={() =>
+                                      openPhotoPreviewFromMap(
+                                        `customer-${photo.id}`,
+                                        'Referensi Customer',
+                                        photo.photo_path
+                                      )
+                                    }
+                                  />
+                                </div>
                               );
                             })}
                           </div>
@@ -761,21 +894,37 @@ export default function MobileWorkerTasksPage() {
                                 <button
                                   type="button"
                                   disabled={submitting}
-                                  onClick={() => handleDeletePhoto(task.assignment_id, photo.id)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeletePhoto(task.assignment_id, photo.id);
+                                  }}
                                   className="absolute right-1.5 top-1.5 z-[1] inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/65 text-white shadow-lg disabled:opacity-60"
                                   aria-label="Hapus foto before"
                                 >
                                   <X className="w-3.5 h-3.5" />
                                 </button>
                                 {photoPreviewMap[String(photo.id)] ? (
-                                  <img
-                                    src={photoPreviewMap[String(photo.id)]}
-                                    alt="Foto before"
-                                    className="h-28 w-full rounded-xl object-cover"
-                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      openPhotoPreviewFromMap(String(photo.id), 'Foto Before', photo.photo_path)
+                                    }
+                                    className="block w-full text-left"
+                                  >
+                                    <img
+                                      src={photoPreviewMap[String(photo.id)]}
+                                      alt="Foto before"
+                                      className="h-28 w-full rounded-xl object-cover"
+                                    />
+                                  </button>
                                 ) : (
                                   <div className="h-28 w-full rounded-xl bg-slate-200 animate-pulse" />
                                 )}
+                                <LihatFotoButton
+                                  onClick={() =>
+                                    openPhotoPreviewFromMap(String(photo.id), 'Foto Before', photo.photo_path)
+                                  }
+                                />
                               </div>
                             ))}
                           </div>
@@ -823,21 +972,37 @@ export default function MobileWorkerTasksPage() {
                                 <button
                                   type="button"
                                   disabled={submitting}
-                                  onClick={() => handleDeletePhoto(task.assignment_id, photo.id)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeletePhoto(task.assignment_id, photo.id);
+                                  }}
                                   className="absolute right-1.5 top-1.5 z-[1] inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/65 text-white shadow-lg disabled:opacity-60"
                                   aria-label="Hapus foto after"
                                 >
                                   <X className="w-3.5 h-3.5" />
                                 </button>
                                 {photoPreviewMap[String(photo.id)] ? (
-                                  <img
-                                    src={photoPreviewMap[String(photo.id)]}
-                                    alt="Foto after"
-                                    className="h-28 w-full rounded-xl object-cover"
-                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      openPhotoPreviewFromMap(String(photo.id), 'Foto After', photo.photo_path)
+                                    }
+                                    className="block w-full text-left"
+                                  >
+                                    <img
+                                      src={photoPreviewMap[String(photo.id)]}
+                                      alt="Foto after"
+                                      className="h-28 w-full rounded-xl object-cover"
+                                    />
+                                  </button>
                                 ) : (
                                   <div className="h-28 w-full rounded-xl bg-slate-200 animate-pulse" />
                                 )}
+                                <LihatFotoButton
+                                  onClick={() =>
+                                    openPhotoPreviewFromMap(String(photo.id), 'Foto After', photo.photo_path)
+                                  }
+                                />
                               </div>
                             ))}
                           </div>
@@ -1014,10 +1179,50 @@ export default function MobileWorkerTasksPage() {
       <MobileCameraCapture
         open={Boolean(cameraTarget)}
         title={cameraTarget ? `Ambil ${cameraTarget.label}` : 'Ambil Foto'}
+        variant="ikm"
+        initialFacingMode="environment"
+        confirmLabel="Ambil Foto"
         includeLocation={Boolean(cameraTarget?.includeLocation)}
         onClose={() => setCameraTarget(null)}
         onCapture={handleCameraCapture}
       />
+
+      {photoPreview ? (
+        <div
+          className="fixed inset-0 z-[210] flex items-center justify-center bg-black/75 px-3 py-4"
+          onClick={closePhotoPreview}
+        >
+          <div
+            className="w-full max-w-[430px] max-h-[calc(100dvh-24px)] bg-white rounded-[18px] overflow-hidden shadow-[0_12px_60px_rgba(0,0,0,.35)] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+              <div className="text-[13px] font-extrabold text-slate-900 truncate pr-3">
+                {photoPreview.title || 'Foto Task'}
+              </div>
+              <button
+                type="button"
+                className="w-9 h-9 rounded-[12px] grid place-items-center border border-slate-200 bg-white text-slate-600"
+                onClick={closePhotoPreview}
+                aria-label="Tutup"
+              >
+                <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M5 5l10 10M15 5L5 15" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-3 sm:p-4 overflow-y-auto">
+              <div className="rounded-[16px] overflow-hidden bg-slate-100 border border-slate-200">
+                <img
+                  src={photoPreview.url}
+                  alt={photoPreview.title || 'Foto task'}
+                  className="w-full h-auto max-h-[72dvh] object-contain"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

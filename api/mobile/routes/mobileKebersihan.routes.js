@@ -5,6 +5,7 @@ import {
   kebersihanUploadMiddleware,
   serveKebersihanFile,
   uploadKebersihanPhoto,
+  deleteKebersihanPhoto,
   getRekapMonth,
   getRekapDay,
 } from '../controllers/mobileKebersihan.controller.js';
@@ -26,6 +27,7 @@ router.use(requireMobileWorker);
 router.get('/today-status', getTodayKebersihanStatus);
 router.get('/rekap', getRekapMonth);
 router.get('/rekap/day', getRekapDay);
+router.delete('/photo', deleteKebersihanPhoto);
 router.post('/upload', (req, res, next) => {
   kebersihanUploadMiddleware(req, res, (err) => {
     if (err) {

@@ -155,6 +155,18 @@ async function savePhoto(reportDate, session, areaCode, file) {
   };
 }
 
+function deleteKebersihanDiskFile(fileName) {
+  if (!fileName) return;
+  const fullPath = path.join(KEBERSIHAN_BASE, path.basename(String(fileName)));
+  if (fs.existsSync(fullPath)) {
+    try {
+      fs.unlinkSync(fullPath);
+    } catch {
+      // ignore disk cleanup failure
+    }
+  }
+}
+
 async function getSubmitterMeta(workerId) {
   const id = Number(workerId);
   if (!id) return null;
@@ -362,13 +374,20 @@ export const uploadKebersihanPhoto = async (req, res) => {
       }
     }
 
-    const saved = await savePhoto(today, session, area.code, file);
-
     const [[existingPhoto]] = await connection.query(
-      `SELECT id FROM tr_worker_kebersihan_photos
+      `SELECT id, photo_file FROM tr_worker_kebersihan_photos
        WHERE report_id = ? AND area_id = ?`,
       [report.id, areaId]
     );
+
+    const saved = await savePhoto(today, session, area.code, file);
+
+    if (
+      existingPhoto?.photo_file &&
+      String(existingPhoto.photo_file) !== String(saved.file)
+    ) {
+      deleteKebersihanDiskFile(existingPhoto.photo_file);
+    }
 
     if (existingPhoto) {
       await connection.query(
@@ -435,6 +454,93 @@ export const uploadKebersihanPhoto = async (req, res) => {
     await connection.rollback();
     console.error('[mobileKebersihan/uploadKebersihanPhoto]', error.message);
     return res.status(500).json({ message: 'Gagal menyimpan foto kebersihan' });
+  } finally {
+    connection.release();
+  }
+};
+
+export const deleteKebersihanPhoto = async (req, res) => {
+  const workerId = req.user?.id;
+  const today = todayDateString();
+  const areaId = Number(req.body?.area_id);
+  const session = normalizeSession(req.body?.session);
+
+  if (!session) {
+    return res.status(400).json({ message: 'session harus pagi atau sore' });
+  }
+  if (!areaId) {
+    return res.status(400).json({ message: 'area_id wajib diisi' });
+  }
+
+  const window = resolveSessionWindow(session);
+  if (!window.allowed) {
+    return res.status(403).json({ message: window.reason || 'Di luar jam kebersihan sesi ini' });
+  }
+
+  if (session === 'pagi' && !TEMP_BYPASS_KEBERSIHAN_PAGI_LOCK) {
+    const groomingComplete = await getTodayGroomingComplete(workerId);
+    if (!groomingComplete) {
+      return res.status(403).json({
+        message: 'Lengkapi foto grooming terlebih dahulu sebelum menghapus kebersihan pagi.',
+      });
+    }
+  }
+
+  const connection = await cleanoxPool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const report = await getSharedReport(connection, today, session, { forUpdate: true });
+    if (!report) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Laporan kebersihan tidak ditemukan' });
+    }
+
+    const [[photo]] = await connection.query(
+      `SELECT id, photo_file
+       FROM tr_worker_kebersihan_photos
+       WHERE report_id = ? AND area_id = ?`,
+      [report.id, areaId]
+    );
+
+    if (!photo) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Foto area tidak ditemukan' });
+    }
+
+    await connection.query(`DELETE FROM tr_worker_kebersihan_photos WHERE id = ?`, [photo.id]);
+    deleteKebersihanDiskFile(photo.photo_file);
+
+    const [[countRow]] = await connection.query(
+      `SELECT COUNT(*) AS total
+       FROM tr_worker_kebersihan_photos
+       WHERE report_id = ?`,
+      [report.id]
+    );
+    const uploadedCount = Number(countRow?.total || 0);
+
+    await connection.query(
+      `UPDATE tr_worker_kebersihan_reports
+       SET worker_id = ?,
+           status = 'In_Progress',
+           completed_at = NULL,
+           updated_at = NOW()
+       WHERE id = ?`,
+      [workerId, report.id]
+    );
+
+    await connection.commit();
+    return res.json({
+      message: 'Foto kebersihan berhasil dihapus',
+      session,
+      status: 'In_Progress',
+      uploaded_count: uploadedCount,
+      area_id: areaId,
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[mobileKebersihan/deleteKebersihanPhoto]', error.message);
+    return res.status(500).json({ message: 'Gagal menghapus foto kebersihan' });
   } finally {
     connection.release();
   }
