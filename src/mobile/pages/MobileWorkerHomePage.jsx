@@ -44,14 +44,14 @@ const MENU_ITEMS = [
     description: 'Kalender saya',
     icon: CalendarDays,
     to: '/mobile-worker/calendar',
-    requiresMorningUnlock: true,
+    requiresMorningUnlock: false,
   },
   {
     title: 'Izin / Cuti',
     description: 'Ajukan izin & cuti',
     icon: FileText,
     to: '/mobile-worker/leave',
-    requiresMorningUnlock: true,
+    requiresMorningUnlock: false,
   },
 ];
 
@@ -534,8 +534,8 @@ export default function MobileWorkerHomePage() {
             {!morningUnlocked && !activityLoading && (
               <p className="mt-4 text-[10.5px] text-slate-500 leading-4 text-center px-1">
                 {requireKebersihanForUnlock
-                  ? 'Task, Jadwal, dan Izin terbuka setelah absensi (check-in), foto grooming, dan kebersihan pagi selesai.'
-                  : 'Task, Jadwal, dan Izin terbuka setelah absensi (check-in) dan foto grooming (ada task pagi sebelum jam 09:00).'}
+                  ? 'Task terbuka setelah absensi (check-in), foto grooming, dan kebersihan pagi selesai.'
+                  : 'Task terbuka setelah absensi (check-in) dan foto grooming (ada task pagi sebelum jam 09:00).'}
               </p>
             )}
           </section>

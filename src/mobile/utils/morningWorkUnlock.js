@@ -40,7 +40,7 @@ export function hasEarlyInScheduleTask(tasks = []) {
 }
 
 /**
- * Unlock Task / Jadwal / Izin for the current workday.
+ * Unlock Task menu and task routes for the current workday.
  * Light path (absensi + grooming): In_Schedule today with time < 09:00 WIB.
  * Full path (+ kebersihan pagi): otherwise (including no tasks).
  */
@@ -75,6 +75,7 @@ export function computeMorningWorkUnlock({
   };
 }
 
+/** Fetch attendance, kebersihan pagi, and tasks; compute Task-only morning unlock. */
 export async function fetchMorningWorkUnlock(client = api) {
   const [attendanceSettled, kebersihanPagiSettled, tasksSettled] = await Promise.allSettled([
     client.get('/mobile-attendance/today-status'),

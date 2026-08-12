@@ -61,7 +61,11 @@ const mobileRoutes = [
   <Route
     key="mobile-calendar"
     path="/mobile-worker/calendar"
-    element={withMorningUnlock(<MobileWorkerCalendarPage />)}
+    element={
+      <PrivateRoute companyIds={[3]}>
+        <MobileWorkerCalendarPage />
+      </PrivateRoute>
+    }
   />,
   <Route
     key="mobile-profile"
@@ -84,7 +88,11 @@ const mobileRoutes = [
   <Route
     key="mobile-leave"
     path="/mobile-worker/leave"
-    element={withMorningUnlock(<MobileWorkerLeavePage />)}
+    element={
+      <PrivateRoute companyIds={[3]}>
+        <MobileWorkerLeavePage />
+      </PrivateRoute>
+    }
   />,
   <Route
     key="mobile-grooming"
