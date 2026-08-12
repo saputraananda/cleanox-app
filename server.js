@@ -4,20 +4,21 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import authRoutes from './api/routes/auth.routes.js';
-import cleanoxByWaschenProductionRoutes from './api/routes/cleanoxByWaschenProduction.routes.js';
-import evidanceRoutes from './api/routes/evidance.routes.js';
-import dashboardCleanoxRoutes from './api/routes/DashboardCleanox.routes.js';
-import posTransactionsRoutes from './api/routes/posTransactions.routes.js';
-import posCustomersRoutes from './api/routes/posCustomers.routes.js';
-import posMasterRoutes from './api/routes/posMaster.routes.js';
-import posDashboardRoutes from './api/routes/posDashboard.routes.js';
-import posWaschenReferralRoutes from './api/routes/posWaschenReferral.routes.js';
-import wilayahRoutes from './api/routes/wilayah.routes.js';
-import mobileAttendanceRoutes from './api/routes/mobileAttendance.routes.js';
-import mobileTasksRoutes from './api/routes/mobileTasks.routes.js';
-import mobileKebersihanRoutes from './api/routes/mobileKebersihan.routes.js';
-import mobileRiwayatRoutes from './api/routes/mobileRiwayat.routes.js';
+import authRoutes from './api/auth/routes/auth.routes.js';
+import cleanoxByWaschenProductionRoutes from './api/web/routes/cleanoxByWaschenProduction.routes.js';
+import evidanceRoutes from './api/web/routes/evidance.routes.js';
+import dashboardCleanoxRoutes from './api/web/routes/DashboardCleanox.routes.js';
+import posTransactionsRoutes from './api/web/routes/posTransactions.routes.js';
+import posCustomersRoutes from './api/web/routes/posCustomers.routes.js';
+import posMasterRoutes from './api/web/routes/posMaster.routes.js';
+import posDashboardRoutes from './api/web/routes/posDashboard.routes.js';
+import posWaschenReferralRoutes from './api/web/routes/posWaschenReferral.routes.js';
+import wilayahRoutes from './api/web/routes/wilayah.routes.js';
+import mobileAttendanceRoutes from './api/mobile/routes/mobileAttendance.routes.js';
+import mobileTasksRoutes from './api/mobile/routes/mobileTasks.routes.js';
+import mobileKebersihanRoutes from './api/mobile/routes/mobileKebersihan.routes.js';
+import mobileRiwayatRoutes from './api/mobile/routes/mobileRiwayat.routes.js';
+import mobileLeaveRoutes from './api/mobile/routes/mobileLeave.routes.js';
 
 dotenv.config();
 
@@ -50,6 +51,7 @@ app.use('/api/mobile-attendance', mobileAttendanceRoutes);
 app.use('/api/mobile-tasks', mobileTasksRoutes);
 app.use('/api/mobile-kebersihan', mobileKebersihanRoutes);
 app.use('/api/mobile-riwayat', mobileRiwayatRoutes);
+app.use('/api/mobile-leave', mobileLeaveRoutes);
 
 /* ── Serve built React app in production ─────────────── */
 if (process.env.NODE_ENV === 'production') {
