@@ -48,7 +48,7 @@ export default function MobileWorkerProfilePage() {
     };
   }, []);
 
-  const name = user?.name || 'Worker';
+  const name = user?.name || 'Karyawan';
   const roleLabel = user?.role || 'Karyawan';
 
   const infoRows = [
@@ -57,7 +57,7 @@ export default function MobileWorkerProfilePage() {
     { label: 'Email', value: user?.email, Icon: Mail },
     { label: 'Role', value: user?.role, Icon: Shield },
     {
-      label: 'Company',
+      label: 'Perusahaan',
       value: user?.company_name || null,
       Icon: Building2,
     },
@@ -166,7 +166,7 @@ export default function MobileWorkerProfilePage() {
               className="mt-4 mb-2 w-full flex items-center justify-center gap-2 h-[48px] rounded-[14px] bg-[#FCECEC] text-[#C23B3B] text-[14px] font-extrabold hover:bg-[#F8DADA] disabled:opacity-60"
             >
               <LogOut className="w-4 h-4" />
-              {loggingOut ? 'Keluar...' : 'Logout'}
+              {loggingOut ? 'Keluar...' : 'Keluar Akun'}
             </button>
           </div>
         </div>
@@ -179,7 +179,7 @@ export default function MobileWorkerProfilePage() {
         variant="danger"
         title="Keluar dari akun?"
         desc="Sesi Anda akan diakhiri dan Anda perlu login kembali untuk masuk."
-        confirmLabel="Logout"
+        confirmLabel="Keluar"
         busy={loggingOut}
         onClose={() => {
           if (!loggingOut) setLogoutOpen(false);

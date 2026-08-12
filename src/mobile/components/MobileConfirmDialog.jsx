@@ -4,7 +4,7 @@ import { CheckCircle2, Play, AlertTriangle } from 'lucide-react';
 const VARIANT_UI = {
   accept: {
     icon: CheckCircle2,
-    iconWrap: 'bg-emerald-50 text-emerald-600',
+    iconWrap: 'bg-[#163A22] text-white',
     confirmBtn:
       'bg-[#163A22] hover:bg-[#20492C] shadow-md shadow-[#163A22]/20',
   },
@@ -16,7 +16,7 @@ const VARIANT_UI = {
   },
   complete: {
     icon: CheckCircle2,
-    iconWrap: 'bg-emerald-50 text-emerald-600',
+    iconWrap: 'bg-[#163A22] text-white',
     confirmBtn:
       'bg-[#163A22] hover:bg-[#20492C] shadow-md shadow-[#163A22]/20',
   },

@@ -393,8 +393,8 @@ export default function MobileWorkerLeavePage() {
               <ArrowLeft className="w-4 h-4" />
             </button>
             <div className="flex-1 min-w-0">
-              <div className="text-[10px] font-semibold tracking-[.12em] uppercase text-[#7BC32C]/90">
-                Cleanox Worker
+              <div className="text-[10px] font-semibold tracking-[.12em] uppercase text-white/80">
+                Karyawan Cleanox
               </div>
               <div className="text-[15px] font-extrabold text-white tracking-[-0.01em] truncate">
                 Izin / Cuti
@@ -653,7 +653,7 @@ export default function MobileWorkerLeavePage() {
                       onClick={() => fileInputRef.current?.click()}
                       className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-slate-300 rounded-xl py-3 text-[12.5px] text-slate-500"
                     >
-                      {doctorFile ? 'Ganti Foto Surat Dokter' : 'Upload Foto Surat Dokter'}
+                      {doctorFile ? 'Ganti Foto Surat Dokter' : 'Unggah Foto Surat Dokter'}
                     </button>
                   </div>
                 )}

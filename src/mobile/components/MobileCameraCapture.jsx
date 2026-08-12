@@ -41,6 +41,7 @@ function LiveTimestamp({ align = 'right' }) {
  * In-browser take-photo modal with burned-in timestamp.
  * variant="ikm" → white portrait sheet (Absensi); default → dark 4/3 shutter UI.
  * Optional GPS via includeLocation → onCapture(file, meta?).
+ * locationDisplayMode="label" → overlay/burn uses resolveLocationLabel instead of coords.
  */
 export default function MobileCameraCapture({
   open,
@@ -51,6 +52,8 @@ export default function MobileCameraCapture({
   includeLocation = false,
   variant = 'default',
   confirmLabel = 'Ambil Foto',
+  locationDisplayMode = 'coords',
+  resolveLocationLabel = null,
 }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -62,6 +65,7 @@ export default function MobileCameraCapture({
   const [gpsMeta, setGpsMeta] = useState(null);
   const [gpsError, setGpsError] = useState('');
   const isIkm = variant === 'ikm';
+  const useLocationLabel = includeLocation && locationDisplayMode === 'label';
 
   useEffect(() => {
     if (!open) return undefined;
@@ -91,10 +95,30 @@ export default function MobileCameraCapture({
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         if (cancelled) return;
+        const latitude = pos.coords.latitude;
+        const longitude = pos.coords.longitude;
+        let locationName = null;
+
+        if (useLocationLabel) {
+          if (typeof resolveLocationLabel !== 'function') {
+            setGpsMeta(null);
+            setGpsStatus('error');
+            setGpsError('Aturan lokasi absensi belum siap.');
+            return;
+          }
+          locationName = resolveLocationLabel(latitude, longitude);
+          if (!locationName) {
+            setGpsMeta(null);
+            setGpsStatus('error');
+            setGpsError('Lokasi absensi belum siap.');
+            return;
+          }
+        }
+
         setGpsMeta({
-          latitude: pos.coords.latitude,
-          longitude: pos.coords.longitude,
-          locationName: null,
+          latitude,
+          longitude,
+          locationName,
         });
         setGpsStatus('ready');
       },
@@ -110,7 +134,7 @@ export default function MobileCameraCapture({
     return () => {
       cancelled = true;
     };
-  }, [open, includeLocation]);
+  }, [open, includeLocation, useLocationLabel, resolveLocationLabel]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -181,6 +205,11 @@ export default function MobileCameraCapture({
       return;
     }
 
+    if (useLocationLabel && !gpsMeta?.locationName) {
+      setGpsError('Lokasi absensi belum siap sebelum mengambil foto.');
+      return;
+    }
+
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     const ctx = canvas.getContext('2d');
@@ -198,8 +227,14 @@ export default function MobileCameraCapture({
     const stamp = formatStamp(new Date());
     const latText = formatCoord(gpsMeta?.latitude);
     const lngText = formatCoord(gpsMeta?.longitude);
-    const locationLine =
-      includeLocation && latText && lngText ? `${latText}, ${lngText}` : null;
+    let locationLine = null;
+    if (includeLocation) {
+      if (useLocationLabel) {
+        locationLine = gpsMeta?.locationName || null;
+      } else if (latText && lngText) {
+        locationLine = `${latText}, ${lngText}`;
+      }
+    }
     const lines = locationLine ? [stamp, locationLine] : [stamp];
 
     const fontSize = Math.max(14, Math.floor(canvas.width / 28));
@@ -246,7 +281,14 @@ export default function MobileCameraCapture({
   };
 
   const captureDisabled =
-    !ready || Boolean(camError) || (includeLocation && gpsStatus !== 'ready');
+    !ready ||
+    Boolean(camError) ||
+    (includeLocation && gpsStatus !== 'ready') ||
+    (useLocationLabel && !gpsMeta?.locationName);
+
+  const gpsReadyLabel = useLocationLabel
+    ? `GPS siap · ${gpsMeta?.locationName || '-'}`
+    : `GPS siap · ${formatCoord(gpsMeta?.latitude)}, ${formatCoord(gpsMeta?.longitude)}`;
 
   const flipButton = (
     <button
@@ -301,14 +343,14 @@ export default function MobileCameraCapture({
           <div
             className={`inline-flex max-w-full rounded-[8px] px-2.5 py-1.5 ${
               gpsStatus === 'ready'
-                ? 'bg-emerald-500/80 text-white'
+                ? 'bg-[#163A22]/85 text-white'
                 : gpsStatus === 'error'
                   ? 'bg-rose-500/80 text-white'
                   : 'bg-black/55 text-white/85'
             }`}
           >
             {gpsStatus === 'ready'
-              ? `GPS siap · ${formatCoord(gpsMeta?.latitude)}, ${formatCoord(gpsMeta?.longitude)}`
+              ? gpsReadyLabel
               : gpsStatus === 'error'
                 ? `GPS gagal · ${gpsError || 'aktifkan izin lokasi'}`
                 : 'Mengambil lokasi GPS...'}
@@ -364,7 +406,7 @@ export default function MobileCameraCapture({
             {includeLocation ? (
               <div className="mt-2 text-[11px] font-semibold text-slate-600">
                 {gpsStatus === 'ready'
-                  ? `GPS siap · ${formatCoord(gpsMeta?.latitude)}, ${formatCoord(gpsMeta?.longitude)}`
+                  ? gpsReadyLabel
                   : gpsStatus === 'error'
                     ? `GPS gagal · ${gpsError || 'aktifkan izin lokasi'}`
                     : 'Mengambil lokasi GPS...'}

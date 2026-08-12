@@ -36,6 +36,8 @@ export const attendanceUploadMiddleware = upload.fields([
 const GROOMING_FIELDS = ['full_body_photo', 'side_photo', 'back_photo', 'hand_photo'];
 const REQUIRED_CHECK_IN_PHOTOS = ['check_in_photo'];
 const REQUIRED_GROOMING_PHOTOS = GROOMING_FIELDS;
+const ABSEN_LOCATION_NAME = 'Head Office Alora';
+const ABSEN_RADIUS_KM = 2;
 
 const PHOTO_TYPE_META = [
   { photo_type: 'full_body', label: 'Foto Satu Badan', field: 'full_body_photo', fileCol: 'full_body_photo_file', pathCol: 'full_body_photo_path' },
@@ -109,6 +111,65 @@ function isGroomingComplete(row) {
   return PHOTO_TYPE_META.every((meta) => Boolean(row[meta.fileCol]));
 }
 
+function parseCoordinate(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function toRadians(value) {
+  return (value * Math.PI) / 180;
+}
+
+function distanceKm(lat1, lng1, lat2, lng2) {
+  const earthRadiusKm = 6371;
+  const dLat = toRadians(lat2 - lat1);
+  const dLng = toRadians(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) *
+      Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return earthRadiusKm * c;
+}
+
+async function getHeadOfficeAbsenLocation(connection) {
+  const [[row]] = await connection.query(
+    `SELECT id, name, latitude, longitude
+     FROM mst_absen_location
+     WHERE name = ?
+     LIMIT 1`,
+    [ABSEN_LOCATION_NAME]
+  );
+  return row || null;
+}
+
+async function resolveAttendanceLocationName(connection, latitude, longitude) {
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    const error = new Error('Koordinat GPS absensi tidak valid');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const office = await getHeadOfficeAbsenLocation(connection);
+  if (!office) {
+    const error = new Error('Lokasi absensi Head Office Alora belum tersedia');
+    error.statusCode = 500;
+    throw error;
+  }
+
+  const officeLat = Number(office.latitude);
+  const officeLng = Number(office.longitude);
+  if (!Number.isFinite(officeLat) || !Number.isFinite(officeLng)) {
+    const error = new Error('Koordinat Head Office Alora tidak valid');
+    error.statusCode = 500;
+    throw error;
+  }
+
+  const km = distanceKm(latitude, longitude, officeLat, officeLng);
+  return km <= ABSEN_RADIUS_KM ? ABSEN_LOCATION_NAME : 'sedang tugas diluar';
+}
+
 function buildGroomingPhotos(row) {
   return PHOTO_TYPE_META.map((meta) => ({
     photo_type: meta.photo_type,
@@ -166,6 +227,31 @@ export const getTodayAttendanceStatus = async (req, res) => {
   }
 };
 
+export const getAbsenLocation = async (req, res) => {
+  try {
+    const office = await getHeadOfficeAbsenLocation(cleanoxPool);
+    if (!office) {
+      return res.status(404).json({ message: 'Lokasi absensi Head Office Alora belum tersedia' });
+    }
+
+    const latitude = Number(office.latitude);
+    const longitude = Number(office.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return res.status(500).json({ message: 'Koordinat Head Office Alora tidak valid' });
+    }
+
+    return res.json({
+      name: office.name || ABSEN_LOCATION_NAME,
+      latitude,
+      longitude,
+      radius_km: ABSEN_RADIUS_KM,
+    });
+  } catch (error) {
+    console.error('[mobileAttendance/getAbsenLocation]', error.message);
+    return res.status(500).json({ message: 'Gagal mengambil lokasi absensi' });
+  }
+};
+
 export const checkInAttendance = async (req, res) => {
   const workerId = req.user?.id;
   const today = todayDateString();
@@ -189,9 +275,14 @@ export const checkInAttendance = async (req, res) => {
     }
 
     const checkInPhoto = await savePhoto(workerId, today, 'check_in', files.check_in_photo[0]);
-    const latitude = req.body.latitude ? Number(req.body.latitude) : null;
-    const longitude = req.body.longitude ? Number(req.body.longitude) : null;
-    const locationName = req.body.location_name || null;
+    const latitude = parseCoordinate(req.body.latitude);
+    const longitude = parseCoordinate(req.body.longitude);
+
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return res.status(400).json({ message: 'GPS absensi wajib aktif untuk absen masuk' });
+    }
+
+    const locationName = await resolveAttendanceLocationName(connection, latitude, longitude);
 
     if (existing) {
       await connection.query(
@@ -234,7 +325,9 @@ export const checkInAttendance = async (req, res) => {
     return res.status(201).json({ message: 'Check-in attendance berhasil disimpan' });
   } catch (error) {
     console.error('[mobileAttendance/checkInAttendance]', error.message);
-    return res.status(500).json({ message: 'Gagal menyimpan check-in attendance' });
+    return res.status(error.statusCode || 500).json({
+      message: error.message || 'Gagal menyimpan check-in attendance',
+    });
   } finally {
     connection.release();
   }
@@ -370,18 +463,23 @@ export const checkOutAttendance = async (req, res) => {
   const workerId = req.user?.id;
   const today = todayDateString();
   const files = req.files || {};
-  const latitude = req.body.latitude ? Number(req.body.latitude) : null;
-  const longitude = req.body.longitude ? Number(req.body.longitude) : null;
-  const locationName = req.body.location_name || null;
+  const latitude = parseCoordinate(req.body.latitude);
+  const longitude = parseCoordinate(req.body.longitude);
 
+  const connection = await cleanoxPool.getConnection();
   try {
     if (!files.check_out_photo?.[0]) {
       return res.status(400).json({ message: 'Foto bukti checkout wajib diunggah' });
     }
 
-    const checkoutPhoto = await savePhoto(workerId, today, 'check_out', files.check_out_photo[0]);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return res.status(400).json({ message: 'GPS absensi wajib aktif untuk absen pulang' });
+    }
 
-    const [result] = await cleanoxPool.query(
+    const checkoutPhoto = await savePhoto(workerId, today, 'check_out', files.check_out_photo[0]);
+    const locationName = await resolveAttendanceLocationName(connection, latitude, longitude);
+
+    const [result] = await connection.query(
       `UPDATE tr_worker_attendance
        SET check_out_at = NOW(),
            check_out_latitude = ?,
@@ -401,7 +499,11 @@ export const checkOutAttendance = async (req, res) => {
     return res.json({ message: 'Check-out attendance berhasil disimpan' });
   } catch (error) {
     console.error('[mobileAttendance/checkOutAttendance]', error.message);
-    return res.status(500).json({ message: 'Gagal menyimpan check-out attendance' });
+    return res.status(error.statusCode || 500).json({
+      message: error.message || 'Gagal menyimpan check-out attendance',
+    });
+  } finally {
+    connection.release();
   }
 };
 

@@ -16,9 +16,9 @@ const WEEKDAYS = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
 const TEAM_DOT_COLOR = '#94A3B8';
 
 const STATUS_META = {
-  Assigned: { label: 'On Review', color: '#64748B' },
-  In_Schedule: { label: 'In Schedule', color: '#3B82F6' },
-  On_Progress: { label: 'On Progress', color: '#7BC32C' },
+  Assigned: { label: 'Perlu Konfirmasi', color: '#64748B' },
+  In_Schedule: { label: 'Terjadwal', color: '#3B82F6' },
+  On_Progress: { label: 'Sedang Dikerjakan', color: '#7BC32C' },
   Done: { label: 'Selesai', color: '#059669' },
 };
 
@@ -335,7 +335,7 @@ export default function MobileWorkerCalendarPage() {
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <p className="text-[13px] font-extrabold text-slate-900 truncate">
-                          {job.customer_name || 'Customer'}
+                          {job.customer_name || 'Pelanggan'}
                         </p>
                         <p className="text-[10.5px] text-slate-400 mt-0.5">
                           {job.transaction_no || '—'}

@@ -7,6 +7,7 @@ import {
   submitGroomingPhotos,
   deleteGroomingPhoto,
   getTodayAttendanceStatus,
+  getAbsenLocation,
   serveAttendanceFile,
   getRekapMonth,
   getRekapDay,
@@ -39,6 +40,7 @@ router.use(authenticate);
 router.use(requireMobileWorker);
 
 router.get('/today-status', getTodayAttendanceStatus);
+router.get('/absen-location', getAbsenLocation);
 router.get('/rekap', getRekapMonth);
 router.get('/rekap/day', getRekapDay);
 router.post('/check-in', handleUpload, checkInAttendance);

@@ -300,7 +300,7 @@ export default function MobileWorkerGroomingPage() {
               </p>
               <Link
                 to="/mobile-worker/attendance"
-                className="inline-flex h-[40px] items-center justify-center rounded-[12px] bg-[#163A22] px-4 text-[12.5px] font-extrabold text-white"
+                className="inline-flex h-[40px] items-center justify-center rounded-[12px] bg-[#7BC32C] px-4 text-[12.5px] font-extrabold text-[#163A22]"
               >
                 Ke Absensi
               </Link>

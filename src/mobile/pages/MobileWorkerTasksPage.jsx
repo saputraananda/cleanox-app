@@ -9,31 +9,31 @@ import MobileCameraCapture from '@mobile/components/MobileCameraCapture.jsx';
 const MAX_PHOTOS_PER_KIND = 10;
 
 const TABS = [
-  { key: 'Assigned', label: 'On Review' },
-  { key: 'In_Schedule', label: 'In Schedule' },
-  { key: 'On_Progress', label: 'On Progress' },
-  { key: 'Done', label: 'Done' },
-  { key: 'Rejected', label: 'Rejected' },
+  { key: 'Assigned', label: 'Perlu Konfirmasi' },
+  { key: 'In_Schedule', label: 'Terjadwal' },
+  { key: 'On_Progress', label: 'Sedang Dikerjakan' },
+  { key: 'Done', label: 'Selesai' },
+  { key: 'Rejected', label: 'Ditolak' },
 ];
 
 const STATUS_LABEL = {
-  Assigned: 'On Review',
-  In_Schedule: 'In Schedule',
-  On_Progress: 'On Progress',
-  Done: 'Done',
-  Rejected: 'Rejected',
-  Replaced: 'Replaced',
+  Assigned: 'Perlu Konfirmasi',
+  In_Schedule: 'Terjadwal',
+  On_Progress: 'Sedang Dikerjakan',
+  Done: 'Selesai',
+  Rejected: 'Ditolak',
+  Replaced: 'Digantikan',
 };
 
 const CONFIRM_COPY = {
   accept: {
     title: 'Terima tugas?',
-    description: 'Status menjadi In Schedule setelah Anda konfirmasi.',
+    description: 'Status menjadi Terjadwal setelah Anda konfirmasi.',
     confirmLabel: 'Terima',
   },
   start: {
     title: 'Mulai pengerjaan?',
-    description: 'Ambil foto kedatangan beserta lokasi GPS untuk lanjut ke On Progress.',
+    description: 'Ambil foto kedatangan beserta lokasi GPS untuk lanjut ke Sedang Dikerjakan.',
     confirmLabel: 'Lanjut Ambil Foto',
   },
   start_takehome: {
@@ -106,7 +106,7 @@ function LihatFotoButton({ onClick }) {
     <button
       type="button"
       onClick={onClick}
-      className="mt-1.5 w-full h-[30px] rounded-[9px] border border-emerald-200 bg-emerald-50 text-emerald-800 text-[10.5px] font-bold tracking-[.02em] flex items-center justify-center gap-1 transition hover:bg-emerald-100 active:scale-[.98]"
+      className="mt-1.5 w-full h-[30px] rounded-[9px] border border-[#163A22] bg-[#163A22] text-white text-[10.5px] font-bold tracking-[.02em] flex items-center justify-center gap-1 transition hover:bg-[#20492C] active:scale-[.98]"
     >
       <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
         <path d="M1.5 10s3.2-5 8.5-5 8.5 5 8.5 5-3.2 5-8.5 5-8.5-5-8.5-5z" />
@@ -124,7 +124,7 @@ export default function MobileWorkerTasksPage() {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState(location.state?.surveySaved ? 'Survey kepuasan tersimpan.' : '');
+  const [success, setSuccess] = useState(location.state?.surveySaved ? 'Survei kepuasan tersimpan.' : '');
   const [expandedId, setExpandedId] = useState(null);
   const [detailMap, setDetailMap] = useState({});
   const [rejectingId, setRejectingId] = useState(null);
@@ -256,7 +256,7 @@ export default function MobileWorkerTasksPage() {
     setSuccess('');
     try {
       await api.post(`/mobile-tasks/${assignmentId}/accept`);
-      setSuccess('Tugas diterima — In Schedule.');
+      setSuccess('Tugas diterima — Terjadwal.');
       setRejectingId(null);
       setConfirmDialog(null);
       await loadTasks(tab);
@@ -274,7 +274,7 @@ export default function MobileWorkerTasksPage() {
     setSuccess('');
     try {
       await api.post(`/mobile-tasks/${assignmentId}/complete`);
-      setSuccess('Pengerjaan selesai — Done.');
+      setSuccess('Pengerjaan selesai — Selesai.');
       setConfirmDialog(null);
       await loadTasks(tab);
     } catch (err) {
@@ -291,7 +291,7 @@ export default function MobileWorkerTasksPage() {
     setSuccess('');
     try {
       await api.post(`/mobile-tasks/${assignmentId}/start`);
-      setSuccess('Order diambil — On Progress.');
+      setSuccess('Order diambil — Sedang Dikerjakan.');
       setConfirmDialog(null);
       setTab('On_Progress');
       await loadTasks('On_Progress');
@@ -386,7 +386,7 @@ export default function MobileWorkerTasksPage() {
         await api.post(`/mobile-tasks/${target.assignmentId}/start`, formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
         });
-        setSuccess('Pengerjaan dimulai — On Progress.');
+        setSuccess('Pengerjaan dimulai — Sedang Dikerjakan.');
         setTab('On_Progress');
         await loadTasks('On_Progress');
         return;
@@ -512,9 +512,9 @@ export default function MobileWorkerTasksPage() {
                 <ArrowLeft className="w-4 h-4" />
               </Link>
               <div className="min-w-0">
-                <div className="text-[14px] font-extrabold text-white truncate">Task</div>
+                <div className="text-[14px] font-extrabold text-white truncate">Tugas</div>
                 <div className="text-[10.5px] text-white/50 font-medium truncate mt-px">
-                  Review → Schedule → Progress → Done
+                  Konfirmasi → Terjadwal → Dikerjakan → Selesai
                 </div>
               </div>
             </div>
@@ -546,14 +546,14 @@ export default function MobileWorkerTasksPage() {
 
           {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</div>}
           {success && (
-            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{success}</div>
+            <div className="rounded-2xl border border-[#163A22] bg-[#163A22] p-3 text-sm text-white">{success}</div>
           )}
 
           {loading ? (
-            <p className="text-sm text-slate-500 px-1 py-6 text-center">Memuat task...</p>
+            <p className="text-sm text-slate-500 px-1 py-6 text-center">Memuat tugas...</p>
           ) : tasks.length === 0 ? (
             <div className="rounded-[22px] border border-slate-100 bg-white p-6 text-center shadow-[0_10px_28px_rgba(15,23,42,.05)]">
-              <p className="text-[13px] font-extrabold text-slate-900">Tidak ada task</p>
+              <p className="text-[13px] font-extrabold text-slate-900">Tidak ada tugas</p>
               <p className="mt-1 text-[11px] text-slate-500">Belum ada tugas pada filter ini.</p>
             </div>
           ) : (
@@ -589,10 +589,10 @@ export default function MobileWorkerTasksPage() {
                           className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
                             isTakeHomeTask(task)
                               ? 'bg-violet-50 text-violet-700 border border-violet-200'
-                              : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              : 'bg-[#163A22] text-white border border-[#163A22]'
                           }`}
                         >
-                          {isTakeHomeTask(task) ? 'Take Home' : 'Home Service'}
+                          {isTakeHomeTask(task) ? 'Bawa Pulang' : 'Layanan Ke Rumah'}
                         </span>
                       </div>
                     </div>
@@ -627,7 +627,7 @@ export default function MobileWorkerTasksPage() {
                         type="button"
                         disabled={submitting}
                         onClick={() => requestAccept(task.assignment_id)}
-                        className="h-[40px] rounded-[12px] bg-[#7BC32C] text-[#163A22] text-[12px] font-extrabold disabled:opacity-60 flex items-center justify-center gap-1.5"
+                        className="h-[40px] rounded-[12px] bg-[#163A22] text-white text-[12px] font-extrabold disabled:opacity-60 flex items-center justify-center gap-1.5"
                       >
                         <CheckCircle2 className="w-4 h-4" />
                         Terima
@@ -745,10 +745,10 @@ export default function MobileWorkerTasksPage() {
                       <div className="rounded-[14px] border border-slate-200 bg-[#FAFBFC] p-3 space-y-2">
                         <div className="flex items-center justify-between gap-2">
                           <div>
-                            <p className="text-[12px] font-extrabold text-slate-800">6. Survey Kepuasan</p>
+                            <p className="text-[12px] font-extrabold text-slate-800">6. Survei Kepuasan</p>
                             <p className="text-[10.5px] text-slate-500">
                               {evidence.has_survey
-                                ? 'Survey tersimpan'
+                                ? 'Survei tersimpan'
                                 : evidence.has_takehome_complete
                                   ? 'Isi setelah pengantaran selesai'
                                   : 'Lengkapi stage Pengantaran dulu'}
@@ -764,7 +764,7 @@ export default function MobileWorkerTasksPage() {
                           onClick={() => openSurveyPage(task.assignment_id, evidence, task)}
                           className="w-full h-[38px] rounded-[12px] bg-[#163A22] text-white text-[12px] font-extrabold disabled:opacity-60"
                         >
-                          {evidence.has_survey ? 'Lihat / Update Survey' : 'Isi Survey Kepuasan'}
+                          {evidence.has_survey ? 'Lihat / Ubah Survei' : 'Isi Survei Kepuasan'}
                         </button>
                       </div>
 
@@ -772,7 +772,7 @@ export default function MobileWorkerTasksPage() {
                         type="button"
                         disabled={submitting || !evidence.can_complete}
                         onClick={() => requestComplete(task.assignment_id)}
-                        className="w-full h-[40px] rounded-[12px] bg-[#7BC32C] text-[#163A22] text-[12px] font-extrabold disabled:opacity-60 flex items-center justify-center gap-1.5"
+                        className="w-full h-[40px] rounded-[12px] bg-[#163A22] text-white text-[12px] font-extrabold disabled:opacity-60 flex items-center justify-center gap-1.5"
                       >
                         <CheckCircle2 className="w-4 h-4" />
                         Selesai
@@ -824,7 +824,7 @@ export default function MobileWorkerTasksPage() {
                       {(customerPhotos || []).length > 0 && (
                         <div className="rounded-[14px] border border-sky-200 bg-sky-50/50 p-3 space-y-2">
                           <div>
-                            <p className="text-[12px] font-extrabold text-slate-800">Referensi Customer</p>
+                            <p className="text-[12px] font-extrabold text-slate-800">Referensi Pelanggan</p>
                             <p className="text-[10.5px] text-slate-500">
                               Foto dari admin — acuan sebelum kerja · {(customerPhotos || []).length} foto
                             </p>
@@ -840,7 +840,7 @@ export default function MobileWorkerTasksPage() {
                                       onClick={() =>
                                         openPhotoPreviewFromMap(
                                           `customer-${photo.id}`,
-                                          'Referensi Customer',
+                                          'Referensi Pelanggan',
                                           photo.photo_path
                                         )
                                       }
@@ -859,7 +859,7 @@ export default function MobileWorkerTasksPage() {
                                     onClick={() =>
                                       openPhotoPreviewFromMap(
                                         `customer-${photo.id}`,
-                                        'Referensi Customer',
+                                        'Referensi Pelanggan',
                                         photo.photo_path
                                       )
                                     }
@@ -1032,7 +1032,7 @@ export default function MobileWorkerTasksPage() {
                       <div className="rounded-[14px] border border-slate-200 bg-[#FAFBFC] p-3 space-y-2">
                         <div className="flex items-center justify-between gap-2">
                           <div>
-                            <p className="text-[12px] font-extrabold text-slate-800">3. Survey Kepuasan</p>
+                            <p className="text-[12px] font-extrabold text-slate-800">3. Survei Kepuasan</p>
                             <p className="text-[10.5px] text-slate-500">
                               {evidence.has_survey
                                 ? (() => {
@@ -1043,12 +1043,12 @@ export default function MobileWorkerTasksPage() {
                                       ?? evidence.survey_rating;
                                     const nps = answers.nps_score;
                                     if (csat != null && nps != null) {
-                                      return `Survey tersimpan · CSAT ${csat}/5 · NPS ${nps}/10`;
+                                      return `Survei tersimpan · CSAT ${csat}/5 · NPS ${nps}/10`;
                                     }
                                     if (csat != null) {
-                                      return `Survey tersimpan · CSAT ${csat}/5`;
+                                      return `Survei tersimpan · CSAT ${csat}/5`;
                                     }
-                                    return 'Survey tersimpan';
+                                    return 'Survei tersimpan';
                                   })()
                                 : evidence.has_after
                                   ? 'Isi di halaman survey khusus'
@@ -1065,7 +1065,7 @@ export default function MobileWorkerTasksPage() {
                           onClick={() => openSurveyPage(task.assignment_id, evidence, task)}
                           className="w-full h-[38px] rounded-[12px] bg-[#163A22] text-white text-[12px] font-extrabold disabled:opacity-60"
                         >
-                          {evidence.has_survey ? 'Lihat / Update Survey' : 'Isi Survey Kepuasan'}
+                          {evidence.has_survey ? 'Lihat / Ubah Survei' : 'Isi Survei Kepuasan'}
                         </button>
                       </div>
 
@@ -1073,7 +1073,7 @@ export default function MobileWorkerTasksPage() {
                         type="button"
                         disabled={submitting || !evidence.can_complete}
                         onClick={() => requestComplete(task.assignment_id)}
-                        className="w-full h-[40px] rounded-[12px] bg-[#7BC32C] text-[#163A22] text-[12px] font-extrabold disabled:opacity-60 flex items-center justify-center gap-1.5"
+                        className="w-full h-[40px] rounded-[12px] bg-[#163A22] text-white text-[12px] font-extrabold disabled:opacity-60 flex items-center justify-center gap-1.5"
                       >
                         <CheckCircle2 className="w-4 h-4" />
                         Selesai
@@ -1096,7 +1096,7 @@ export default function MobileWorkerTasksPage() {
                           rows={3}
                           value={rejectForm.note}
                           onChange={(e) => setRejectForm((prev) => ({ ...prev, note: e.target.value }))}
-                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#7BC32C]"
+                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#163A22]"
                           placeholder="Contoh: sedang sakit / bentrok jadwal"
                         />
                       </div>
@@ -1108,7 +1108,7 @@ export default function MobileWorkerTasksPage() {
                           onChange={(e) =>
                             setRejectForm((prev) => ({ ...prev, recommended_employee_id: e.target.value }))
                           }
-                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#7BC32C]"
+                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#163A22]"
                         >
                           <option value="">Pilih karyawan bebas di tanggal ini</option>
                           {candidates.map((c) => (
@@ -1198,7 +1198,7 @@ export default function MobileWorkerTasksPage() {
           >
             <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
               <div className="text-[13px] font-extrabold text-slate-900 truncate pr-3">
-                {photoPreview.title || 'Foto Task'}
+                {photoPreview.title || 'Foto Tugas'}
               </div>
               <button
                 type="button"

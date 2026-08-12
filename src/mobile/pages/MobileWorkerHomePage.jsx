@@ -13,7 +13,7 @@ import cleanoxLogo from '../../assets/cleanox.png';
 const MENU_ITEMS = [
   {
     title: 'Absensi',
-    description: 'Check-in & check-out',
+    description: 'Masuk & pulang kerja',
     icon: Camera,
     to: '/mobile-worker/attendance',
     requiresMorningUnlock: false,
@@ -26,7 +26,7 @@ const MENU_ITEMS = [
     requiresMorningUnlock: false,
   },
   {
-    title: 'Task',
+    title: 'Tugas',
     description: 'Plot & tugas',
     icon: ClipboardList,
     to: '/mobile-worker/tasks',
@@ -126,7 +126,7 @@ function mapNoticesToCards(notices = []) {
     noticeId: notice.id,
     type: notice.event_type === 'cancel' ? 'task_cancel' : 'task_reschedule',
     status: notice.event_type === 'cancel' ? 'cancel' : 'reschedule',
-    title: notice.title || (notice.event_type === 'cancel' ? 'Task dibatalkan' : 'Jadwal dipindah'),
+    title: notice.title || (notice.event_type === 'cancel' ? 'Tugas dibatalkan' : 'Jadwal dipindah'),
     description: notice.description || '',
     to: notice.to || (notice.event_type === 'cancel' ? '/mobile-worker/riwayat' : '/mobile-worker/tasks'),
   }));
@@ -147,7 +147,7 @@ function buildTodayActivityCards({
       type: 'absensi',
       status: 'belum',
       title: 'Anda belum melakukan absensi',
-      description: 'Lakukan Foto In / check-in untuk memulai hari kerja.',
+      description: 'Lakukan Foto In / absen masuk untuk memulai hari kerja.',
       to: '/mobile-worker/attendance',
     };
   } else if (!attendanceRow?.check_out_at) {
@@ -156,7 +156,7 @@ function buildTodayActivityCards({
       type: 'absensi',
       status: 'pulang',
       title: 'Silahkan absensi pulang ketika jam pulang',
-      description: 'Check-in sudah tercatat. Lakukan check-out saat pekerjaan selesai.',
+      description: 'Absen masuk sudah tercatat. Lakukan absen pulang saat pekerjaan selesai.',
       to: '/mobile-worker/attendance',
     };
   }
@@ -470,7 +470,7 @@ export default function MobileWorkerHomePage() {
                   foto
                 </div>
                 <div className="min-w-0">
-                  <div className="text-[13px] font-extrabold text-white truncate">{user?.name || 'Worker'}</div>
+                  <div className="text-[13px] font-extrabold text-white truncate">{user?.name || 'Karyawan'}</div>
                   <div className="text-[10px] text-white/55 font-medium truncate mt-px">
                     {user?.employee_code
                       ? `Karyawan · ${user.employee_code}`
@@ -504,8 +504,8 @@ export default function MobileWorkerHomePage() {
                       className={`relative w-[58px] h-[58px] rounded-[18px] grid place-items-center shadow-[0_10px_20px_rgba(15,23,42,.08)] border border-slate-100 ${
                         item.title === 'Absensi'
                           ? 'bg-white text-[#163A22]'
-                          : item.title === 'Task'
-                            ? 'bg-white text-[#7BC32C]'
+                          : item.title === 'Tugas'
+                            ? 'bg-white text-[#163A22]'
                             : 'bg-white text-[#B6BF00]'
                       }`}
                     >
@@ -534,8 +534,8 @@ export default function MobileWorkerHomePage() {
             {!morningUnlocked && !activityLoading && (
               <p className="mt-4 text-[10.5px] text-slate-500 leading-4 text-center px-1">
                 {requireKebersihanForUnlock
-                  ? 'Task terbuka setelah absensi (check-in), foto grooming, dan kebersihan pagi selesai.'
-                  : 'Task terbuka setelah absensi (check-in) dan foto grooming (ada task pagi sebelum jam 09:00).'}
+                  ? 'Menu tugas terbuka setelah absensi (masuk), foto grooming, dan kebersihan pagi selesai.'
+                  : 'Menu tugas terbuka setelah absensi (masuk) dan foto grooming selesai (ada tugas pagi sebelum jam 09:00).'}
               </p>
             )}
           </section>

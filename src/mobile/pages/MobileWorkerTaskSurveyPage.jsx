@@ -22,9 +22,9 @@ const emptyForm = {
 };
 
 const NPS_CATEGORY_UI = {
-  Detractor: { text: 'Detractor', tone: 'text-rose-700 bg-rose-50 border-rose-200' },
-  Passive: { text: 'Passive', tone: 'text-amber-700 bg-amber-50 border-amber-200' },
-  Promoter: { text: 'Promoter', tone: 'text-emerald-700 bg-emerald-50 border-emerald-200' },
+  Detractor: { text: 'Tidak Puas', tone: 'text-rose-700 bg-rose-50 border-rose-200' },
+  Passive: { text: 'Biasa Saja', tone: 'text-amber-700 bg-amber-50 border-amber-200' },
+  Promoter: { text: 'Merekomendasikan', tone: 'text-white bg-[#163A22] border-[#163A22]' },
 };
 
 function toggleInList(list, value) {
@@ -54,11 +54,11 @@ export default function MobileWorkerTaskSurveyPage() {
         setTask(nextTask);
 
         if (!nextTask) {
-          setBlockMessage('Task tidak ditemukan.');
+          setBlockMessage('Tugas tidak ditemukan.');
           return;
         }
         if (nextTask.assignment_status !== 'On_Progress') {
-          setBlockMessage('Survey hanya bisa diisi untuk task On Progress.');
+          setBlockMessage('Survei hanya bisa diisi untuk tugas yang sedang dikerjakan.');
           return;
         }
         if (String(nextTask.service_mode || nextTask.transaction?.service_mode) === 'take_home') {
@@ -168,7 +168,7 @@ export default function MobileWorkerTaskSurveyPage() {
                 <ArrowLeft className="w-4 h-4" />
               </Link>
               <div className="min-w-0">
-                <div className="text-[14px] font-extrabold text-white truncate">Survey Kepuasan</div>
+                <div className="text-[14px] font-extrabold text-white truncate">Survei Kepuasan</div>
                 <div className="text-[10.5px] text-white/50 font-medium truncate mt-px">
                   {customerName} · {transactionNo}
                 </div>
@@ -185,19 +185,19 @@ export default function MobileWorkerTaskSurveyPage() {
             <p className="text-sm text-slate-500 px-1 py-6 text-center">Memuat survey...</p>
           ) : blockMessage ? (
             <div className="rounded-[22px] border border-amber-200 bg-amber-50 p-5 space-y-3">
-              <p className="text-[13px] font-extrabold text-amber-900">Survey belum bisa diisi</p>
+              <p className="text-[13px] font-extrabold text-amber-900">Survei belum bisa diisi</p>
               <p className="text-[12px] text-amber-800 leading-relaxed">{blockMessage}</p>
               <Link
                 to="/mobile-worker/tasks"
                 className="inline-flex h-[40px] items-center justify-center rounded-[12px] bg-[#163A22] px-4 text-[12px] font-extrabold text-white"
               >
-                Kembali ke Task
+                Kembali ke Tugas
               </Link>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-2.5">
               <section className="rounded-[18px] border border-slate-200 bg-white p-4">
-                <p className="text-[13px] font-extrabold text-slate-900">Form Feedback Pelanggan</p>
+                <p className="text-[13px] font-extrabold text-slate-900">Formulir Masukan Pelanggan</p>
                 <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">
                   Isi survey ini berdasarkan feedback pelanggan di lokasi. Layanan, CSAT, dan NPS wajib diisi.
                 </p>
@@ -220,7 +220,7 @@ export default function MobileWorkerTaskSurveyPage() {
                         }
                         className={`rounded-full border px-3 py-1.5 text-[11px] font-bold transition ${
                           selected
-                            ? 'border-emerald-400 bg-emerald-50 text-emerald-800'
+                            ? 'border-[#163A22] bg-[#163A22] text-white'
                             : 'border-slate-200 bg-slate-50 text-slate-700'
                         }`}
                       >
@@ -246,7 +246,7 @@ export default function MobileWorkerTaskSurveyPage() {
                         onClick={() => setForm((prev) => ({ ...prev, csat_score: option.score }))}
                         className={`min-h-[58px] rounded-[10px] border px-1 py-1.5 text-center transition ${
                           selected
-                            ? 'border-emerald-400 bg-emerald-50 text-emerald-800'
+                            ? 'border-[#163A22] bg-[#163A22] text-white'
                             : 'border-slate-200 bg-slate-50 text-slate-700'
                         }`}
                       >
@@ -280,7 +280,7 @@ export default function MobileWorkerTaskSurveyPage() {
                         onClick={() => setForm((prev) => ({ ...prev, nps_score: score }))}
                         className={`aspect-square rounded-[8px] border text-[11px] font-extrabold transition ${
                           selected
-                            ? 'border-emerald-400 bg-emerald-50 text-emerald-800'
+                            ? 'border-[#163A22] bg-[#163A22] text-white'
                             : 'border-slate-200 bg-slate-50 text-slate-700'
                         }`}
                       >
@@ -306,7 +306,7 @@ export default function MobileWorkerTaskSurveyPage() {
                         onClick={() => setForm((prev) => ({ ...prev, tags: toggleInList(prev.tags, label) }))}
                         className={`rounded-full border px-3 py-1.5 text-[11px] font-bold transition ${
                           selected
-                            ? 'border-emerald-400 bg-emerald-50 text-emerald-800'
+                            ? 'border-[#163A22] bg-[#163A22] text-white'
                             : 'border-slate-200 bg-slate-50 text-slate-700'
                         }`}
                       >
@@ -323,7 +323,7 @@ export default function MobileWorkerTaskSurveyPage() {
                     maxLength={SURVEY_FEEDBACK_TEXT_MAX}
                     value={form.feedback_text}
                     onChange={(e) => setForm((prev) => ({ ...prev, feedback_text: e.target.value }))}
-                    className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[12.5px] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#7BC32C]"
+                    className="mt-2 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[12.5px] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#163A22]"
                     placeholder="Tuliskan kritik atau saran pelanggan di sini..."
                   />
                   <span className="mt-1 block text-right text-[10px] text-slate-400">
@@ -337,7 +337,7 @@ export default function MobileWorkerTaskSurveyPage() {
                 disabled={submitting}
                 className="w-full h-[44px] rounded-[12px] bg-[#163A22] text-white text-[13px] font-extrabold disabled:opacity-60"
               >
-                {submitting ? 'Menyimpan Survey...' : task?.evidence?.has_survey ? 'Update Survey' : 'Simpan Survey'}
+                {submitting ? 'Menyimpan Survei...' : task?.evidence?.has_survey ? 'Ubah Survei' : 'Simpan Survei'}
               </button>
             </form>
           )}
@@ -347,7 +347,7 @@ export default function MobileWorkerTaskSurveyPage() {
       <MobileConfirmDialog
         open={alertOpen}
         variant="danger"
-        title="Survey Belum Lengkap"
+        title="Survei Belum Lengkap"
         description={error || 'Lengkapi semua pertanyaan wajib sebelum menyimpan.'}
         confirmLabel="Mengerti"
         cancelLabel="Tutup"

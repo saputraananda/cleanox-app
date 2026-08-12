@@ -1,10 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowLeft, Camera, CheckCircle2, X } from 'lucide-react';
 import api from '@shared/utils/api.js';
 import MobileWorkerBottomNav from '@mobile/components/MobileWorkerBottomNav.jsx';
 import MobileCameraCapture from '@mobile/components/MobileCameraCapture.jsx';
 import MobileConfirmDialog from '@mobile/components/MobileConfirmDialog.jsx';
+import {
+  DEFAULT_ABSEN_RADIUS_KM,
+  resolveAttendanceLocationLabel,
+} from '@mobile/utils/attendanceLocation.js';
 
 const MONTHS_ID_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
 const pad2 = (n) => String(n).padStart(2, '0');
@@ -57,7 +61,7 @@ function LihatFotoButton({ onClick }) {
     <button
       type="button"
       onClick={onClick}
-      className="mt-2 w-full h-[30px] rounded-[9px] border border-emerald-200 bg-emerald-50 text-emerald-800 text-[10.5px] font-bold tracking-[.02em] flex items-center justify-center gap-1 transition hover:bg-emerald-100 active:scale-[.98]"
+      className="mt-2 w-full h-[30px] rounded-[9px] border border-[#163A22] bg-[#163A22] text-white text-[10.5px] font-bold tracking-[.02em] flex items-center justify-center gap-1 transition hover:bg-[#20492C] active:scale-[.98]"
     >
       <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
         <path d="M1.5 10s3.2-5 8.5-5 8.5 5 8.5 5-3.2 5-8.5 5-8.5-5-8.5-5z" />
@@ -72,6 +76,8 @@ export default function MobileWorkerAttendancePage() {
   const [attendance, setAttendance] = useState(null);
   const [checkInFile, setCheckInFile] = useState(null);
   const [checkoutProofFile, setCheckoutProofFile] = useState(null);
+  const [checkInMeta, setCheckInMeta] = useState(null);
+  const [checkOutMeta, setCheckOutMeta] = useState(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -86,6 +92,7 @@ export default function MobileWorkerAttendancePage() {
   const [savedCheckOutPhotoUrl, setSavedCheckOutPhotoUrl] = useState('');
   const [photoPreview, setPhotoPreview] = useState(null);
   const [activeLeave, setActiveLeave] = useState(null);
+  const [absenOffice, setAbsenOffice] = useState(null);
   const checkInPreviewUrlRef = useRef('');
   const checkoutProofPreviewUrlRef = useRef('');
   const savedCheckInPhotoUrlRef = useRef('');
@@ -97,16 +104,47 @@ export default function MobileWorkerAttendancePage() {
     && ['pengajuan', 'disetujui'].includes(activeLeave.status)
   );
 
+  const resolveLocationLabel = useCallback(
+    (lat, lng) => {
+      if (!absenOffice) return null;
+      return resolveAttendanceLocationLabel(
+        lat,
+        lng,
+        absenOffice.latitude,
+        absenOffice.longitude,
+        absenOffice.radius_km ?? DEFAULT_ABSEN_RADIUS_KM
+      );
+    },
+    [absenOffice]
+  );
+
   const loadStatus = async () => {
     setLoading(true);
     try {
-      const [{ data: attendanceData }, leaveRes] = await Promise.all([
+      const [{ data: attendanceData }, leaveRes, absenLocRes] = await Promise.all([
         api.get('/mobile-attendance/today-status'),
         api.get('/mobile-leave/today').catch(() => ({ data: { leave: null } })),
+        api.get('/mobile-attendance/absen-location').catch(() => ({ data: null })),
       ]);
       const row = attendanceData.attendance || null;
       setAttendance(row);
       setActiveLeave(leaveRes.data?.leave || null);
+
+      const office = absenLocRes?.data;
+      if (
+        office &&
+        Number.isFinite(Number(office.latitude)) &&
+        Number.isFinite(Number(office.longitude))
+      ) {
+        setAbsenOffice({
+          name: office.name || 'Head Office Alora',
+          latitude: Number(office.latitude),
+          longitude: Number(office.longitude),
+          radius_km: Number(office.radius_km) || DEFAULT_ABSEN_RADIUS_KM,
+        });
+      } else {
+        setAbsenOffice(null);
+      }
 
       const checkInPath =
         attendanceData.check_in_photo?.path || row?.check_in_photo_path || '';
@@ -127,7 +165,7 @@ export default function MobileWorkerAttendancePage() {
         return nextOutUrl;
       });
     } catch (err) {
-      setError(err.response?.data?.message || 'Gagal mengambil status attendance');
+      setError(err.response?.data?.message || 'Gagal mengambil status absensi');
     } finally {
       setLoading(false);
     }
@@ -165,6 +203,7 @@ export default function MobileWorkerAttendancePage() {
 
   const handleCheckInFileChange = (file) => {
     setCheckInFile(file || null);
+    if (!file) setCheckInMeta(null);
     setCheckInPreviewUrl((prev) => {
       if (prev?.startsWith?.('blob:')) URL.revokeObjectURL(prev);
       return file ? URL.createObjectURL(file) : '';
@@ -173,6 +212,7 @@ export default function MobileWorkerAttendancePage() {
 
   const handleCheckoutProofChange = (file) => {
     setCheckoutProofFile(file || null);
+    if (!file) setCheckOutMeta(null);
     setCheckoutProofPreviewUrl((prev) => {
       if (prev?.startsWith?.('blob:')) URL.revokeObjectURL(prev);
       return file ? URL.createObjectURL(file) : '';
@@ -225,15 +265,18 @@ export default function MobileWorkerAttendancePage() {
     try {
       const formData = new FormData();
       formData.append('check_in_photo', checkInFile);
+      if (checkInMeta?.latitude != null) formData.append('latitude', String(checkInMeta.latitude));
+      if (checkInMeta?.longitude != null) formData.append('longitude', String(checkInMeta.longitude));
+      if (checkInMeta?.locationName) formData.append('location_name', checkInMeta.locationName);
 
       await api.post('/mobile-attendance/check-in', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      setSuccess('Check-in berhasil. Lanjut isi Foto Grooming jika belum.');
+      setSuccess('Absen masuk berhasil. Lanjut isi foto grooming jika belum.');
       handleCheckInFileChange(null);
       await loadStatus();
     } catch (err) {
-      setError(err.response?.data?.message || 'Gagal menyimpan check-in attendance');
+      setError(err.response?.data?.message || 'Gagal menyimpan absen masuk');
     } finally {
       setSubmitting(false);
     }
@@ -252,15 +295,18 @@ export default function MobileWorkerAttendancePage() {
     try {
       const formData = new FormData();
       formData.append('check_out_photo', checkoutProofFile);
+      if (checkOutMeta?.latitude != null) formData.append('latitude', String(checkOutMeta.latitude));
+      if (checkOutMeta?.longitude != null) formData.append('longitude', String(checkOutMeta.longitude));
+      if (checkOutMeta?.locationName) formData.append('location_name', checkOutMeta.locationName);
 
       await api.post('/mobile-attendance/check-out', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      setSuccess('Check-out attendance berhasil disimpan.');
+      setSuccess('Absen pulang berhasil disimpan.');
       handleCheckoutProofChange(null);
       await loadStatus();
     } catch (err) {
-      setError(err.response?.data?.message || 'Gagal menyimpan check-out attendance');
+      setError(err.response?.data?.message || 'Gagal menyimpan absen pulang');
     } finally {
       setSubmitting(false);
     }
@@ -288,7 +334,7 @@ export default function MobileWorkerAttendancePage() {
               </Link>
               <div className="min-w-0 overflow-hidden">
                 <div className="text-[14px] font-extrabold text-white truncate">Absensi</div>
-                <div className="text-[10.5px] text-white/50 font-medium truncate mt-px">Foto In & Foto Out</div>
+                <div className="text-[10.5px] text-white/50 font-medium truncate mt-px">Foto masuk & foto pulang</div>
               </div>
             </div>
           </div>
@@ -299,14 +345,14 @@ export default function MobileWorkerAttendancePage() {
               <div className="text-[11.5px] text-white/45 font-medium mt-1">{liveDate}</div>
             </div>
             <div className="text-[10px] font-bold tracking-[.03em] px-2.5 py-[5px] rounded-full bg-white/12 text-white/85 border border-white/10 whitespace-nowrap flex-shrink-0">
-              In / Out
+              Masuk / Pulang
             </div>
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto px-3 sm:px-[14px] pt-3 sm:pt-[14px] pb-[calc(110px+env(safe-area-inset-bottom))] flex flex-col gap-2.5">
           {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</div>}
-          {success && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{success}</div>}
+          {success && <div className="rounded-2xl border border-[#163A22] bg-[#163A22] p-3 text-sm text-white">{success}</div>}
 
           {leaveLocksAttendance && (
             <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
@@ -318,23 +364,29 @@ export default function MobileWorkerAttendancePage() {
           <section className="rounded-[18px] bg-white p-4 shadow-[0_1px_4px_rgba(0,0,0,.04)] border border-slate-200 space-y-3">
             <div>
               <p className="text-[14px] font-extrabold text-slate-900">Status Hari Ini</p>
-              <p className="text-[11px] text-slate-500">Pantau check-in dan check-out worker.</p>
+              <p className="text-[11px] text-slate-500">Pantau absen masuk dan absen pulang karyawan.</p>
             </div>
 
             {loading ? (
-              <p className="text-sm text-slate-500">Memuat status attendance...</p>
+              <p className="text-sm text-slate-500">Memuat status absensi...</p>
             ) : (
               <div className="grid grid-cols-2 gap-3">
                 <div className="rounded-[14px] border border-slate-100 bg-[#FAFBFC] p-3">
-                  <p className="text-[10px] uppercase tracking-[.06em] text-slate-400 font-bold">Check In</p>
+                  <p className="text-[10px] uppercase tracking-[.06em] text-slate-400 font-bold">Masuk</p>
                   <p className="mt-1 text-[14px] font-extrabold text-slate-900">{formatDateTime(attendance?.check_in_at)}</p>
+                  <p className="mt-1 text-[10.5px] text-slate-500">
+                    {attendance?.check_in_location_name || 'Lokasi belum tercatat'}
+                  </p>
                   {attendance?.check_in_at && savedCheckInPhotoUrl ? (
                     <LihatFotoButton onClick={() => openPhotoPreview(savedCheckInPhotoUrl, 'Foto In')} />
                   ) : null}
                 </div>
                 <div className="rounded-[14px] border border-slate-100 bg-[#FAFBFC] p-3">
-                  <p className="text-[10px] uppercase tracking-[.06em] text-slate-400 font-bold">Check Out</p>
+                  <p className="text-[10px] uppercase tracking-[.06em] text-slate-400 font-bold">Pulang</p>
                   <p className="mt-1 text-[14px] font-extrabold text-slate-900">{formatDateTime(attendance?.check_out_at)}</p>
+                  <p className="mt-1 text-[10.5px] text-slate-500">
+                    {attendance?.check_out_location_name || 'Lokasi belum tercatat'}
+                  </p>
                   {attendance?.check_out_at && savedCheckOutPhotoUrl ? (
                     <LihatFotoButton onClick={() => openPhotoPreview(savedCheckOutPhotoUrl, 'Foto Out')} />
                   ) : null}
@@ -348,14 +400,14 @@ export default function MobileWorkerAttendancePage() {
               <div>
                 <p className="text-[14px] font-extrabold text-slate-900">Foto In</p>
                 <p className="text-[11px] text-slate-500 mt-1">
-                  Ambil 1 foto untuk check-in. Foto grooming ada di menu terpisah.
+                  Ambil 1 foto untuk absen masuk. Foto grooming ada di menu terpisah.
                 </p>
               </div>
 
               <div className="rounded-[16px] border border-slate-200 p-3 bg-[#FAFBFC]">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-[12.5px] font-bold text-slate-800">Foto Check-In</p>
+                    <p className="text-[12.5px] font-bold text-slate-800">Foto Absen Masuk</p>
                     <p className="text-[10.5px] text-slate-500 mt-1">
                       {checkInFile ? 'Foto siap' : 'Belum ada foto'}
                     </p>
@@ -370,7 +422,7 @@ export default function MobileWorkerAttendancePage() {
                 <button
                   type="button"
                   onClick={() => setCameraTarget({ key: 'check_in_photo', label: 'Foto In' })}
-                  className="mt-3 w-full h-[40px] rounded-[12px] border-2 border-dashed border-slate-300 text-slate-600 text-[12px] font-bold flex items-center justify-center gap-1.5 hover:border-[#7BC32C] hover:text-[#163A22] hover:bg-[#EEF8E3]/50 transition"
+                  className="mt-3 w-full h-[40px] rounded-[12px] border-2 border-dashed border-slate-300 text-slate-600 text-[12px] font-bold flex items-center justify-center gap-1.5 hover:border-[#163A22] hover:text-white hover:bg-[#163A22] transition"
                 >
                   <Camera className="w-4 h-4" />
                   {checkInFile ? 'Ambil Ulang' : 'Ambil Foto'}
@@ -405,7 +457,7 @@ export default function MobileWorkerAttendancePage() {
                 disabled={submitting}
                 className="w-full h-[42px] rounded-[12px] bg-[#163A22] px-4 text-[12.5px] font-extrabold text-white hover:bg-[#20492C] disabled:opacity-60"
               >
-                {submitting ? 'Menyimpan Check-In...' : 'Check-In Attendance'}
+                {submitting ? 'Menyimpan Absen Masuk...' : 'Simpan Absen Masuk'}
               </button>
             </form>
           )}
@@ -413,9 +465,9 @@ export default function MobileWorkerAttendancePage() {
           {attendance?.check_in_at && !attendance?.check_out_at && (
             <section className="rounded-[18px] bg-white p-4 shadow-[0_1px_4px_rgba(0,0,0,.04)] border border-slate-200 space-y-4">
               <div>
-                <p className="text-[14px] font-extrabold text-slate-900">Check-Out Attendance</p>
+                <p className="text-[14px] font-extrabold text-slate-900">Absen Pulang</p>
                 <p className="text-[11px] text-slate-500 mt-1">
-                  Check-in sudah tersimpan. Ambil 1 foto bukti checkout sebelum pekerjaan ditutup.
+                  Absen masuk sudah tersimpan. Ambil 1 foto bukti absen pulang sebelum pekerjaan ditutup.
                 </p>
               </div>
               <div className="rounded-[16px] border border-slate-200 p-3 bg-[#FAFBFC]">
@@ -436,7 +488,7 @@ export default function MobileWorkerAttendancePage() {
                 <button
                   type="button"
                   onClick={() => setCameraTarget({ key: 'check_out_photo', label: 'Foto Out' })}
-                  className="mt-3 w-full h-[40px] rounded-[12px] border-2 border-dashed border-slate-300 text-slate-600 text-[12px] font-bold flex items-center justify-center gap-1.5 hover:border-[#7BC32C] hover:text-[#163A22] hover:bg-[#EEF8E3]/50 transition"
+                  className="mt-3 w-full h-[40px] rounded-[12px] border-2 border-dashed border-slate-300 text-slate-600 text-[12px] font-bold flex items-center justify-center gap-1.5 hover:border-[#163A22] hover:text-white hover:bg-[#163A22] transition"
                 >
                   <Camera className="w-4 h-4" />
                   {checkoutProofFile ? 'Ambil Ulang' : 'Ambil Foto'}
@@ -473,7 +525,7 @@ export default function MobileWorkerAttendancePage() {
                 type="button"
                 onClick={handleCheckOut}
                 disabled={submitting}
-                className="w-full h-[42px] rounded-[12px] bg-[#7BC32C] px-4 text-[12.5px] font-extrabold text-[#163A22] hover:bg-[#8CD145] disabled:opacity-60"
+                className="w-full h-[42px] rounded-[12px] bg-[#163A22] px-4 text-[12.5px] font-extrabold text-white hover:bg-[#20492C] disabled:opacity-60"
               >
                 {submitting ? 'Menyimpan Check-Out...' : 'Check-Out Attendance'}
               </button>
@@ -499,16 +551,20 @@ export default function MobileWorkerAttendancePage() {
         variant="ikm"
         initialFacingMode="user"
         confirmLabel="Ambil Foto"
-        includeLocation={false}
+        includeLocation
+        locationDisplayMode="label"
+        resolveLocationLabel={resolveLocationLabel}
         onClose={() => setCameraTarget(null)}
-        onCapture={(file) => {
+        onCapture={(file, meta) => {
           const key = cameraTarget?.key;
           setCameraTarget(null);
           if (key === 'check_out_photo') {
+            setCheckOutMeta(meta || null);
             handleCheckoutProofChange(file);
             return;
           }
           if (key === 'check_in_photo') {
+            setCheckInMeta(meta || null);
             handleCheckInFileChange(file);
           }
         }}
@@ -554,7 +610,7 @@ export default function MobileWorkerAttendancePage() {
       <MobileConfirmDialog
         open={photoRequirementAlertOpen}
         title="Check-In Belum Bisa Diproses"
-        description="Ambil dulu Foto In sebelum melakukan check-in attendance."
+        description="Ambil dulu Foto In sebelum melakukan absen masuk."
         variant="danger"
         confirmLabel="Isi Foto Dulu"
         cancelLabel="Tutup"
@@ -566,7 +622,7 @@ export default function MobileWorkerAttendancePage() {
       <MobileConfirmDialog
         open={checkoutPhotoRequirementAlertOpen}
         title="Check-Out Belum Bisa Diproses"
-        description="Ambil dulu Foto Out sebelum melakukan check-out attendance."
+        description="Ambil dulu Foto Out sebelum melakukan absen pulang."
         variant="danger"
         confirmLabel="Isi Foto Dulu"
         cancelLabel="Tutup"

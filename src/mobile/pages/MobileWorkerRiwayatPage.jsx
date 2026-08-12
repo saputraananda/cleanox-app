@@ -13,12 +13,12 @@ import api from '@shared/utils/api.js';
 import MobileWorkerBottomNav from '@mobile/components/MobileWorkerBottomNav.jsx';
 
 const TYPE_META = {
-  task_accept: { label: 'Task', Icon: CheckCircle2, tone: 'bg-[#EEF8E3] text-[#163A22]' },
-  task_start: { label: 'Task', Icon: Play, tone: 'bg-[#EEF8E3] text-[#2F6B38]' },
-  task_complete: { label: 'Task', Icon: CheckCircle2, tone: 'bg-emerald-50 text-emerald-700' },
-  task_reject: { label: 'Task', Icon: XCircle, tone: 'bg-rose-50 text-rose-700' },
+  task_accept: { label: 'Tugas', Icon: CheckCircle2, tone: 'bg-[#EEF8E3] text-[#163A22]' },
+  task_start: { label: 'Tugas', Icon: Play, tone: 'bg-[#EEF8E3] text-[#2F6B38]' },
+  task_complete: { label: 'Tugas', Icon: CheckCircle2, tone: 'bg-emerald-50 text-emerald-700' },
+  task_reject: { label: 'Tugas', Icon: XCircle, tone: 'bg-rose-50 text-rose-700' },
   task_reschedule: { label: 'Jadwal', Icon: History, tone: 'bg-sky-50 text-sky-700' },
-  task_cancel: { label: 'Task', Icon: XCircle, tone: 'bg-rose-50 text-rose-700' },
+  task_cancel: { label: 'Tugas', Icon: XCircle, tone: 'bg-rose-50 text-rose-700' },
   attendance_check_in: { label: 'Absensi', Icon: Camera, tone: 'bg-[#EEF8E3] text-[#163A22]' },
   attendance_check_out: { label: 'Absensi', Icon: OutIcon, tone: 'bg-slate-100 text-slate-600' },
   kebersihan_upload: { label: 'Kebersihan', Icon: Sparkles, tone: 'bg-[#F7F8E0] text-[#8A9200]' },
@@ -96,7 +96,7 @@ export default function MobileWorkerRiwayatPage() {
               <ClipboardList className="w-8 h-8 text-slate-300 mx-auto" />
               <p className="mt-3 text-[13px] font-extrabold text-slate-900">Belum ada aktivitas</p>
               <p className="mt-1 text-[11px] text-slate-500">
-                Accept, mulai/selesai task, absensi, dan kebersihan akan muncul di sini.
+                Konfirmasi, mulai/selesai tugas, absensi, dan kebersihan akan muncul di sini.
               </p>
             </div>
           ) : (
