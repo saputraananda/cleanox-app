@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Camera, ClipboardList, Sparkles, ArrowRight, Clock3, XCircle, CalendarDays, FileText, UserRound, Lock } from 'lucide-react';
+import { Camera, ClipboardList, Sparkles, ArrowRight, Clock3, XCircle, CalendarDays, FileText, UserRound, Lock, Banknote } from 'lucide-react';
 import { getUser } from '@shared/utils/auth.js';
 import api from '@shared/utils/api.js';
 import MobileWorkerBottomNav from '@mobile/components/MobileWorkerBottomNav.jsx';
@@ -51,6 +51,13 @@ const MENU_ITEMS = [
     description: 'Ajukan izin & cuti',
     icon: FileText,
     to: '/mobile-worker/leave',
+    requiresMorningUnlock: false,
+  },
+  {
+    title: 'Kasbon & Pinjam',
+    description: 'Ajukan kasbon & pinjaman',
+    icon: Banknote,
+    to: '/mobile-worker/kasbon',
     requiresMorningUnlock: false,
   },
 ];

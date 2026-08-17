@@ -10,6 +10,7 @@ import MobileWorkerCalendarPage from '@mobile/pages/MobileWorkerCalendarPage.jsx
 import MobileWorkerProfilePage from '@mobile/pages/MobileWorkerProfilePage.jsx';
 import MobileWorkerRiwayatPage from '@mobile/pages/MobileWorkerRiwayatPage.jsx';
 import MobileWorkerLeavePage from '@mobile/pages/MobileWorkerLeavePage.jsx';
+import MobileWorkerKasbonPage from '@mobile/pages/MobileWorkerKasbonPage.jsx';
 import MobileWorkerGroomingPage from '@mobile/pages/MobileWorkerGroomingPage.jsx';
 
 function withMorningUnlock(page) {
@@ -91,6 +92,15 @@ const mobileRoutes = [
     element={
       <PrivateRoute companyIds={[3]}>
         <MobileWorkerLeavePage />
+      </PrivateRoute>
+    }
+  />,
+  <Route
+    key="mobile-kasbon"
+    path="/mobile-worker/kasbon"
+    element={
+      <PrivateRoute companyIds={[3]}>
+        <MobileWorkerKasbonPage />
       </PrivateRoute>
     }
   />,
