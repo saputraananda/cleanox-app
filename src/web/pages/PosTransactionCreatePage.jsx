@@ -23,6 +23,7 @@ import CustomerFormFields, {
   formToPayload,
 } from '@web/components/CustomerFormFields.jsx';
 import BodyPortal from '@web/components/BodyPortal.jsx';
+import TablePagination, { PAGE_SIZE_OPTIONS } from '@web/components/TablePagination.jsx';
 import { buildCustomerOrderMessage } from '@web/utils/posCustomerOrderMessage.js';
 import { buildGroupOrderMessage } from '@web/utils/posGroupOrderMessage.js';
 import {
@@ -149,7 +150,17 @@ export default function PosTransactionCreatePage() {
   const [workers, setWorkers] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
-  const [customerSearch, setCustomerSearch] = useState('');
+  const [customerModalOpen, setCustomerModalOpen] = useState(false);
+  const [customerModalLoading, setCustomerModalLoading] = useState(false);
+  const [customerModalSearch, setCustomerModalSearch] = useState('');
+  const [customerModalPage, setCustomerModalPage] = useState(1);
+  const [customerModalPageSize, setCustomerModalPageSize] = useState(PAGE_SIZE_OPTIONS[0] || 10);
+  const [customerPagination, setCustomerPagination] = useState({
+    page: 1,
+    page_size: PAGE_SIZE_OPTIONS[0] || 10,
+    total_items: 0,
+    total_pages: 1,
+  });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [creatingCustomer, setCreatingCustomer] = useState(false);
@@ -187,9 +198,28 @@ export default function PosTransactionCreatePage() {
         ? 'workers'
         : 'items';
 
-  const loadCustomers = async (term = '') => {
-    const { data } = await api.get('/pos-customers', { params: { search: term, status: 'Aktif' } });
+  const loadCustomers = async ({ search = '', page = 1, pageSize = customerModalPageSize } = {}) => {
+    const safePage = Math.max(1, Number(page || 1));
+    const safePageSize = Math.max(1, Number(pageSize || customerModalPageSize || 10));
+    const { data } = await api.get('/pos-customers', {
+      params: {
+        search,
+        status: 'Aktif',
+        page: safePage,
+        page_size: safePageSize,
+      },
+    });
     setCustomers(data.customers || []);
+    setCustomerPagination(
+      data.pagination || {
+        page: safePage,
+        page_size: safePageSize,
+        total_items: Array.isArray(data.customers) ? data.customers.length : 0,
+        total_pages: 1,
+      }
+    );
+    setCustomerModalPage(data.pagination?.page || safePage);
+    setCustomerModalPageSize(data.pagination?.page_size || safePageSize);
   };
 
   const handleSelectCustomer = async (row) => {
@@ -200,6 +230,7 @@ export default function PosTransactionCreatePage() {
           id_konsumen: row.legacy_id_konsumen,
         });
         setSelectedCustomer(data.customer);
+        setCustomerModalOpen(false);
         return;
       }
       if (!row.id) {
@@ -207,6 +238,7 @@ export default function PosTransactionCreatePage() {
         return;
       }
       setSelectedCustomer(row);
+      setCustomerModalOpen(false);
     } catch (err) {
       setError(err.response?.data?.message || 'Gagal menyiapkan customer');
     }
@@ -224,7 +256,7 @@ export default function PosTransactionCreatePage() {
       try {
         const [serviceRes] = await Promise.all([
           api.get('/pos-transactions/services'),
-          loadCustomers(),
+          loadCustomers({ search: '', page: 1, pageSize: PAGE_SIZE_OPTIONS[0] || 10 }),
         ]);
         setServices(serviceRes.data.services || []);
         setServiceCategoriesMaster(serviceRes.data.categories || []);
@@ -658,12 +690,71 @@ export default function PosTransactionCreatePage() {
     syncServiceDate(scheduleDate, normalized);
   };
 
+  const openCustomerPickerModal = async () => {
+    setCustomerModalOpen(true);
+    setCustomerModalPage(1);
+    setError('');
+    setCustomerModalLoading(true);
+    try {
+      await loadCustomers({
+        search: customerModalSearch,
+        page: 1,
+        pageSize: customerModalPageSize,
+      });
+    } catch (err) {
+      setError(err.response?.data?.message || 'Gagal memuat customer');
+    } finally {
+      setCustomerModalLoading(false);
+    }
+  };
+
+  const closeCustomerPickerModal = () => {
+    setCustomerModalOpen(false);
+  };
+
   const handleSearchCustomer = async (e) => {
     e.preventDefault();
+    setCustomerModalLoading(true);
     try {
-      await loadCustomers(customerSearch);
+      await loadCustomers({
+        search: customerModalSearch,
+        page: 1,
+        pageSize: customerModalPageSize,
+      });
     } catch (err) {
       setError(err.response?.data?.message || 'Gagal mencari customer');
+    } finally {
+      setCustomerModalLoading(false);
+    }
+  };
+
+  const handleCustomerPageChange = async (page) => {
+    setCustomerModalLoading(true);
+    try {
+      await loadCustomers({
+        search: customerModalSearch,
+        page,
+        pageSize: customerModalPageSize,
+      });
+    } catch (err) {
+      setError(err.response?.data?.message || 'Gagal memuat halaman customer');
+    } finally {
+      setCustomerModalLoading(false);
+    }
+  };
+
+  const handleCustomerPageSizeChange = async (pageSize) => {
+    setCustomerModalLoading(true);
+    try {
+      await loadCustomers({
+        search: customerModalSearch,
+        page: 1,
+        pageSize,
+      });
+    } catch (err) {
+      setError(err.response?.data?.message || 'Gagal mengubah pagination customer');
+    } finally {
+      setCustomerModalLoading(false);
     }
   };
 
@@ -686,7 +777,11 @@ export default function PosTransactionCreatePage() {
       const { data } = await api.post('/pos-customers', formToPayload(newCustomerForm));
       setSelectedCustomer(data.customer);
       closeCreateCustomerModal();
-      await loadCustomers(customerSearch);
+      await loadCustomers({
+        search: customerModalSearch,
+        page: customerModalPage,
+        pageSize: customerModalPageSize,
+      });
     } catch (err) {
       setError(err.response?.data?.message || 'Gagal menambah customer');
     } finally {
@@ -860,83 +955,30 @@ export default function PosTransactionCreatePage() {
             </div>
             <button
               type="button"
-              onClick={() => setSelectedCustomer(null)}
-              className="rounded-[10px] p-1.5 text-emerald-700 transition duration-150 hover:bg-emerald-100 active:scale-[.98]"
+              onClick={openCustomerPickerModal}
+              className="inline-flex items-center gap-2 rounded-[10px] border border-emerald-200 bg-white px-3 py-2 text-[12px] font-semibold text-emerald-700 transition duration-150 hover:bg-emerald-100 active:scale-[.98]"
               aria-label="Ganti customer"
             >
-              <X className="w-4 h-4" />
+              <Pencil className="w-3.5 h-3.5" />
+              Ganti
             </button>
           </div>
         ) : (
-          <>
-            <form onSubmit={handleSearchCustomer} className="flex flex-col sm:flex-row gap-2.5">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 w-4 h-4 -translate-y-1/2 text-slate-400" />
-                <input
-                  value={customerSearch}
-                  onChange={(e) => setCustomerSearch(e.target.value)}
-                  placeholder="Cari nama atau telepon customer"
-                  className={`${inputClass} pl-9`}
-                />
-              </div>
-              <button
-                type="submit"
-                className="rounded-[12px] px-4 py-2.5 text-[13px] font-bold text-white transition duration-150 hover:-translate-y-0.5 active:scale-[.98]"
-                style={primaryBtnStyle}
-              >
-                Cari
-              </button>
-            </form>
-
-            <div className="grid gap-2.5 sm:grid-cols-2">
-              {customers.length === 0 ? (
-                <p className="text-[13px] text-slate-400 sm:col-span-2">
-                  Tidak ada customer. Tambah customer baru.
-                </p>
-              ) : (
-                customers.map((row) => (
-                  <button
-                    key={row.id || row.legacy_id_konsumen}
-                    type="button"
-                    onClick={() => handleSelectCustomer(row)}
-                    className="rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3.5 text-left transition duration-150 hover:-translate-y-0.5 hover:border-blue-300 hover:bg-white active:scale-[.98]"
-                  >
-                    <div className="flex items-start gap-3">
-                      <div
-                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[11px] font-extrabold text-blue-700"
-                        style={{ background: 'linear-gradient(135deg, #DBEAFE 0%, #EFF6FF 100%)' }}
-                      >
-                        {getInitials(row.name) || 'C'}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <div className="text-[13px] font-bold text-slate-800 truncate">{row.name}</div>
-                          <span
-                            className={`inline-flex shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-                              row.source_system === 'smartlink'
-                                ? 'border-amber-200 bg-amber-50 text-amber-700'
-                                : 'border-blue-200 bg-blue-50 text-blue-700'
-                            }`}
-                          >
-                            {getCustomerSourceLabel(row)}
-                          </span>
-                        </div>
-                        <div className="mt-1 text-[11.5px] text-slate-500">
-                          {row.phone || 'Tanpa telepon'}
-                        </div>
-                        {row.address && (
-                          <div className="mt-1 text-[11.5px] text-slate-400 truncate">{row.address}</div>
-                        )}
-                        <span className="mt-2 inline-flex rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
-                          {row.transaction_count || 0} transaksi
-                        </span>
-                      </div>
-                    </div>
-                  </button>
-                ))
-              )}
-            </div>
-          </>
+          <div className="rounded-[16px] border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center">
+            <p className="text-[13px] font-semibold text-slate-700">Belum ada customer dipilih</p>
+            <p className="mt-1 text-[11.5px] text-slate-500">
+              Klik tombol di bawah untuk membuka daftar customer aktif.
+            </p>
+            <button
+              type="button"
+              onClick={openCustomerPickerModal}
+              className="mt-4 inline-flex items-center gap-2 rounded-[12px] px-4 py-2.5 text-[13px] font-bold text-white transition duration-150 hover:-translate-y-0.5 active:scale-[.98]"
+              style={primaryBtnStyle}
+            >
+              <Users className="w-4 h-4" />
+              Pilih Customer
+            </button>
+          </div>
         )}
       </section>
 
@@ -1490,6 +1532,129 @@ export default function PosTransactionCreatePage() {
                 </button>
               </div>
             </form>
+            </div>
+          </div>
+        </BodyPortal>
+      )}
+
+      {customerModalOpen && (
+        <BodyPortal>
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-[2px]"
+            onClick={closeCustomerPickerModal}
+          >
+            <div
+              className="flex w-full max-w-5xl max-h-[90vh] flex-col overflow-hidden rounded-[20px] border border-slate-200 bg-white shadow-[0_0_0_1px_rgba(0,0,0,.04),0_16px_48px_rgba(15,23,42,.18)]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
+                <div>
+                  <p className={labelEyebrowClass}>Langkah 1</p>
+                  <h2 className="mt-1 text-[16px] font-extrabold tracking-[-0.01em] text-slate-900">
+                    Pilih Customer
+                  </h2>
+                  <p className="mt-1 text-[11.5px] text-slate-500">
+                    Diurutkan dari customer yang paling sering transaksi.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeCustomerPickerModal}
+                  className="rounded-[10px] p-1.5 text-slate-400 transition duration-150 hover:bg-slate-100 hover:text-slate-700 active:scale-[.98]"
+                  aria-label="Tutup"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 space-y-4">
+                <form onSubmit={handleSearchCustomer} className="flex flex-col gap-2.5 sm:flex-row">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 w-4 h-4 -translate-y-1/2 text-slate-400" />
+                    <input
+                      value={customerModalSearch}
+                      onChange={(e) => setCustomerModalSearch(e.target.value)}
+                      placeholder="Cari nama, telepon, atau alamat customer"
+                      className={`${inputClass} pl-9`}
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    className="rounded-[12px] px-4 py-2.5 text-[13px] font-bold text-white transition duration-150 hover:-translate-y-0.5 active:scale-[.98]"
+                    style={primaryBtnStyle}
+                  >
+                    Cari
+                  </button>
+                </form>
+
+                {customerModalLoading ? (
+                  <div className="rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-10 text-center">
+                    <p className="text-[13px] font-semibold text-slate-700">Memuat customer...</p>
+                  </div>
+                ) : customers.length === 0 ? (
+                  <div className="rounded-[16px] border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center">
+                    <p className="text-[13px] font-semibold text-slate-700">Customer tidak ditemukan</p>
+                    <p className="mt-1 text-[11.5px] text-slate-500">
+                      Ubah kata kunci pencarian atau tambahkan customer baru dari tombol yang sudah ada.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid gap-2.5 sm:grid-cols-2">
+                    {customers.map((row) => (
+                      <button
+                        key={row.id || row.legacy_id_konsumen}
+                        type="button"
+                        onClick={() => handleSelectCustomer(row)}
+                        className="rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3.5 text-left transition duration-150 hover:-translate-y-0.5 hover:border-blue-300 hover:bg-white active:scale-[.98]"
+                      >
+                        <div className="flex items-start gap-3">
+                          <div
+                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[11px] font-extrabold text-blue-700"
+                            style={{ background: 'linear-gradient(135deg, #DBEAFE 0%, #EFF6FF 100%)' }}
+                          >
+                            {getInitials(row.name) || 'C'}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <div className="text-[13px] font-bold text-slate-800 truncate">{row.name}</div>
+                              <span
+                                className={`inline-flex shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                                  row.source_system === 'smartlink'
+                                    ? 'border-amber-200 bg-amber-50 text-amber-700'
+                                    : 'border-blue-200 bg-blue-50 text-blue-700'
+                                }`}
+                              >
+                                {getCustomerSourceLabel(row)}
+                              </span>
+                            </div>
+                            <div className="mt-1 text-[11.5px] text-slate-500">
+                              {row.phone || 'Tanpa telepon'}
+                            </div>
+                            {row.address && (
+                              <div className="mt-1 text-[11.5px] text-slate-400 truncate">{row.address}</div>
+                            )}
+                            <span className="mt-2 inline-flex rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
+                              {row.transaction_count || 0} transaksi
+                            </span>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="shrink-0 border-t border-slate-100">
+                <TablePagination
+                  totalItems={customerPagination.total_items || 0}
+                  page={customerPagination.page || customerModalPage}
+                  pageSize={customerModalPageSize}
+                  pageSizeOptions={PAGE_SIZE_OPTIONS}
+                  onPageChange={handleCustomerPageChange}
+                  onPageSizeChange={handleCustomerPageSizeChange}
+                  itemLabel="customer"
+                />
+              </div>
             </div>
           </div>
         </BodyPortal>

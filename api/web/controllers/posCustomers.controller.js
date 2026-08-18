@@ -395,6 +395,10 @@ export const getPosCustomers = async (req, res) => {
   try {
     const search = String(req.query.search || '').trim();
     const status = String(req.query.status || '').trim();
+    const page = Math.max(1, Number(req.query.page || 1) || 1);
+    const requestedPageSize = Number(req.query.page_size || 10) || 10;
+    const pageSize = Math.min(50, Math.max(1, requestedPageSize));
+    const offset = (page - 1) * pageSize;
     const params = [];
     const conditions = [];
 
@@ -414,15 +418,36 @@ export const getPosCustomers = async (req, res) => {
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
+    const [countRows] = await cleanoxPool.query(
+      `SELECT COUNT(*) AS total
+       FROM v_customers_unified v
+       ${where}`,
+      params
+    );
+
     const [rows] = await cleanoxPool.query(
       `SELECT ${UNIFIED_CUSTOMER_SELECT}
        FROM v_customers_unified v
        ${where}
-       ORDER BY v.name ASC`,
-      params
+       ORDER BY (COALESCE(v.legacy_transaction_count, 0) + COALESCE(v.pos_transaction_count, 0)) DESC,
+                v.name ASC
+       LIMIT ?
+       OFFSET ?`,
+      [...params, pageSize, offset]
     );
 
-    return res.json({ customers: rows.map(mapUnifiedCustomerRow) });
+    const totalItems = Number(countRows[0]?.total || 0);
+    const totalPages = Math.max(1, Math.ceil(totalItems / pageSize) || 1);
+
+    return res.json({
+      customers: rows.map(mapUnifiedCustomerRow),
+      pagination: {
+        page,
+        page_size: pageSize,
+        total_items: totalItems,
+        total_pages: totalPages,
+      },
+    });
   } catch (error) {
     console.error('[posCustomers/getPosCustomers]', error.message);
     return res.status(500).json({ message: 'Gagal memuat data customer' });

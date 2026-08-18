@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Inbox, Plus, RefreshCw, Search, Pencil, X, Save } from 'lucide-react';
 import api from '@shared/utils/api.js';
 import CustomerFormFields, {
@@ -9,7 +9,6 @@ import CustomerFormFields, {
 import BodyPortal from '@web/components/BodyPortal.jsx';
 import TablePagination, {
   PAGE_SIZE_OPTIONS,
-  paginateList,
 } from '@web/components/TablePagination.jsx';
 
 export default function PosCustomersPage() {
@@ -23,13 +22,35 @@ export default function PosCustomersPage() {
   const [form, setForm] = useState(emptyCustomerForm);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [pagination, setPagination] = useState({
+    page: 1,
+    page_size: 10,
+    total_items: 0,
+    total_pages: 1,
+  });
 
-  const loadData = async (term = search) => {
+  const loadData = async ({ term = search, page = currentPage, size = pageSize } = {}) => {
     setLoading(true);
     setError('');
     try {
-      const { data } = await api.get('/pos-customers', { params: { search: term } });
+      const { data } = await api.get('/pos-customers', {
+        params: {
+          search: term,
+          page,
+          page_size: size,
+        },
+      });
       setCustomers(data.customers || []);
+      setPagination(
+        data.pagination || {
+          page,
+          page_size: size,
+          total_items: Array.isArray(data.customers) ? data.customers.length : 0,
+          total_pages: 1,
+        }
+      );
+      setCurrentPage(data.pagination?.page || page);
+      setPageSize(data.pagination?.page_size || size);
     } catch (err) {
       setError(err.response?.data?.message || 'Gagal memuat customer');
     } finally {
@@ -40,11 +61,11 @@ export default function PosCustomersPage() {
   useEffect(() => {
     const timer = setTimeout(() => {
       setCurrentPage(1);
-      loadData(search);
+      loadData({ term: search, page: 1, size: pageSize });
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [search]);
+  }, [search, pageSize]);
 
   const getCustomerSourceLabel = (row) => {
     if (row.source_system === 'smartlink') return 'Smartlink';
@@ -80,7 +101,7 @@ export default function PosCustomersPage() {
       setPanelOpen(false);
       setForm(emptyCustomerForm);
       setEditingId(null);
-      await loadData();
+      await loadData({ term: search, page: currentPage, size: pageSize });
     } catch (err) {
       setError(err.response?.data?.message || 'Gagal menyimpan customer');
     } finally {
@@ -88,10 +109,19 @@ export default function PosCustomersPage() {
     }
   };
 
-  const pagination = useMemo(
-    () => paginateList(customers, currentPage, pageSize),
-    [customers, currentPage, pageSize]
-  );
+  const handleRefresh = () => {
+    loadData({ term: search, page: currentPage, size: pageSize });
+  };
+
+  const handlePageChange = (page) => {
+    loadData({ term: search, page, size: pageSize });
+  };
+
+  const handlePageSizeChange = (size) => {
+    setCurrentPage(1);
+    setPageSize(size);
+    loadData({ term: search, page: 1, size });
+  };
 
   return (
     <div className="p-3 sm:p-5 space-y-6 max-w-[1400px] mx-auto bg-slate-50 min-h-full">
@@ -111,7 +141,7 @@ export default function PosCustomersPage() {
         <div className="flex gap-3">
           <button
             type="button"
-            onClick={() => loadData()}
+            onClick={handleRefresh}
             className="inline-flex items-center gap-2 rounded-[12px] border border-slate-200 bg-white px-4 py-2.5 text-[13px] font-semibold text-slate-700 transition duration-150 hover:-translate-y-0.5 active:scale-[.98]"
           >
             <RefreshCw className="w-4 h-4" />
@@ -145,10 +175,7 @@ export default function PosCustomersPage() {
             <select
               className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400"
               value={pageSize}
-              onChange={(e) => {
-                setPageSize(Number(e.target.value));
-                setCurrentPage(1);
-              }}
+              onChange={(e) => handlePageSizeChange(Number(e.target.value))}
             >
               {PAGE_SIZE_OPTIONS.map((size) => (
                 <option key={size} value={size}>
@@ -192,7 +219,7 @@ export default function PosCustomersPage() {
                     </td>
                   </tr>
                 ) : (
-                  pagination.items.map((row) => (
+                  customers.map((row) => (
                     <tr
                       key={row.id || row.legacy_id_konsumen}
                       className="border-b border-gray-50 hover:bg-slate-50/40 transition-colors even:bg-slate-50/20"
@@ -246,10 +273,10 @@ export default function PosCustomersPage() {
 
         {!loading && (
           <TablePagination
-            totalItems={pagination.totalItems}
+            totalItems={pagination.total_items}
             page={pagination.page}
             pageSize={pageSize}
-            onPageChange={setCurrentPage}
+            onPageChange={handlePageChange}
             itemLabel="customer"
           />
         )}

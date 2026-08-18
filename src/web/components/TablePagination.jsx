@@ -27,11 +27,26 @@ export default function TablePagination({
   onPageSizeChange,
   itemLabel = 'baris',
 }) {
+  const MAX_VISIBLE_PAGES = 5;
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize) || 1);
   const safePage = Math.min(Math.max(1, page), totalPages);
   const offset = (safePage - 1) * pageSize;
   const start = totalItems === 0 ? 0 : offset + 1;
   const end = Math.min(offset + pageSize, totalItems);
+  const visibleCount = Math.min(MAX_VISIBLE_PAGES, totalPages);
+  const halfWindow = Math.floor(visibleCount / 2);
+  let startPage = Math.max(1, safePage - halfWindow);
+  let endPage = startPage + visibleCount - 1;
+
+  if (endPage > totalPages) {
+    endPage = totalPages;
+    startPage = Math.max(1, endPage - visibleCount + 1);
+  }
+
+  const visiblePages = Array.from(
+    { length: Math.max(0, endPage - startPage + 1) },
+    (_, idx) => startPage + idx
+  );
 
   return (
     <div className="flex flex-col gap-2 border-t border-slate-100 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
@@ -71,8 +86,7 @@ export default function TablePagination({
             <ChevronLeft className="w-3.5 h-3.5" />
           </button>
 
-          {Array.from({ length: totalPages }).map((_, idx) => {
-            const pageNum = idx + 1;
+          {visiblePages.map((pageNum) => {
             return (
               <button
                 key={pageNum}
