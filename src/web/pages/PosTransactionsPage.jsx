@@ -124,6 +124,15 @@ export default function PosTransactionsPage() {
     });
   };
 
+  const paginationTotalItems =
+    pagination.total_items > 0
+      ? pagination.total_items
+      : Number(summary?.total_transactions || transactions.length || 0);
+  const paginationTotalPages =
+    pagination.total_pages > 1
+      ? pagination.total_pages
+      : Math.max(1, Math.ceil(paginationTotalItems / pageSize) || 1);
+
   return (
     <div className="max-w-7xl mx-auto p-6 space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
@@ -279,7 +288,8 @@ export default function PosTransactionsPage() {
             </div>
 
             <TablePagination
-              totalItems={pagination.total_items}
+              totalItems={paginationTotalItems}
+              totalPages={paginationTotalPages}
               page={pagination.page}
               pageSize={pageSize}
               pageSizeOptions={PAGE_SIZE_OPTIONS}

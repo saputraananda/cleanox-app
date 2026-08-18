@@ -20,6 +20,7 @@ export function paginateList(items, page, pageSize = DEFAULT_PAGE_SIZE) {
 
 export default function TablePagination({
   totalItems,
+  totalPages: totalPagesProp,
   page,
   pageSize = DEFAULT_PAGE_SIZE,
   pageSizeOptions = PAGE_SIZE_OPTIONS,
@@ -28,11 +29,13 @@ export default function TablePagination({
   itemLabel = 'baris',
 }) {
   const MAX_VISIBLE_PAGES = 5;
-  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize) || 1);
+  const safeTotalItems = Math.max(0, Number(totalItems || 0));
+  const derivedTotalPages = Math.max(1, Math.ceil(safeTotalItems / pageSize) || 1);
+  const totalPages = Math.max(1, Number(totalPagesProp) || derivedTotalPages);
   const safePage = Math.min(Math.max(1, page), totalPages);
   const offset = (safePage - 1) * pageSize;
-  const start = totalItems === 0 ? 0 : offset + 1;
-  const end = Math.min(offset + pageSize, totalItems);
+  const start = safeTotalItems === 0 ? 0 : offset + 1;
+  const end = Math.min(offset + pageSize, safeTotalItems);
   const visibleCount = Math.min(MAX_VISIBLE_PAGES, totalPages);
   const halfWindow = Math.floor(visibleCount / 2);
   let startPage = Math.max(1, safePage - halfWindow);
@@ -53,7 +56,7 @@ export default function TablePagination({
       <p className="text-[12px] text-slate-400 font-medium">
         Menampilkan <span className="font-semibold">{start}</span> -{' '}
         <span className="font-semibold">{end}</span> dari{' '}
-        <span className="font-semibold">{totalItems}</span> {itemLabel}
+        <span className="font-semibold">{safeTotalItems}</span> {itemLabel}
       </p>
 
       <div className="flex items-center justify-between gap-2 sm:justify-end">
