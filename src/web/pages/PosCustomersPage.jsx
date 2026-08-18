@@ -46,6 +46,14 @@ export default function PosCustomersPage() {
     return () => clearTimeout(timer);
   }, [search]);
 
+  const getCustomerSourceLabel = (row) => {
+    if (row.source_system === 'smartlink') return 'Smartlink';
+    if (row.source_system === 'pos_legacy') return 'POS · Legacy';
+    return 'POS';
+  };
+
+  const canEditCustomer = (row) => Boolean(row.id) && !row.needs_ensure;
+
   const openCreate = () => {
     setEditingId(null);
     setForm(emptyCustomerForm);
@@ -167,7 +175,7 @@ export default function PosCustomersPage() {
                   <th className="px-3 sm:px-4 py-3 text-left text-[12px] font-semibold text-white/90 uppercase tracking-wider">Nama</th>
                   <th className="px-3 sm:px-4 py-3 text-left text-[12px] font-semibold text-white/90 uppercase tracking-wider">Telepon</th>
                   <th className="px-3 sm:px-4 py-3 text-left text-[12px] font-semibold text-white/90 uppercase tracking-wider">Alamat</th>
-                  <th className="px-3 sm:px-4 py-3 text-left text-[12px] font-semibold text-white/90 uppercase tracking-wider">Sumber</th>
+                  <th className="px-3 sm:px-4 py-3 text-left text-[12px] font-semibold text-white/90 uppercase tracking-wider">Asal Data</th>
                   <th className="px-3 sm:px-4 py-3 text-left text-[12px] font-semibold text-white/90 uppercase tracking-wider">Transaksi</th>
                   <th className="px-3 sm:px-4 py-3 text-left text-[12px] font-semibold text-white/90 uppercase tracking-wider">Tier</th>
                   <th className="px-3 sm:px-4 py-3 text-left text-[12px] font-semibold text-white/90 uppercase tracking-wider">Status</th>
@@ -185,18 +193,25 @@ export default function PosCustomersPage() {
                   </tr>
                 ) : (
                   pagination.items.map((row) => (
-                    <tr key={row.id} className="border-b border-gray-50 hover:bg-slate-50/40 transition-colors even:bg-slate-50/20">
+                    <tr
+                      key={row.id || row.legacy_id_konsumen}
+                      className="border-b border-gray-50 hover:bg-slate-50/40 transition-colors even:bg-slate-50/20"
+                    >
                       <td className="px-3 sm:px-4 py-2.5 font-medium text-gray-900">{row.name}</td>
                       <td className="px-3 sm:px-4 py-2.5 text-sm text-gray-700 whitespace-nowrap">{row.phone || '—'}</td>
                       <td className="px-3 sm:px-4 py-2.5 text-sm text-gray-700 max-w-sm truncate">
                         {row.address || '—'}
                       </td>
                       <td className="px-3 sm:px-4 py-2.5 text-sm text-gray-700">
-                        {row.referral_source_name
-                          ? row.referral_employee_name
-                            ? `${row.referral_source_name} · ${row.referral_employee_name}`
-                            : row.referral_source_name
-                          : '—'}
+                        <span
+                          className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                            row.source_system === 'smartlink'
+                              ? 'border-amber-200 bg-amber-50 text-amber-700'
+                              : 'border-blue-200 bg-blue-50 text-blue-700'
+                          }`}
+                        >
+                          {getCustomerSourceLabel(row)}
+                        </span>
                       </td>
                       <td className="px-3 sm:px-4 py-2.5 text-sm font-semibold text-gray-800">
                         {row.transaction_count || 0}
@@ -208,14 +223,18 @@ export default function PosCustomersPage() {
                         </span>
                       </td>
                       <td className="px-3 sm:px-4 py-2.5 text-right">
-                        <button
-                          type="button"
-                          onClick={() => openEdit(row)}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-[10px] border border-indigo-200 bg-indigo-50 text-indigo-600 transition duration-150 hover:-translate-y-0.5 hover:bg-indigo-100 active:scale-[.95]"
-                          aria-label="Edit customer"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
+                        {canEditCustomer(row) ? (
+                          <button
+                            type="button"
+                            onClick={() => openEdit(row)}
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-[10px] border border-indigo-200 bg-indigo-50 text-indigo-600 transition duration-150 hover:-translate-y-0.5 hover:bg-indigo-100 active:scale-[.95]"
+                            aria-label="Edit customer"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                        ) : (
+                          <span className="text-[11px] text-slate-400">Arsip Smartlink</span>
+                        )}
                       </td>
                     </tr>
                   ))

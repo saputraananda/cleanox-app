@@ -192,6 +192,32 @@ export default function PosTransactionCreatePage() {
     setCustomers(data.customers || []);
   };
 
+  const handleSelectCustomer = async (row) => {
+    setError('');
+    try {
+      if (row.needs_ensure && row.legacy_id_konsumen) {
+        const { data } = await api.post('/pos-customers/ensure-legacy', {
+          id_konsumen: row.legacy_id_konsumen,
+        });
+        setSelectedCustomer(data.customer);
+        return;
+      }
+      if (!row.id) {
+        setError('Customer belum valid');
+        return;
+      }
+      setSelectedCustomer(row);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Gagal menyiapkan customer');
+    }
+  };
+
+  const getCustomerSourceLabel = (row) => {
+    if (row.source_system === 'smartlink') return 'Smartlink';
+    if (row.source_system === 'pos_legacy') return 'POS · Legacy';
+    return 'POS';
+  };
+
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
@@ -870,9 +896,9 @@ export default function PosTransactionCreatePage() {
               ) : (
                 customers.map((row) => (
                   <button
-                    key={row.id}
+                    key={row.id || row.legacy_id_konsumen}
                     type="button"
-                    onClick={() => setSelectedCustomer(row)}
+                    onClick={() => handleSelectCustomer(row)}
                     className="rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3.5 text-left transition duration-150 hover:-translate-y-0.5 hover:border-blue-300 hover:bg-white active:scale-[.98]"
                   >
                     <div className="flex items-start gap-3">
@@ -883,7 +909,18 @@ export default function PosTransactionCreatePage() {
                         {getInitials(row.name) || 'C'}
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="text-[13px] font-bold text-slate-800 truncate">{row.name}</div>
+                        <div className="flex items-center gap-2">
+                          <div className="text-[13px] font-bold text-slate-800 truncate">{row.name}</div>
+                          <span
+                            className={`inline-flex shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                              row.source_system === 'smartlink'
+                                ? 'border-amber-200 bg-amber-50 text-amber-700'
+                                : 'border-blue-200 bg-blue-50 text-blue-700'
+                            }`}
+                          >
+                            {getCustomerSourceLabel(row)}
+                          </span>
+                        </div>
                         <div className="mt-1 text-[11.5px] text-slate-500">
                           {row.phone || 'Tanpa telepon'}
                         </div>

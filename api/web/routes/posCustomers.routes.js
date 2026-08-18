@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authenticate } from '../../shared/middleware/auth.middleware.js';
 import {
   createPosCustomer,
+  ensureLegacyCustomer,
   getPosCustomerDetail,
   getPosCustomers,
   getWaschenEmployees,
@@ -30,6 +31,7 @@ router.use(authenticate);
 router.use(authorizePosAccess);
 
 router.get('/waschen-employees', getWaschenEmployees);
+router.post('/ensure-legacy', ensureLegacyCustomer);
 router.get('/', getPosCustomers);
 router.get('/:id', getPosCustomerDetail);
 router.post('/', createPosCustomer);
