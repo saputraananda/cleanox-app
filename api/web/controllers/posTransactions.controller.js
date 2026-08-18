@@ -447,8 +447,30 @@ export const getPosSummary = async (_req, res) => {
 export const getPosTransactions = async (req, res) => {
   const search = String(req.query.search || '').trim();
   const status = String(req.query.status || '').trim();
+  const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+  const pageSize = Math.min(50, Math.max(1, Number.parseInt(req.query.page_size, 10) || 10));
+  const offset = (page - 1) * pageSize;
 
   try {
+    let fromSql = `
+      FROM v_transactions_unified v
+      WHERE 1 = 1`;
+    const filterParams = [];
+
+    if (search) {
+      fromSql += ` AND (
+        v.transaction_no LIKE ?
+        OR v.customer_name LIKE ?
+        OR COALESCE(v.customer_phone, '') LIKE ?
+      )`;
+      filterParams.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    }
+
+    if (status) {
+      fromSql += ` AND v.status = ?`;
+      filterParams.push(status);
+    }
+
     let sql = `
       SELECT
         v.id,
@@ -469,28 +491,19 @@ export const getPosTransactions = async (req, res) => {
         v.outlet,
         v.is_historical,
         v.pos_transaction_id
-      FROM v_transactions_unified v
-      WHERE 1 = 1`;
-    const params = [];
+      ${fromSql}
+      ORDER BY v.created_at DESC, v.transaction_no DESC
+      LIMIT ? OFFSET ?`;
 
-    if (search) {
-      sql += ` AND (
-        v.transaction_no LIKE ?
-        OR v.customer_name LIKE ?
-        OR COALESCE(v.customer_phone, '') LIKE ?
-      )`;
-      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
-    }
+    const countSql = `SELECT COUNT(*) AS total ${fromSql}`;
 
-    if (status) {
-      sql += ` AND v.status = ?`;
-      params.push(status);
-    }
+    const [[countRow], [rows]] = await Promise.all([
+      cleanoxPool.query(countSql, filterParams),
+      cleanoxPool.query(sql, [...filterParams, pageSize, offset]),
+    ]);
+    const totalItems = Number(countRow?.total || 0);
+    const totalPages = Math.max(1, Math.ceil(totalItems / pageSize) || 1);
 
-    sql += `
-      ORDER BY v.created_at DESC, v.transaction_no DESC`;
-
-    const [rows] = await cleanoxPool.query(sql, params);
     return res.json({
       transactions: rows.map((row) => ({
         ...row,
@@ -503,6 +516,12 @@ export const getPosTransactions = async (req, res) => {
         is_historical: Boolean(Number(row.is_historical || 0)),
         pos_transaction_id: row.pos_transaction_id == null ? null : Number(row.pos_transaction_id),
       })),
+      pagination: {
+        page,
+        page_size: pageSize,
+        total_items: totalItems,
+        total_pages: totalPages,
+      },
     });
   } catch (error) {
     console.error('[pos/getPosTransactions]', error.message);
