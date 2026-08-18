@@ -74,7 +74,7 @@ export default function PosTransactionsPage() {
           <p className="text-[9.5px] font-semibold uppercase tracking-[.14em] text-blue-700">Cleanox Only</p>
           <h1 className="text-[22px] font-extrabold tracking-[-0.01em] text-slate-900 mt-1">Riwayat Transaksi</h1>
           <p className="text-sm text-slate-500 mt-2">
-            Jalur transaksi POS baru yang terpisah dari tracking produksi existing.
+            Histori transaksi gabungan dari POS dan arsip Smartlink.
           </p>
         </div>
 
@@ -135,7 +135,7 @@ export default function PosTransactionsPage() {
         {error && <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</div>}
 
         {loading ? (
-          <div className="py-14 text-center text-sm text-slate-500">Memuat transaksi POS...</div>
+          <div className="py-14 text-center text-sm text-slate-500">Memuat histori transaksi...</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full text-[15px]">
@@ -156,21 +156,40 @@ export default function PosTransactionsPage() {
                 {transactions.length === 0 ? (
                   <tr>
                     <td colSpan={9} className="px-3 py-10 text-center text-slate-400">
-                      Belum ada transaksi POS.
+                      Belum ada histori transaksi.
                     </td>
                   </tr>
                 ) : (
                   transactions.map((row) => (
-                    <tr key={row.id} className="hover:bg-slate-50">
-                      <td className="px-3 py-3 font-semibold text-brand-700">{row.transaction_no}</td>
+                    <tr
+                      key={`${row.source_system}-${row.pos_transaction_id || row.transaction_no}`}
+                      className="hover:bg-slate-50"
+                    >
+                      <td className="px-3 py-3">
+                        <div className="font-semibold text-brand-700">{row.transaction_no}</div>
+                        <div className="mt-1">
+                          <span
+                            className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                              row.source_system === 'smartlink'
+                                ? 'border-amber-200 bg-amber-50 text-amber-700'
+                                : 'border-blue-200 bg-blue-50 text-blue-700'
+                            }`}
+                          >
+                            {row.source_system === 'smartlink' ? 'Smartlink' : 'POS'}
+                          </span>
+                        </div>
+                      </td>
                       <td className="px-3 py-3">
                         <div className="font-medium text-slate-800">{row.customer_name}</div>
                         <div className="text-sm text-slate-400">{row.customer_phone || '-'}</div>
+                        {row.outlet ? (
+                          <div className="text-xs text-slate-400 mt-1">{row.outlet}</div>
+                        ) : null}
                       </td>
                       <td className="px-3 py-3 text-slate-600">{formatDateTime(row.service_date)}</td>
-                      <td className="px-3 py-3 text-slate-600">{row.total_people}</td>
+                      <td className="px-3 py-3 text-slate-600">{row.total_people ?? '-'}</td>
                       <td className="px-3 py-3 text-slate-600">{row.total_items}</td>
-                      <td className="px-3 py-3 text-slate-600">{row.total_workers}</td>
+                      <td className="px-3 py-3 text-slate-600">{row.total_workers ?? '-'}</td>
                       <td className="px-3 py-3">
                         <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-sm font-semibold text-slate-700">
                           {row.status}
@@ -182,13 +201,17 @@ export default function PosTransactionsPage() {
                           : formatCurrency(row.final_amount)}
                       </td>
                       <td className="px-3 py-3 text-right">
-                        <Link
-                          to={`/cleanox-only/transactions/${row.id}`}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-[10px] border border-blue-200 bg-blue-50 text-blue-700 transition duration-150 hover:-translate-y-0.5 hover:bg-blue-100 active:scale-[.95]"
-                          aria-label="Detail transaksi"
-                        >
-                          <ArrowRight className="w-4 h-4" />
-                        </Link>
+                        {row.source_system === 'pos' && row.pos_transaction_id ? (
+                          <Link
+                            to={`/cleanox-only/transactions/${row.pos_transaction_id}`}
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-[10px] border border-blue-200 bg-blue-50 text-blue-700 transition duration-150 hover:-translate-y-0.5 hover:bg-blue-100 active:scale-[.95]"
+                            aria-label="Detail transaksi"
+                          >
+                            <ArrowRight className="w-4 h-4" />
+                          </Link>
+                        ) : (
+                          <span className="text-[11px] text-slate-400">Arsip Smartlink</span>
+                        )}
                       </td>
                     </tr>
                   ))

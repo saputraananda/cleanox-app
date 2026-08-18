@@ -451,57 +451,57 @@ export const getPosTransactions = async (req, res) => {
   try {
     let sql = `
       SELECT
-        t.id,
-        t.transaction_no,
-        t.customer_name,
-        t.customer_phone,
-        t.service_date,
-        t.total_people,
-        t.final_amount,
-        t.pricing_finalized_at,
-        t.service_mode,
-        t.status,
-        t.created_at,
-        COUNT(DISTINCT i.id) AS total_items,
-        COUNT(DISTINCT a.id) AS total_workers,
-        SUM(CASE WHEN c.name = 'General Cleaning' THEN 1 ELSE 0 END) AS gc_item_count
-      FROM tr_transactions t
-      LEFT JOIN tr_transaction_items i ON i.transaction_id = t.id
-      LEFT JOIN mst_services s ON s.id = i.service_id
-      LEFT JOIN mst_category c ON c.id = s.category_id
-      LEFT JOIN tr_worker_assignments a ON a.transaction_id = t.id
+        v.id,
+        v.source_system,
+        v.transaction_no,
+        v.customer_name,
+        v.customer_phone,
+        v.service_date,
+        v.completed_date,
+        v.total_people,
+        v.total_items,
+        v.total_workers,
+        v.final_amount,
+        v.pricing_pending,
+        v.service_mode,
+        v.status,
+        v.created_at,
+        v.outlet,
+        v.is_historical,
+        v.pos_transaction_id
+      FROM v_transactions_unified v
       WHERE 1 = 1`;
     const params = [];
 
     if (search) {
       sql += ` AND (
-        t.transaction_no LIKE ?
-        OR t.customer_name LIKE ?
-        OR COALESCE(t.customer_phone, '') LIKE ?
+        v.transaction_no LIKE ?
+        OR v.customer_name LIKE ?
+        OR COALESCE(v.customer_phone, '') LIKE ?
       )`;
       params.push(`%${search}%`, `%${search}%`, `%${search}%`);
     }
 
     if (status) {
-      sql += ` AND t.status = ?`;
+      sql += ` AND v.status = ?`;
       params.push(status);
     }
 
     sql += `
-      GROUP BY
-        t.id, t.transaction_no, t.customer_name, t.customer_phone,
-        t.service_date, t.total_people, t.final_amount, t.pricing_finalized_at,
-        t.service_mode, t.status, t.created_at
-      ORDER BY t.created_at DESC`;
+      ORDER BY v.created_at DESC, v.transaction_no DESC`;
 
     const [rows] = await cleanoxPool.query(sql, params);
     return res.json({
       transactions: rows.map((row) => ({
         ...row,
+        source_system: row.source_system,
         final_amount: Number(row.final_amount || 0),
-        has_gc: Number(row.gc_item_count || 0) > 0,
-        pricing_pending:
-          Number(row.gc_item_count || 0) > 0 && !row.pricing_finalized_at,
+        total_people: row.total_people == null ? null : Number(row.total_people),
+        total_items: Number(row.total_items || 0),
+        total_workers: row.total_workers == null ? null : Number(row.total_workers),
+        pricing_pending: Boolean(Number(row.pricing_pending || 0)),
+        is_historical: Boolean(Number(row.is_historical || 0)),
+        pos_transaction_id: row.pos_transaction_id == null ? null : Number(row.pos_transaction_id),
       })),
     });
   } catch (error) {
