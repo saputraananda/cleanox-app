@@ -417,11 +417,11 @@ export const getPosSummary = async (_req, res) => {
     const [summaryRows] = await cleanoxPool.query(
       `SELECT
         COUNT(*) AS total_transactions,
-        SUM(CASE WHEN status IN ('Draft', 'Waiting_Confirmation') THEN 1 ELSE 0 END) AS incoming_transactions,
+        SUM(CASE WHEN status IN ('Draft', 'Waiting_Confirmation', 'Belum Lunas') THEN 1 ELSE 0 END) AS incoming_transactions,
         SUM(CASE WHEN status IN ('Assigned', 'Scheduled', 'In_Progress') THEN 1 ELSE 0 END) AS active_transactions,
-        SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed_transactions,
+        SUM(CASE WHEN status IN ('Completed', 'Lunas') THEN 1 ELSE 0 END) AS completed_transactions,
         COALESCE(SUM(final_amount), 0) AS total_revenue
-      FROM tr_transactions`
+      FROM v_transactions_unified`
     );
 
     const [trackingRows] = await cleanoxPool.query(
