@@ -125,15 +125,13 @@ function toMoney(value) {
 }
 
 /**
- * Finalize GC pricing (once).
- * - With endAfterPhotoAt: window = earliest started_at → after time (first after path).
- * - Without: fallback Done window (completeTask path).
+ * Finalize GC pricing from an explicit job window (admin history entry or mobile finalize).
  * Must run inside an open DB transaction; throws on invalid duration (caller should rollback).
  */
-export async function finalizeGeneralCleaningPricing(
+export async function finalizeGeneralCleaningPricingFromWindow(
   connection,
   transactionId,
-  { actorId = null, endAfterPhotoAt = null } = {}
+  { startedAt, completedAt, actorId = null, trackingTitle = 'Pricing finalized' } = {}
 ) {
   if (!transactionId) return { finalized: false };
 
@@ -161,17 +159,7 @@ export async function finalizeGeneralCleaningPricing(
     return { finalized: false };
   }
 
-  const [assignments] = await connection.query(
-    `SELECT id, employee_id, employee_name, assignment_status, started_at, completed_at, after_photo_at
-     FROM tr_worker_assignments
-     WHERE transaction_id = ?`,
-    [transactionId]
-  );
-
-  const window = endAfterPhotoAt
-    ? resolveGcJobWindowFromAfter(assignments, { endAfterPhotoAt })
-    : resolveGcJobWindow(assignments);
-  const billingHours = calculateGcBillingHours(window);
+  const billingHours = calculateGcBillingHours({ startedAt, completedAt });
 
   let subtotal = 0;
   let discount = 0;
@@ -295,10 +283,63 @@ export async function finalizeGeneralCleaningPricing(
     connection,
     transactionId,
     'Completed',
-    'Pricing finalized',
+    trackingTitle,
     `General Cleaning difinalisasi: ${billingHours} jam · total ${toMoney(finalAmount)}`,
     actorId
   );
 
   return { finalized: true, billingHours, finalAmount };
+}
+
+/**
+ * Finalize GC pricing (once).
+ * - With endAfterPhotoAt: window = earliest started_at → after time (first after path).
+ * - Without: fallback Done window (completeTask path).
+ * Must run inside an open DB transaction; throws on invalid duration (caller should rollback).
+ */
+export async function finalizeGeneralCleaningPricing(
+  connection,
+  transactionId,
+  { actorId = null, endAfterPhotoAt = null } = {}
+) {
+  if (!transactionId) return { finalized: false };
+
+  const [[tx]] = await connection.query(
+    `SELECT id, pricing_finalized_at FROM tr_transactions WHERE id = ?`,
+    [transactionId]
+  );
+  if (!tx) return { finalized: false };
+  if (tx.pricing_finalized_at) return { finalized: false, already: true };
+
+  const [items] = await connection.query(
+    `SELECT
+      i.id,
+      c.name AS category_name
+     FROM tr_transaction_items i
+     INNER JOIN mst_services s ON s.id = i.service_id
+     LEFT JOIN mst_category c ON c.id = s.category_id
+     WHERE i.transaction_id = ?`,
+    [transactionId]
+  );
+
+  if (!transactionHasGeneralCleaning(items)) {
+    return { finalized: false };
+  }
+
+  const [assignments] = await connection.query(
+    `SELECT id, employee_id, employee_name, assignment_status, started_at, completed_at, after_photo_at
+     FROM tr_worker_assignments
+     WHERE transaction_id = ?`,
+    [transactionId]
+  );
+
+  const window = endAfterPhotoAt
+    ? resolveGcJobWindowFromAfter(assignments, { endAfterPhotoAt })
+    : resolveGcJobWindow(assignments);
+
+  return finalizeGeneralCleaningPricingFromWindow(connection, transactionId, {
+    startedAt: window.startedAt,
+    completedAt: window.completedAt,
+    actorId,
+  });
 }

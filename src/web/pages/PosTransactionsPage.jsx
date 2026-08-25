@@ -234,7 +234,7 @@ export default function PosTransactionsPage() {
                       >
                         <td className="px-3 py-3">
                           <div className="font-semibold text-brand-700">{row.transaction_no}</div>
-                          <div className="mt-1">
+                          <div className="mt-1 flex flex-wrap gap-1">
                             <span
                               className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
                                 row.source_system === 'smartlink'
@@ -244,6 +244,11 @@ export default function PosTransactionsPage() {
                             >
                               {row.source_system === 'smartlink' ? 'Smartlink' : 'POS'}
                             </span>
+                            {row.is_history_entry ? (
+                              <span className="inline-flex rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700">
+                                History
+                              </span>
+                            ) : null}
                           </div>
                         </td>
                         <td className="px-3 py-3">

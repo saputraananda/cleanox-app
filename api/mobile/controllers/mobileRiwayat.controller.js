@@ -29,6 +29,7 @@ export const listMyRiwayat = async (req, res) => {
        FROM tr_worker_assignments a
        INNER JOIN tr_transactions t ON t.id = a.transaction_id
        WHERE a.employee_id = ?
+         AND COALESCE(t.is_history_entry, 0) = 0
          AND (
            a.responded_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
            OR a.started_at >= DATE_SUB(NOW(), INTERVAL ? DAY)

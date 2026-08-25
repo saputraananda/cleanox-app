@@ -190,7 +190,8 @@ async function getAssignmentOwnedByUser(assignmentId, employeeId) {
       t.service_mode
      FROM tr_worker_assignments a
      INNER JOIN tr_transactions t ON t.id = a.transaction_id
-     WHERE a.id = ? AND a.employee_id = ?`,
+     WHERE a.id = ? AND a.employee_id = ?
+       AND COALESCE(t.is_history_entry, 0) = 0`,
     [assignmentId, employeeId]
   );
   return row || null;
@@ -432,6 +433,7 @@ export const listMyTasks = async (req, res) => {
        FROM tr_worker_assignments a
        INNER JOIN tr_transactions t ON t.id = a.transaction_id
        WHERE a.employee_id = ?
+       AND COALESCE(t.is_history_entry, 0) = 0
        ${statusSql}
        ${dateSql}
        ORDER BY t.service_date ASC, a.id DESC`,
@@ -604,6 +606,7 @@ export const acceptTask = async (req, res) => {
        FROM tr_worker_assignments a
        INNER JOIN tr_transactions t ON t.id = a.transaction_id
        WHERE a.id = ? AND a.employee_id = ?
+         AND COALESCE(t.is_history_entry, 0) = 0
        FOR UPDATE`,
       [assignmentId, employeeId]
     );
@@ -669,6 +672,7 @@ export const startTask = async (req, res) => {
        FROM tr_worker_assignments a
        INNER JOIN tr_transactions t ON t.id = a.transaction_id
        WHERE a.id = ? AND a.employee_id = ?
+         AND COALESCE(t.is_history_entry, 0) = 0
        FOR UPDATE`,
       [assignmentId, employeeId]
     );
@@ -793,6 +797,7 @@ export const advanceTakehomeStage = async (req, res) => {
        FROM tr_worker_assignments a
        INNER JOIN tr_transactions t ON t.id = a.transaction_id
        WHERE a.id = ? AND a.employee_id = ?
+         AND COALESCE(t.is_history_entry, 0) = 0
        FOR UPDATE`,
       [assignmentId, employeeId]
     );
@@ -960,6 +965,7 @@ export const uploadAfterPhoto = async (req, res) => {
        FROM tr_worker_assignments a
        INNER JOIN tr_transactions t ON t.id = a.transaction_id
        WHERE a.id = ? AND a.employee_id = ?
+         AND COALESCE(t.is_history_entry, 0) = 0
        FOR UPDATE`,
       [assignmentId, employeeId]
     );
@@ -1226,6 +1232,7 @@ export const completeTask = async (req, res) => {
        FROM tr_worker_assignments a
        INNER JOIN tr_transactions t ON t.id = a.transaction_id
        WHERE a.id = ? AND a.employee_id = ?
+         AND COALESCE(t.is_history_entry, 0) = 0
        FOR UPDATE`,
       [assignmentId, employeeId]
     );
@@ -1324,6 +1331,7 @@ export const rejectTask = async (req, res) => {
        FROM tr_worker_assignments a
        INNER JOIN tr_transactions t ON t.id = a.transaction_id
        WHERE a.id = ? AND a.employee_id = ?
+         AND COALESCE(t.is_history_entry, 0) = 0
        FOR UPDATE`,
       [assignmentId, employeeId]
     );

@@ -433,6 +433,15 @@ export default function PosTransactionDetailPage() {
 
   const { transaction, items, assignments, tracking, customer_photos: customerPhotos = [], takehome_progress: takehomeProgress } = detail;
   const isTakeHome = String(transaction.service_mode || 'home_service') === 'take_home';
+  const isHistoryEntry = Boolean(transaction.is_history_entry);
+  const historyStartedAt = (assignments || [])
+    .map((row) => row.started_at)
+    .filter(Boolean)
+    .sort((a, b) => new Date(a) - new Date(b))[0] || null;
+  const historyEndedAt = (assignments || [])
+    .map((row) => row.completed_at)
+    .filter(Boolean)
+    .sort((a, b) => new Date(b) - new Date(a))[0] || null;
   const serviceDateKey = toDateKeyJakarta(transaction.service_date);
   const tomorrowKey = addDaysKey(todayKeyJakarta(), 1);
   const hasProgressOrDone = (assignments || []).some((row) =>
@@ -441,11 +450,12 @@ export default function PosTransactionDetailPage() {
   const isTerminalStatus = ['Completed', 'Cancelled'].includes(transaction.status);
   const hasGc = transactionHasGeneralCleaning(items);
   const canReschedule =
+    !isHistoryEntry &&
     !isTerminalStatus &&
     Boolean(serviceDateKey) &&
     serviceDateKey >= tomorrowKey &&
     !hasProgressOrDone;
-  const canCancel = !isTerminalStatus;
+  const canCancel = !isHistoryEntry && !isTerminalStatus;
   const canUploadCustomerPhotos =
     transaction.status !== 'Cancelled' && customerPhotos.length < 10;
 
@@ -546,6 +556,11 @@ export default function PosTransactionDetailPage() {
           </Link>
           <h1 className="mt-2 text-2xl font-bold text-slate-900">{transaction.transaction_no}</h1>
           <p className="mt-1 text-sm text-slate-500">{transaction.customer_name} • {itemSummary}</p>
+          {isHistoryEntry && (
+            <span className="mt-2 inline-flex rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700">
+              Input History
+            </span>
+          )}
         </div>
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
           <button
@@ -617,6 +632,17 @@ export default function PosTransactionDetailPage() {
               <p className="mt-1 font-semibold text-slate-900">{formatDateTime(transaction.service_date)}</p>
               <p className="text-sm text-slate-500">{transaction.total_people} orang</p>
             </div>
+            {isHistoryEntry && (
+              <div>
+                <p className="text-xs uppercase tracking-wide text-slate-400">Jam Mulai / Selesai</p>
+                <p className="mt-1 font-semibold text-slate-900">
+                  {historyStartedAt ? formatDateTime(historyStartedAt) : '-'}
+                </p>
+                <p className="text-sm text-slate-500">
+                  s/d {historyEndedAt ? formatDateTime(historyEndedAt) : '-'}
+                </p>
+              </div>
+            )}
             <div>
               <p className="text-xs uppercase tracking-wide text-slate-400">Status</p>
               <p className="mt-1 font-semibold text-slate-900">{transaction.status}</p>
@@ -641,6 +667,7 @@ export default function PosTransactionDetailPage() {
             </div>
           </div>
 
+          {!isHistoryEntry && (
           <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 space-y-4">
             <div>
               <p className="text-sm font-semibold text-slate-900">Ubah / Batalkan Jadwal</p>
@@ -696,6 +723,7 @@ export default function PosTransactionDetailPage() {
               </button>
             </div>
           </div>
+          )}
 
           <div className="overflow-x-auto rounded-xl border border-slate-200">
             <table className="min-w-full text-[15px]">
@@ -755,6 +783,7 @@ export default function PosTransactionDetailPage() {
               </span>
             )}
           </div>
+          {!isHistoryEntry && (
           <form onSubmit={handleAssignmentSubmit} className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">
               {workers.map((worker) => {
@@ -800,18 +829,23 @@ export default function PosTransactionDetailPage() {
               Simpan Assignment
             </button>
           </form>
+          )}
 
           <div className="rounded-xl border border-slate-200 p-4">
             <p className="text-sm font-semibold text-slate-900">Worker aktif pada transaksi ini</p>
             <ul className="mt-3 space-y-2 text-sm text-slate-600">
               {(assignments || []).filter((item) =>
-                ['Assigned', 'In_Schedule', 'On_Progress'].includes(item.assignment_status)
+                isHistoryEntry
+                  ? item.assignment_status === 'Done'
+                  : ['Assigned', 'In_Schedule', 'On_Progress'].includes(item.assignment_status)
               ).length === 0 ? (
                 <li>Belum ada worker ditugaskan.</li>
               ) : (
                 (assignments || [])
                   .filter((item) =>
-                    ['Assigned', 'In_Schedule', 'On_Progress'].includes(item.assignment_status)
+                    isHistoryEntry
+                      ? item.assignment_status === 'Done'
+                      : ['Assigned', 'In_Schedule', 'On_Progress'].includes(item.assignment_status)
                   )
                   .map((item) => (
                     <li key={item.id}>
@@ -861,6 +895,7 @@ export default function PosTransactionDetailPage() {
           )}
         </section>
 
+        {!isHistoryEntry && (
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
           <h2 className="text-lg font-semibold text-slate-900">Pesan & Notifikasi</h2>
 
@@ -916,6 +951,7 @@ export default function PosTransactionDetailPage() {
             </div>
           </div>
         </section>
+        )}
       </div>
 
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">

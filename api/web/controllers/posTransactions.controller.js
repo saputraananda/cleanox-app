@@ -7,6 +7,8 @@ import cleanoxPool, { aloraPool } from '../../shared/db/cleanox.js';
 import { buildCustomerOrderMessage } from '../../shared/utils/posCustomerOrderMessage.js';
 import { buildGroupOrderMessage } from '../../shared/utils/posGroupOrderMessage.js';
 import {
+  calculateGcBillingHours,
+  finalizeGeneralCleaningPricingFromWindow,
   isGeneralCleaningCategory,
   parseGcCrewSizeFromServiceName,
 } from '../../shared/utils/posGeneralCleaningBilling.js';
@@ -154,6 +156,20 @@ function formatMysqlDateTime(value) {
   const date = new Date(raw);
   if (Number.isNaN(date.getTime())) return null;
   return date.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function parseTruthyFlag(value) {
+  if (value === true || value === 1 || value === '1') return true;
+  if (typeof value === 'string' && value.trim().toLowerCase() === 'true') return true;
+  return false;
+}
+
+function parseJobDateTime(value) {
+  const formatted = formatMysqlDateTime(value);
+  if (!formatted || !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(formatted)) return null;
+  const parsed = new Date(formatted.replace(' ', 'T'));
+  if (Number.isNaN(parsed.getTime())) return null;
+  return { mysql: formatted.length === 16 ? `${formatted}:00` : formatted.slice(0, 19), date: parsed };
 }
 
 async function compressCustomerPhoto(buffer) {
@@ -495,7 +511,8 @@ export const getPosTransactions = async (req, res) => {
         v.created_at,
         v.outlet,
         v.is_historical,
-        v.pos_transaction_id
+        v.pos_transaction_id,
+        v.is_history_entry
       ${fromSql}
       ORDER BY v.created_at DESC, v.transaction_no DESC
       LIMIT ? OFFSET ?`;
@@ -519,6 +536,7 @@ export const getPosTransactions = async (req, res) => {
         total_workers: row.total_workers == null ? null : Number(row.total_workers),
         pricing_pending: Boolean(Number(row.pricing_pending || 0)),
         is_historical: Boolean(Number(row.is_historical || 0)),
+        is_history_entry: Boolean(Number(row.is_history_entry || 0)),
         pos_transaction_id: row.pos_transaction_id == null ? null : Number(row.pos_transaction_id),
       })),
       pagination: {
@@ -656,9 +674,12 @@ export const getPosTransactionDetail = async (req, res) => {
       transaction: {
         ...transaction,
         service_mode: transaction.service_mode || 'home_service',
+        is_history_entry: Boolean(Number(transaction.is_history_entry || 0)),
         subtotal_amount: Number(transaction.subtotal_amount || 0),
         discount_amount: Number(transaction.discount_amount || 0),
         final_amount: Number(transaction.final_amount || 0),
+        billing_hours:
+          transaction.billing_hours == null ? null : Number(transaction.billing_hours),
       },
       items: items.map((item) => ({
         ...item,
@@ -789,15 +810,38 @@ export const createPosTransaction = async (req, res) => {
     items,
     worker_ids,
     service_mode: serviceModeRaw,
+    job_started_at: jobStartedRaw,
+    job_ended_at: jobEndedRaw,
   } = req.body;
 
-  const service_mode = String(serviceModeRaw || 'home_service').trim();
+  const isHistoryEntry = parseTruthyFlag(req.body?.is_history_entry);
+  const service_mode = isHistoryEntry
+    ? 'home_service'
+    : String(serviceModeRaw || 'home_service').trim();
 
   if (!customer_id || !service_date || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ message: 'Customer, tanggal layanan, dan item wajib diisi' });
   }
   if (!isValidServiceMode(service_mode)) {
     return res.status(400).json({ message: 'service_mode wajib home_service atau take_home' });
+  }
+
+  let historyStarted = null;
+  let historyEnded = null;
+  if (isHistoryEntry) {
+    historyStarted = parseJobDateTime(jobStartedRaw || service_date);
+    historyEnded = parseJobDateTime(jobEndedRaw);
+    if (!historyStarted || !historyEnded) {
+      return res.status(400).json({ message: 'Jam mulai dan jam selesai wajib diisi' });
+    }
+    try {
+      calculateGcBillingHours({
+        startedAt: historyStarted.date,
+        completedAt: historyEnded.date,
+      });
+    } catch {
+      return res.status(400).json({ message: 'Jam selesai harus setelah jam mulai' });
+    }
   }
 
   const connection = await cleanoxPool.getConnection();
@@ -879,6 +923,24 @@ export const createPosTransaction = async (req, res) => {
         });
       }
       gcCrewSize = uniqueCrew[0];
+    }
+
+    if (isHistoryEntry) {
+      if (!hasGc) {
+        await connection.rollback();
+        return res.status(400).json({
+          message: 'Input Transaksi History hanya untuk General Cleaning',
+        });
+      }
+      for (const rawItem of items) {
+        const service = servicesMap.get(Number(rawItem.service_id));
+        if (!service || !isGeneralCleaningCategory(service.category_name)) {
+          await connection.rollback();
+          return res.status(400).json({
+            message: 'Semua item harus General Cleaning untuk Input Transaksi History',
+          });
+        }
+      }
     }
 
     const totalPeopleCount = Math.max(1, Number(total_people || 1));
@@ -981,6 +1043,7 @@ export const createPosTransaction = async (req, res) => {
 
     const finalAmount = subtotal - discount;
     const transactionNo = buildTransactionNo();
+    const resolvedServiceDate = isHistoryEntry ? historyStarted.mysql : service_date;
 
     let assignedWorkers = [];
     if (uniqueWorkerIds.length > 0) {
@@ -994,14 +1057,16 @@ export const createPosTransaction = async (req, res) => {
       );
       assignedWorkers = workerRows;
 
-      const busyIds = await getBusyEmployeeIdsOnServiceDate(connection, service_date);
-      const busyWorkers = assignedWorkers.filter((w) => busyIds.has(Number(w.employee_id)));
-      if (busyWorkers.length > 0) {
-        await connection.rollback();
-        const names = busyWorkers.map((w) => w.full_name).join(', ');
-        return res.status(400).json({
-          message: `Worker already has an active task at the same service date and time: ${names}`,
-        });
+      if (!isHistoryEntry) {
+        const busyIds = await getBusyEmployeeIdsOnServiceDate(connection, service_date);
+        const busyWorkers = assignedWorkers.filter((w) => busyIds.has(Number(w.employee_id)));
+        if (busyWorkers.length > 0) {
+          await connection.rollback();
+          const names = busyWorkers.map((w) => w.full_name).join(', ');
+          return res.status(400).json({
+            message: `Worker already has an active task at the same service date and time: ${names}`,
+          });
+        }
       }
     }
 
@@ -1025,7 +1090,7 @@ export const createPosTransaction = async (req, res) => {
       customerName: snapshotName,
       customerPhone: snapshotPhone,
       customerAddress: snapshotAddress,
-      serviceDate: service_date,
+      serviceDate: resolvedServiceDate,
       items: messageItems,
       totalPeople: totalPeopleCount,
       notes: notes || null,
@@ -1041,26 +1106,28 @@ export const createPosTransaction = async (req, res) => {
       customerName: snapshotName,
       customerPhone: snapshotPhone,
       customerAddress: snapshotAddress,
-      serviceDate: service_date,
+      serviceDate: resolvedServiceDate,
       items: messageItems,
       totalPeople: totalPeopleCount,
       finalAmount,
       pricingFinalized: false,
     });
 
+    const initialStatus = isHistoryEntry ? 'Completed' : 'Draft';
+
     const [result] = await connection.query(
       `INSERT INTO tr_transactions
         (transaction_no, customer_id, customer_name, customer_phone, customer_address, service_date, total_people,
          subtotal_amount, discount_amount, final_amount, billing_hours, pricing_finalized_at, notes,
-         group_message_template, customer_message_template, service_mode, status, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)`,
+         group_message_template, customer_message_template, service_mode, is_history_entry, status, created_by, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         transactionNo,
         customer.id,
         snapshotName,
         snapshotPhone,
         snapshotAddress,
-        service_date,
+        resolvedServiceDate,
         totalPeopleCount,
         toMoney(subtotal),
         toMoney(discount),
@@ -1069,7 +1136,8 @@ export const createPosTransaction = async (req, res) => {
         groupMessageTemplate,
         customerMessageTemplate,
         service_mode,
-        'Draft',
+        isHistoryEntry ? 1 : 0,
+        initialStatus,
         req.user?.id || null,
         req.user?.id || null,
       ]
@@ -1110,24 +1178,41 @@ export const createPosTransaction = async (req, res) => {
     }
 
     for (const worker of assignedWorkers) {
-      await connection.query(
-        `INSERT INTO tr_worker_assignments
-          (transaction_id, employee_id, employee_name, assignment_status)
-         VALUES (?, ?, ?, ?)`,
-        [transactionId, worker.employee_id, worker.full_name, 'Assigned']
-      );
+      if (isHistoryEntry) {
+        await connection.query(
+          `INSERT INTO tr_worker_assignments
+            (transaction_id, employee_id, employee_name, assignment_status, assigned_at, responded_at, started_at, completed_at)
+           VALUES (?, ?, ?, 'Done', NOW(), NOW(), ?, ?)`,
+          [
+            transactionId,
+            worker.employee_id,
+            worker.full_name,
+            historyStarted.mysql,
+            historyEnded.mysql,
+          ]
+        );
+      } else {
+        await connection.query(
+          `INSERT INTO tr_worker_assignments
+            (transaction_id, employee_id, employee_name, assignment_status)
+           VALUES (?, ?, ?, ?)`,
+          [transactionId, worker.employee_id, worker.full_name, 'Assigned']
+        );
+      }
     }
 
     await createPosTracking(
       connection,
       transactionId,
       'Created',
-      'Transaksi POS dibuat',
-      `Transaksi ${transactionNo} dibuat untuk ${snapshotName} (${service_mode === 'take_home' ? 'Take Home' : 'Home Service'})`,
+      isHistoryEntry ? 'Transaksi history dibuat' : 'Transaksi POS dibuat',
+      isHistoryEntry
+        ? `Transaksi history ${transactionNo} dicatat untuk ${snapshotName}`
+        : `Transaksi ${transactionNo} dibuat untuk ${snapshotName} (${service_mode === 'take_home' ? 'Take Home' : 'Home Service'})`,
       req.user?.id
     );
 
-    if (Array.isArray(worker_ids) && worker_ids.length > 0) {
+    if (!isHistoryEntry && Array.isArray(worker_ids) && worker_ids.length > 0) {
       await createPosTracking(
         connection,
         transactionId,
@@ -1138,13 +1223,33 @@ export const createPosTransaction = async (req, res) => {
       );
     }
 
-    await syncTransactionStatusFromAssignments(connection, transactionId);
+    let billingHours = null;
+    let finalizedAmount = toMoney(finalAmount);
+
+    if (isHistoryEntry) {
+      const finalized = await finalizeGeneralCleaningPricingFromWindow(connection, transactionId, {
+        startedAt: historyStarted.date,
+        completedAt: historyEnded.date,
+        actorId: req.user?.id || null,
+        trackingTitle: 'Pricing finalized (history)',
+      });
+      if (finalized?.finalized) {
+        billingHours = finalized.billingHours;
+        finalizedAmount = toMoney(finalized.finalAmount);
+      }
+    } else {
+      await syncTransactionStatusFromAssignments(connection, transactionId);
+    }
 
     await connection.commit();
     return res.status(201).json({
-      message: 'Transaksi POS berhasil dibuat',
+      message: isHistoryEntry
+        ? 'Transaksi history berhasil dicatat'
+        : 'Transaksi POS berhasil dibuat',
       transaction_id: transactionId,
       transaction_no: transactionNo,
+      billing_hours: billingHours,
+      final_amount: finalizedAmount,
     });
   } catch (error) {
     await connection.rollback();
@@ -1152,7 +1257,9 @@ export const createPosTransaction = async (req, res) => {
     const message = error.message || 'Gagal membuat transaksi POS';
     const isMeterValidation =
       typeof message === 'string' && message.startsWith('Ukuran meter wajib diisi');
-    return res.status(isMeterValidation ? 400 : 500).json({ message });
+    const isDurationValidation =
+      typeof message === 'string' && message.includes('Durasi pengerjaan tidak valid');
+    return res.status(isMeterValidation || isDurationValidation ? 400 : 500).json({ message });
   } finally {
     connection.release();
   }

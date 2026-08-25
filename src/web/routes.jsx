@@ -7,6 +7,7 @@ import CleanoxOnlyCalendarPage from '@web/pages/CleanoxOnlyCalendarPage.jsx';
 import CleanoxOnlyDashboardPage from '@web/pages/CleanoxOnlyDashboardPage.jsx';
 import PosTransactionsPage from '@web/pages/PosTransactionsPage.jsx';
 import PosTransactionCreatePage from '@web/pages/PosTransactionCreatePage.jsx';
+import PosHistoryTransactionCreatePage from '@web/pages/PosHistoryTransactionCreatePage.jsx';
 import PosTransactionDetailPage from '@web/pages/PosTransactionDetailPage.jsx';
 import PosCustomersPage from '@web/pages/PosCustomersPage.jsx';
 import PosWaschenReferralPage from '@web/pages/PosWaschenReferralPage.jsx';
@@ -59,6 +60,17 @@ const webRoutes = [
       <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>
         <Layout>
           <PosTransactionCreatePage />
+        </Layout>
+      </PrivateRoute>
+    }
+  />,
+  <Route
+    key="co-transactions-history-new"
+    path="/cleanox-only/transactions/history/new"
+    element={
+      <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>
+        <Layout>
+          <PosHistoryTransactionCreatePage />
         </Layout>
       </PrivateRoute>
     }
