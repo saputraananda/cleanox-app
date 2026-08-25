@@ -815,9 +815,7 @@ export const createPosTransaction = async (req, res) => {
   } = req.body;
 
   const isHistoryEntry = parseTruthyFlag(req.body?.is_history_entry);
-  const service_mode = isHistoryEntry
-    ? 'home_service'
-    : String(serviceModeRaw || 'home_service').trim();
+  const service_mode = String(serviceModeRaw || 'home_service').trim();
 
   if (!customer_id || !service_date || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ message: 'Customer, tanggal layanan, dan item wajib diisi' });
@@ -923,24 +921,6 @@ export const createPosTransaction = async (req, res) => {
         });
       }
       gcCrewSize = uniqueCrew[0];
-    }
-
-    if (isHistoryEntry) {
-      if (!hasGc) {
-        await connection.rollback();
-        return res.status(400).json({
-          message: 'Input Transaksi History hanya untuk General Cleaning',
-        });
-      }
-      for (const rawItem of items) {
-        const service = servicesMap.get(Number(rawItem.service_id));
-        if (!service || !isGeneralCleaningCategory(service.category_name)) {
-          await connection.rollback();
-          return res.status(400).json({
-            message: 'Semua item harus General Cleaning untuk Input Transaksi History',
-          });
-        }
-      }
     }
 
     const totalPeopleCount = Math.max(1, Number(total_people || 1));
@@ -1227,15 +1207,26 @@ export const createPosTransaction = async (req, res) => {
     let finalizedAmount = toMoney(finalAmount);
 
     if (isHistoryEntry) {
-      const finalized = await finalizeGeneralCleaningPricingFromWindow(connection, transactionId, {
-        startedAt: historyStarted.date,
-        completedAt: historyEnded.date,
-        actorId: req.user?.id || null,
-        trackingTitle: 'Pricing finalized (history)',
-      });
-      if (finalized?.finalized) {
-        billingHours = finalized.billingHours;
-        finalizedAmount = toMoney(finalized.finalAmount);
+      if (hasGc) {
+        const finalized = await finalizeGeneralCleaningPricingFromWindow(connection, transactionId, {
+          startedAt: historyStarted.date,
+          completedAt: historyEnded.date,
+          actorId: req.user?.id || null,
+          trackingTitle: 'Pricing finalized (history)',
+        });
+        if (finalized?.finalized) {
+          billingHours = finalized.billingHours;
+          finalizedAmount = toMoney(finalized.finalAmount);
+        }
+      } else {
+        await createPosTracking(
+          connection,
+          transactionId,
+          'Completed',
+          'History entry completed',
+          `Transaksi history ${transactionNo} selesai dicatat · total ${finalizedAmount}`,
+          req.user?.id || null
+        );
       }
     } else {
       await syncTransactionStatusFromAssignments(connection, transactionId);
