@@ -22,6 +22,11 @@ import {
 import { syncTransactionStatusFromAssignments } from '../../shared/utils/posTransactionStatusSync.js';
 import { resolveEffectiveBasePrice } from '../../shared/utils/posServicePrice.js';
 import {
+  getBillableMultiplier,
+  isMeterPricedService,
+  resolveMeterValue,
+} from '../../shared/utils/posMeterServices.js';
+import {
   TAKEHOME_STAGE_LABELS,
   TAKEHOME_STAGE_ORDER,
   isValidServiceMode,
@@ -657,6 +662,8 @@ export const getPosTransactionDetail = async (req, res) => {
       },
       items: items.map((item) => ({
         ...item,
+        qty: Number(item.qty || 0),
+        meter: item.meter == null ? null : Number(item.meter),
         base_price_snapshot: Number(item.base_price_snapshot || 0),
         original_price_snapshot:
           item.original_price_snapshot == null ? null : Number(item.original_price_snapshot),
@@ -902,6 +909,19 @@ export const createPosTransaction = async (req, res) => {
 
       const isGc = isGeneralCleaningCategory(service.category_name);
       const qty = isGc ? 1 : Math.max(1, Number(item.qty || 1));
+      const needsMeter = !isGc && isMeterPricedService(service.name);
+      const meter = isGc
+        ? null
+        : needsMeter
+          ? resolveMeterValue({ serviceName: service.name, meter: item.meter })
+          : null;
+      const billable = isGc
+        ? 1
+        : getBillableMultiplier({
+            serviceName: service.name,
+            qty,
+            meter,
+          });
       const listPrice = Number(service.price || 0);
       const coretPrice = service.coret_price == null ? null : Number(service.coret_price);
       const basePrice = resolveEffectiveBasePrice({
@@ -924,6 +944,7 @@ export const createPosTransaction = async (req, res) => {
         return {
           service_id: service.id,
           qty,
+          meter: null,
           unit_label: item.unit_label || service.satuan_name || 'jam',
           base_price_snapshot: toMoney(basePrice),
           original_price_snapshot: originalPriceSnapshot,
@@ -937,20 +958,21 @@ export const createPosTransaction = async (req, res) => {
         };
       }
 
-      const lineTotal = finalPrice * qty;
-      subtotal += basePrice * qty;
-      discount += safeDiscountPerUnit * qty;
+      const lineTotal = finalPrice * billable;
+      subtotal += basePrice * billable;
+      discount += safeDiscountPerUnit * billable;
 
       return {
         service_id: service.id,
         qty,
+        meter,
         unit_label: item.unit_label || service.satuan_name || null,
         base_price_snapshot: toMoney(basePrice),
         original_price_snapshot: originalPriceSnapshot,
         promo_name_snapshot: promo?.name || null,
         promo_type_snapshot: promo?.promo_type || null,
         promo_value_snapshot: promo ? toMoney(rawPromoValue) : null,
-        promo_discount_amount: toMoney(safeDiscountPerUnit * qty),
+        promo_discount_amount: toMoney(safeDiscountPerUnit * billable),
         final_price_snapshot: toMoney(finalPrice),
         line_total: toMoney(lineTotal),
         category_name: service.category_name || null,
@@ -988,6 +1010,7 @@ export const createPosTransaction = async (req, res) => {
       return {
         service_name: service?.name || `Service #${item.service_id}`,
         qty: item.qty,
+        meter: item.meter,
         base_price: item.base_price_snapshot,
         original_price: item.original_price_snapshot,
         final_price_per_unit: item.final_price_snapshot,
@@ -1064,14 +1087,15 @@ export const createPosTransaction = async (req, res) => {
     for (const item of normalizedItems) {
       await connection.query(
         `INSERT INTO tr_transaction_items
-          (transaction_id, service_id, qty, unit_label, base_price_snapshot, original_price_snapshot,
+          (transaction_id, service_id, qty, meter, unit_label, base_price_snapshot, original_price_snapshot,
            promo_name_snapshot, promo_type_snapshot, promo_value_snapshot, promo_discount_amount,
            final_price_snapshot, line_total)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           transactionId,
           item.service_id,
           item.qty,
+          item.meter,
           item.unit_label,
           item.base_price_snapshot,
           item.original_price_snapshot,
@@ -1125,7 +1149,10 @@ export const createPosTransaction = async (req, res) => {
   } catch (error) {
     await connection.rollback();
     console.error('[pos/createPosTransaction]', error.message);
-    return res.status(500).json({ message: error.message || 'Gagal membuat transaksi POS' });
+    const message = error.message || 'Gagal membuat transaksi POS';
+    const isMeterValidation =
+      typeof message === 'string' && message.startsWith('Ukuran meter wajib diisi');
+    return res.status(isMeterValidation ? 400 : 500).json({ message });
   } finally {
     connection.release();
   }

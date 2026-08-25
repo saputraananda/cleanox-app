@@ -132,16 +132,21 @@ export function formatItemLine(item, totalPeople) {
 
   const serviceName = item?.service_name || '-';
   const qty = Math.max(1, toNumber(item?.qty || 1));
+  const meter = item?.meter == null || item?.meter === '' ? null : toNumber(item.meter);
+  const qtyPart =
+    meter != null && Number.isFinite(meter) && meter > 0
+      ? `${qty} x ${meter} m`
+      : String(qty);
   const basePart = formatBasePricePart(item);
   const finalPrice = toNumber(item?.final_price_per_unit);
   const lineTotal = toNumber(item?.line_total);
   const promoPart = formatPromoPart(item);
 
   if (promoPart) {
-    return `- ${serviceName} = ${basePart}  ${promoPart} ${formatIdr(finalPrice)} x ${qty} = ${formatIdr(lineTotal)}`;
+    return `- ${serviceName} = ${basePart}  ${promoPart} ${formatIdr(finalPrice)} x ${qtyPart} = ${formatIdr(lineTotal)}`;
   }
 
-  return `- ${serviceName} = ${basePart} ${formatIdr(finalPrice)} x ${qty} = ${formatIdr(lineTotal)}`;
+  return `- ${serviceName} = ${basePart} ${formatIdr(finalPrice)} x ${qtyPart} = ${formatIdr(lineTotal)}`;
 }
 
 export function formatCustomerTotalLine(items = [], finalAmount, { pricingFinalized = false } = {}) {

@@ -32,6 +32,14 @@ import {
   parseGcCrewSizeFromServiceName,
 } from '@web/utils/posGeneralCleaningBilling.js';
 import { resolveEffectiveBasePrice } from '@web/utils/posServicePrice.js';
+import {
+  getBillableMultiplier,
+  isMeterPricedService,
+  resolveMeterFromDimensions,
+  resolveMeterValue,
+  formatMeterDimensionsLabel,
+} from '@web/utils/posMeterServices.js';
+import { isBlankAddress } from '@web/utils/posCustomerAddress.js';
 
 const inputClass =
   'w-full rounded-[12px] border border-slate-200 bg-slate-50 px-3 py-2.5 text-[13px] text-slate-800 transition duration-150 focus:bg-white focus:border-blue-400 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,.12)]';
@@ -161,6 +169,11 @@ export default function PosTransactionCreatePage() {
     total_items: 0,
     total_pages: 1,
   });
+  const [addressFillOpen, setAddressFillOpen] = useState(false);
+  const [addressFillDraft, setAddressFillDraft] = useState('');
+  const [addressFillSaving, setAddressFillSaving] = useState(false);
+  const [addressFillError, setAddressFillError] = useState('');
+  const [pendingCustomer, setPendingCustomer] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [creatingCustomer, setCreatingCustomer] = useState(false);
@@ -177,7 +190,13 @@ export default function PosTransactionCreatePage() {
   });
   const [itemModalOpen, setItemModalOpen] = useState(false);
   const [editingItemIndex, setEditingItemIndex] = useState(null);
-  const [itemDraft, setItemDraft] = useState({ service_id: '', qty: 1, promo_id: '' });
+  const [itemDraft, setItemDraft] = useState({
+    service_id: '',
+    qty: 1,
+    meter_length: '',
+    meter_width: '',
+    promo_id: '',
+  });
   const [itemModalError, setItemModalError] = useState('');
   const [deleteItemIndex, setDeleteItemIndex] = useState(null);
   const [serviceSearch, setServiceSearch] = useState('');
@@ -222,6 +241,24 @@ export default function PosTransactionCreatePage() {
     setCustomerModalPageSize(data.pagination?.page_size || safePageSize);
   };
 
+  const applySelectedCustomer = (customer) => {
+    if (!customer?.id) {
+      setError('Customer belum valid');
+      return;
+    }
+    if (isBlankAddress(customer.address)) {
+      setPendingCustomer(customer);
+      setAddressFillDraft('');
+      setAddressFillError('');
+      setAddressFillOpen(true);
+      setCustomerModalOpen(false);
+      return;
+    }
+    setSelectedCustomer(customer);
+    setPendingCustomer(null);
+    setCustomerModalOpen(false);
+  };
+
   const handleSelectCustomer = async (row) => {
     setError('');
     try {
@@ -229,18 +266,50 @@ export default function PosTransactionCreatePage() {
         const { data } = await api.post('/pos-customers/ensure-legacy', {
           id_konsumen: row.legacy_id_konsumen,
         });
-        setSelectedCustomer(data.customer);
-        setCustomerModalOpen(false);
+        applySelectedCustomer(data.customer);
         return;
       }
       if (!row.id) {
         setError('Customer belum valid');
         return;
       }
-      setSelectedCustomer(row);
-      setCustomerModalOpen(false);
+      applySelectedCustomer(row);
     } catch (err) {
       setError(err.response?.data?.message || 'Gagal menyiapkan customer');
+    }
+  };
+
+  const closeAddressFillModal = () => {
+    setAddressFillOpen(false);
+    setAddressFillDraft('');
+    setAddressFillError('');
+    setPendingCustomer(null);
+  };
+
+  const handleSaveAddressFill = async (e) => {
+    e.preventDefault();
+    if (!pendingCustomer?.id) {
+      setAddressFillError('Customer belum valid');
+      return;
+    }
+    const address = String(addressFillDraft || '').trim();
+    if (isBlankAddress(address) || address.length < 3) {
+      setAddressFillError('Alamat wajib diisi minimal 3 karakter');
+      return;
+    }
+
+    setAddressFillSaving(true);
+    setAddressFillError('');
+    try {
+      const { data } = await api.patch(`/pos-customers/${pendingCustomer.id}/address`, {
+        address,
+      });
+      setSelectedCustomer(data.customer);
+      closeAddressFillModal();
+    } catch (err) {
+      setAddressFillError(err.response?.data?.message || 'Gagal menyimpan alamat');
+    } finally {
+      setAddressFillSaving(false);
     }
   };
 
@@ -318,6 +387,13 @@ export default function PosTransactionCreatePage() {
 
         const isGc = isGeneralCleaningCategory(service.category_name);
         const qty = Math.max(1, Number(item.qty || 1));
+        const billable = isGc
+          ? 1
+          : getBillableMultiplier({
+              serviceName: service.name,
+              qty,
+              meter: item.meter,
+            });
         const promo = service.promos?.find((row) => Number(row.id) === Number(item.promo_id));
         const base = resolveEffectiveBasePrice(service);
         const discountPerUnit = promo
@@ -338,8 +414,8 @@ export default function PosTransactionCreatePage() {
           return acc;
         }
 
-        acc.subtotal += base * qty;
-        acc.discount += safeDiscountPerUnit * qty;
+        acc.subtotal += base * billable;
+        acc.discount += safeDiscountPerUnit * billable;
         return acc;
       },
       { subtotal: 0, discount: 0, hasGc: false, gcRates: [] }
@@ -385,14 +461,23 @@ export default function PosTransactionCreatePage() {
         const safeDiscountPerUnit = Math.min(base, discountPerUnit);
         const finalPrice = Math.max(0, base - safeDiscountPerUnit);
         const isGc = isGeneralCleaningCategory(service.category_name);
+        const meter = isGc ? null : resolveMeterValue({ serviceName: service.name, meter: item.meter });
+        const billable = isGc
+          ? 1
+          : getBillableMultiplier({
+              serviceName: service.name,
+              qty,
+              meter: item.meter,
+            });
 
         return {
           service_name: service.name,
           qty: isGc ? 1 : qty,
+          meter,
           base_price: base,
           original_price: originalPrice,
           final_price_per_unit: finalPrice,
-          line_total: isGc ? 0 : finalPrice * qty,
+          line_total: isGc ? 0 : finalPrice * billable,
           promo_type: promo?.promo_type || null,
           promo_value: promo ? Number(promo.promo_value || 0) : null,
           category_name: service.category_name || null,
@@ -439,14 +524,23 @@ export default function PosTransactionCreatePage() {
         const safeDiscountPerUnit = Math.min(base, discountPerUnit);
         const finalPrice = Math.max(0, base - safeDiscountPerUnit);
         const isGc = isGeneralCleaningCategory(service.category_name);
+        const meter = isGc ? null : resolveMeterValue({ serviceName: service.name, meter: item.meter });
+        const billable = isGc
+          ? 1
+          : getBillableMultiplier({
+              serviceName: service.name,
+              qty,
+              meter: item.meter,
+            });
 
         return {
           service_name: service.name,
           qty: isGc ? 1 : qty,
+          meter,
           base_price: base,
           original_price: originalPrice,
           final_price_per_unit: finalPrice,
-          line_total: isGc ? 0 : finalPrice * qty,
+          line_total: isGc ? 0 : finalPrice * billable,
           promo_type: promo?.promo_type || null,
           promo_value: promo ? Number(promo.promo_value || 0) : null,
           category_name: service.category_name || null,
@@ -510,9 +604,17 @@ export default function PosTransactionCreatePage() {
     setSelectedCategoryId(categoryId);
   };
 
+  const emptyItemDraft = () => ({
+    service_id: '',
+    qty: 1,
+    meter_length: '',
+    meter_width: '',
+    promo_id: '',
+  });
+
   const openAddItemModal = () => {
     setEditingItemIndex(null);
-    setItemDraft({ service_id: '', qty: 1, promo_id: '' });
+    setItemDraft(emptyItemDraft());
     setItemModalError('');
     resetServicePickerFilters('all');
     setItemModalOpen(true);
@@ -527,6 +629,18 @@ export default function PosTransactionCreatePage() {
     setItemDraft({
       service_id: item.service_id || '',
       qty: Math.max(1, Number(item.qty || 1)),
+      meter_length:
+        item.meter_length != null && item.meter_length !== ''
+          ? String(item.meter_length)
+          : item.meter != null && item.meter !== ''
+            ? String(item.meter)
+            : '',
+      meter_width:
+        item.meter_width != null && item.meter_width !== ''
+          ? String(item.meter_width)
+          : item.meter != null && item.meter !== ''
+            ? '1'
+            : '',
       promo_id: item.promo_id || '',
     });
     setItemModalError('');
@@ -537,7 +651,7 @@ export default function PosTransactionCreatePage() {
   const closeItemModal = () => {
     setItemModalOpen(false);
     setEditingItemIndex(null);
-    setItemDraft({ service_id: '', qty: 1, promo_id: '' });
+    setItemDraft(emptyItemDraft());
     setItemModalError('');
     resetServicePickerFilters('all');
   };
@@ -545,7 +659,14 @@ export default function PosTransactionCreatePage() {
   const handleItemDraftChange = (key, value) => {
     setItemDraft((prev) => {
       const next = { ...prev, [key]: value };
-      if (key === 'service_id') next.promo_id = '';
+      if (key === 'service_id') {
+        next.promo_id = '';
+        const nextService = services.find((row) => Number(row.id) === Number(value));
+        if (!isMeterPricedService(nextService?.name)) {
+          next.meter_length = '';
+          next.meter_width = '';
+        }
+      }
       return next;
     });
   };
@@ -558,14 +679,43 @@ export default function PosTransactionCreatePage() {
     }
 
     const service = services.find((row) => Number(row.id) === Number(itemDraft.service_id));
+    const needsMeter = isMeterPricedService(service?.name);
+    const lengthValue = Number(itemDraft.meter_length);
+    const widthValue = Number(itemDraft.meter_width);
+    const meterValue = resolveMeterFromDimensions({
+      serviceName: service?.name,
+      length: itemDraft.meter_length,
+      width: itemDraft.meter_width,
+    });
+    if (needsMeter && meterValue == null) {
+      setItemModalError(
+        `Ukuran panjang × lebar wajib diisi untuk service ${service?.name || ''}`
+      );
+      return;
+    }
+
+    const qtyValue = Math.max(1, Number(itemDraft.qty || 1));
     const nextItemsPreview =
       editingItemIndex === null
-        ? [...form.items, { service_id: itemDraft.service_id, qty: 1, promo_id: itemDraft.promo_id || '' }]
+        ? [
+            ...form.items,
+            {
+              service_id: itemDraft.service_id,
+              qty: qtyValue,
+              meter: needsMeter ? meterValue : null,
+              meter_length: needsMeter ? lengthValue : null,
+              meter_width: needsMeter ? widthValue : null,
+              promo_id: itemDraft.promo_id || '',
+            },
+          ]
         : form.items.map((item, idx) =>
             idx === editingItemIndex
               ? {
                   service_id: itemDraft.service_id,
-                  qty: Math.max(1, Number(itemDraft.qty || 1)),
+                  qty: qtyValue,
+                  meter: needsMeter ? meterValue : null,
+                  meter_length: needsMeter ? lengthValue : null,
+                  meter_width: needsMeter ? widthValue : null,
                   promo_id: itemDraft.promo_id || '',
                 }
               : item
@@ -579,7 +729,10 @@ export default function PosTransactionCreatePage() {
     const isGc = isGeneralCleaningCategory(service?.category_name);
     const payload = {
       service_id: itemDraft.service_id,
-      qty: isGc ? 1 : Math.max(1, Number(itemDraft.qty || 1)),
+      qty: isGc ? 1 : qtyValue,
+      meter: isGc || !needsMeter ? null : meterValue,
+      meter_length: isGc || !needsMeter ? null : lengthValue,
+      meter_width: isGc || !needsMeter ? null : widthValue,
       promo_id: itemDraft.promo_id || '',
     };
 
@@ -795,6 +948,10 @@ export default function PosTransactionCreatePage() {
       setError('Pilih customer terlebih dahulu');
       return;
     }
+    if (isBlankAddress(selectedCustomer.address)) {
+      setError('Alamat customer wajib diisi sebelum membuat transaksi');
+      return;
+    }
     if (!form.service_date) {
       setError('Tanggal layanan wajib diisi');
       return;
@@ -832,6 +989,7 @@ export default function PosTransactionCreatePage() {
         items: form.items.map((item) => ({
           service_id: Number(item.service_id),
           qty: Number(item.qty || 1),
+          meter: item.meter == null || item.meter === '' ? null : Number(item.meter),
           promo_id: item.promo_id ? Number(item.promo_id) : null,
         })),
       };
@@ -946,9 +1104,13 @@ export default function PosTransactionCreatePage() {
                 <p className="mt-1 text-[11.5px] text-emerald-700">
                   {selectedCustomer.phone || 'Tanpa telepon'}
                 </p>
-                {selectedCustomer.address && (
+                {!isBlankAddress(selectedCustomer.address) ? (
                   <p className="mt-1 text-[12.5px] text-emerald-700/90 line-clamp-2">
                     {selectedCustomer.address}
+                  </p>
+                ) : (
+                  <p className="mt-1 text-[12.5px] font-semibold text-rose-600">
+                    Alamat belum diisi
                   </p>
                 )}
               </div>
@@ -1269,7 +1431,18 @@ export default function PosTransactionCreatePage() {
                       const crew =
                         parseGcCrewSizeFromServiceName(service?.name) ||
                         Number(form.total_people || 1);
-                      const lineTotal = isGc ? 0 : rateFinal * qty;
+                      const meterValue = resolveMeterValue({
+                        serviceName: service?.name,
+                        meter: item.meter,
+                      });
+                      const billable = isGc
+                        ? 1
+                        : getBillableMultiplier({
+                            serviceName: service?.name,
+                            qty,
+                            meter: item.meter,
+                          });
+                      const lineTotal = isGc ? 0 : rateFinal * billable;
 
                       return (
                         <div
@@ -1301,7 +1474,15 @@ export default function PosTransactionCreatePage() {
                                 : service
                                   ? (
                                       <>
-                                        Qty {qty} ·{' '}
+                                        Qty {qty}
+                                        {(() => {
+                                          const dimLabel = formatMeterDimensionsLabel({
+                                            length: item.meter_length,
+                                            width: item.meter_width,
+                                            meter: meterValue,
+                                          });
+                                          return dimLabel ? ` · ${dimLabel}` : '';
+                                        })()} ·{' '}
                                         {hasCoret && (
                                           <span className="line-through text-slate-400 mr-1">
                                             Rp {listPrice.toLocaleString('id-ID')}
@@ -1660,6 +1841,76 @@ export default function PosTransactionCreatePage() {
         </BodyPortal>
       )}
 
+      {addressFillOpen && pendingCustomer && (
+        <BodyPortal>
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-[2px]"
+            onClick={closeAddressFillModal}
+          >
+            <div
+              className="w-full max-w-lg rounded-[20px] border border-slate-200 bg-white p-5 shadow-[0_0_0_1px_rgba(0,0,0,.04),0_16px_48px_rgba(15,23,42,.18)] space-y-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div>
+                <p className={labelEyebrowClass}>Alamat Customer</p>
+                <h2 className="mt-1 text-[16px] font-extrabold tracking-[-0.01em] text-slate-900">
+                  Lengkapi Alamat Customer
+                </h2>
+                <p className="mt-1 text-[11.5px] text-slate-500">
+                  Alamat dari Smartlink kosong. Isi alamat agar bisa lanjut membuat transaksi.
+                </p>
+              </div>
+
+              <div className="rounded-[14px] border border-slate-200 bg-slate-50 px-3.5 py-3">
+                <p className="text-[13px] font-bold text-slate-800">{pendingCustomer.name}</p>
+                <p className="mt-0.5 text-[11.5px] text-slate-500">
+                  {pendingCustomer.phone || 'Tanpa telepon'}
+                </p>
+              </div>
+
+              <form onSubmit={handleSaveAddressFill} className="space-y-3">
+                <label className="block space-y-1.5">
+                  <span className={labelEyebrowClass}>Alamat lengkap</span>
+                  <textarea
+                    rows={4}
+                    value={addressFillDraft}
+                    onChange={(e) => setAddressFillDraft(e.target.value)}
+                    className={inputClass}
+                    placeholder="Contoh: Citra Gran, Cluster The Dense, Blok P29 No. 5"
+                    required
+                  />
+                </label>
+
+                {addressFillError && (
+                  <div className="rounded-[12px] border border-rose-200 bg-rose-50 px-3 py-2.5 text-[13px] text-rose-700">
+                    {addressFillError}
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={closeAddressFillModal}
+                    disabled={addressFillSaving}
+                    className="rounded-[12px] border border-slate-200 bg-white px-4 py-2.5 text-[13px] font-semibold text-slate-700 transition duration-150 hover:-translate-y-0.5 active:scale-[.98] disabled:opacity-60"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={addressFillSaving}
+                    className="rounded-[12px] px-4 py-2.5 text-[13px] font-bold text-white transition duration-150 hover:-translate-y-0.5 active:scale-[.98] disabled:opacity-60"
+                    style={primaryBtnStyle}
+                  >
+                    {addressFillSaving ? 'Menyimpan...' : 'Simpan Alamat'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </BodyPortal>
+      )}
+
       {itemModalOpen && (
         <BodyPortal>
           <div
@@ -1677,7 +1928,7 @@ export default function PosTransactionCreatePage() {
                   {editingItemIndex === null ? 'Tambah Item' : `Edit Item ${editingItemIndex + 1}`}
                 </h2>
                 <p className="mt-1 text-[11.5px] text-slate-500">
-                  Cari dan pilih service, lalu atur qty serta promo.
+                  Cari dan pilih service, lalu atur qty, ukuran panjang × lebar (jika perlu), serta promo.
                 </p>
               </div>
               <button
@@ -1805,7 +2056,22 @@ export default function PosTransactionCreatePage() {
               onSubmit={handleSaveItemModal}
               className="shrink-0 space-y-3 border-t border-slate-100 bg-slate-50/80 px-5 py-4"
             >
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {(() => {
+                const draftService = services.find(
+                  (row) => Number(row.id) === Number(itemDraft.service_id)
+                );
+                const draftNeedsMeter = isMeterPricedService(draftService?.name);
+                const draftArea = resolveMeterFromDimensions({
+                  serviceName: draftService?.name,
+                  length: itemDraft.meter_length,
+                  width: itemDraft.meter_width,
+                });
+                return (
+              <div
+                className={`grid grid-cols-1 gap-3 ${
+                  draftNeedsMeter ? 'sm:grid-cols-3' : 'sm:grid-cols-2'
+                }`}
+              >
                 <label className="block space-y-1.5">
                   <span className={labelEyebrowClass}>Qty</span>
                   <div className="flex items-center gap-2">
@@ -1840,6 +2106,42 @@ export default function PosTransactionCreatePage() {
                   </div>
                 </label>
 
+                {draftNeedsMeter && (
+                  <div className="block space-y-1.5">
+                    <span className={labelEyebrowClass}>Ukuran (panjang × lebar)</span>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        value={itemDraft.meter_length}
+                        onChange={(e) => handleItemDraftChange('meter_length', e.target.value)}
+                        className={inputClass}
+                        placeholder="P"
+                        required
+                        aria-label="Panjang meter"
+                      />
+                      <span className="shrink-0 text-sm font-bold text-slate-400">×</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        value={itemDraft.meter_width}
+                        onChange={(e) => handleItemDraftChange('meter_width', e.target.value)}
+                        className={inputClass}
+                        placeholder="L"
+                        required
+                        aria-label="Lebar meter"
+                      />
+                    </div>
+                    <p className="text-[11px] text-slate-500">
+                      {draftArea != null
+                        ? `Total ${draftArea} m²`
+                        : 'Isi panjang dan lebar dalam meter'}
+                    </p>
+                  </div>
+                )}
+
                 <label className="block space-y-1.5">
                   <span className={labelEyebrowClass}>Promo</span>
                   <select
@@ -1849,10 +2151,7 @@ export default function PosTransactionCreatePage() {
                     disabled={!itemDraft.service_id}
                   >
                     <option value="">Tanpa promo</option>
-                    {(
-                      services.find((row) => Number(row.id) === Number(itemDraft.service_id))
-                        ?.promos || []
-                    ).map((promo) => (
+                    {(draftService?.promos || []).map((promo) => (
                       <option key={promo.id} value={promo.id}>
                         {promo.name} -{' '}
                         {promo.promo_type === 'persen'
@@ -1863,6 +2162,8 @@ export default function PosTransactionCreatePage() {
                   </select>
                 </label>
               </div>
+                );
+              })()}
 
               <div className="flex justify-end gap-2">
                 <button

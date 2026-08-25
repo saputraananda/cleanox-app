@@ -120,6 +120,13 @@ export function formatGroupStandardItemLine(item) {
 
   const qty = Math.max(1, Number(item?.qty || 1));
 
+  const meter = item?.meter == null || item?.meter === '' ? null : Number(item.meter);
+
+  const qtyPart =
+    meter != null && Number.isFinite(meter) && meter > 0
+      ? `${qty} x ${meter} m`
+      : String(qty);
+
   const basePart = formatBasePricePart(item);
 
   const finalPrice = Number(item?.final_price_per_unit ?? item?.final_price ?? 0);
@@ -132,13 +139,13 @@ export function formatGroupStandardItemLine(item) {
 
   if (promoPart) {
 
-    return `* ${serviceName} = ${basePart}  ${promoPart} ${formatIdr(finalPrice)} x ${qty} = ${formatIdr(lineTotal)}`;
+    return `* ${serviceName} = ${basePart}  ${promoPart} ${formatIdr(finalPrice)} x ${qtyPart} = ${formatIdr(lineTotal)}`;
 
   }
 
 
 
-  return `* ${serviceName} = ${basePart} ${formatIdr(finalPrice)} x ${qty} = ${formatIdr(lineTotal)}`;
+  return `* ${serviceName} = ${basePart} ${formatIdr(finalPrice)} x ${qtyPart} = ${formatIdr(lineTotal)}`;
 
 }
 

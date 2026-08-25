@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Download, FileSpreadsheet, ArrowLeft, Save, Copy, Send, ImagePlus, X } from 'lucide-react';
+import { Download, FileSpreadsheet, FileText, ArrowLeft, Save, Copy, Send, ImagePlus, X } from 'lucide-react';
 import api from '@shared/utils/api.js';
 import { buildCustomerOrderMessage } from '@web/utils/posCustomerOrderMessage.js';
 import { buildGroupOrderMessage } from '@web/utils/posGroupOrderMessage.js';
@@ -10,6 +10,7 @@ import {
 } from '@web/utils/posGeneralCleaningBilling.js';
 import { downloadPosEReceiptPdf, loadImageAsDataUrl } from '@web/utils/posEReceipt.js';
 import { downloadPosInternalInvoicePdf } from '@web/utils/posInternalInvoicePdf.js';
+import { downloadPosOrderFormPdf } from '@web/utils/posOrderFormPdf.js';
 import PosTakehomeStageTimeline from '@web/components/PosTakehomeStageTimeline.jsx';
 import cleanoxLogo from '../../assets/cleanox.png';
 
@@ -94,6 +95,7 @@ export default function PosTransactionDetailPage() {
   const [assignmentIds, setAssignmentIds] = useState([]);
   const [receiptLoading, setReceiptLoading] = useState(false);
   const [invoiceLoading, setInvoiceLoading] = useState(false);
+  const [orderFormLoading, setOrderFormLoading] = useState(false);
   const [evidencePreviewMap, setEvidencePreviewMap] = useState({});
   const evidencePreviewMapRef = useRef({});
   const [customerPreviewMap, setCustomerPreviewMap] = useState({});
@@ -385,6 +387,29 @@ export default function PosTransactionDetailPage() {
     }
   };
 
+  const handleDownloadOrderForm = async () => {
+    if (!detail?.transaction) return;
+    setOrderFormLoading(true);
+    setError('');
+    try {
+      let logoDataUrl = null;
+      try {
+        logoDataUrl = await loadImageAsDataUrl(cleanoxLogo);
+      } catch {
+        logoDataUrl = null;
+      }
+      await downloadPosOrderFormPdf({
+        transaction: detail.transaction,
+        items: detail.items || [],
+        logoDataUrl,
+      });
+    } catch (err) {
+      setError(err.message || 'Gagal membuat Cleanox Order Form PDF');
+    } finally {
+      setOrderFormLoading(false);
+    }
+  };
+
   const handleSendGroup = async (e) => {
     e.preventDefault();
     try {
@@ -526,7 +551,7 @@ export default function PosTransactionDetailPage() {
           <button
             type="button"
             onClick={handleDownloadEReceipt}
-            disabled={receiptLoading || invoiceLoading}
+            disabled={receiptLoading || invoiceLoading || orderFormLoading}
             className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-60"
           >
             <Download className="w-4 h-4" />
@@ -534,8 +559,17 @@ export default function PosTransactionDetailPage() {
           </button>
           <button
             type="button"
+            onClick={handleDownloadOrderForm}
+            disabled={receiptLoading || invoiceLoading || orderFormLoading}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-semibold text-sky-900 hover:bg-sky-100 disabled:opacity-60"
+          >
+            <FileText className="w-4 h-4" />
+            {orderFormLoading ? 'Menyiapkan PDF...' : 'Cleanox Order Form'}
+          </button>
+          <button
+            type="button"
             onClick={handleDownloadInternalInvoice}
-            disabled={invoiceLoading || receiptLoading}
+            disabled={invoiceLoading || receiptLoading || orderFormLoading}
             className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-900 hover:bg-emerald-100 disabled:opacity-60"
           >
             <FileSpreadsheet className="w-4 h-4" />
@@ -682,7 +716,11 @@ export default function PosTransactionDetailPage() {
                   <tr key={item.id}>
                     <td className="px-3 py-3 font-medium text-slate-800">{item.service_name}</td>
                     <td className="px-3 py-3 text-slate-600">
-                      {pendingGc ? '—' : item.qty}
+                      {pendingGc
+                        ? '—'
+                        : item.meter != null && item.meter !== ''
+                          ? `Qty ${item.qty} · ${Number(item.meter)} m`
+                          : item.qty}
                       {isGc && transaction.pricing_finalized_at ? ' jam' : ''}
                     </td>
                     <td className="px-3 py-3 text-slate-600">{item.promo_name_snapshot || '-'}</td>

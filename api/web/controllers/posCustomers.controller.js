@@ -1,4 +1,8 @@
 import cleanoxPool, { aloraPool } from '../../shared/db/cleanox.js';
+import {
+  isBlankAddress,
+  resolveLegacyAddress,
+} from '../../shared/utils/posCustomerAddress.js';
 
 export function buildCustomerAddressText({
   street_detail,
@@ -467,10 +471,28 @@ export const ensureLegacyCustomer = async (req, res) => {
     );
 
     if (existingRows.length) {
-      const customer = await fetchPosCustomerDetailById(Number(existingRows[0].id));
+      let customer = await fetchPosCustomerDetailById(Number(existingRows[0].id));
       if (!customer) {
         return res.status(404).json({ message: 'Customer POS tidak ditemukan' });
       }
+
+      if (isBlankAddress(customer.address)) {
+        const resolved = await resolveLegacyAddress({
+          idKonsumen,
+          name: customer.name,
+          phone: customer.phone,
+        });
+        if (resolved) {
+          await cleanoxPool.query(
+            `UPDATE mst_customers
+             SET address = ?, updated_at = CURRENT_TIMESTAMP(0)
+             WHERE id = ?`,
+            [resolved, customer.id]
+          );
+          customer = await fetchPosCustomerDetailById(Number(customer.id));
+        }
+      }
+
       return res.json({ customer, created: false });
     }
 
@@ -499,6 +521,12 @@ export const ensureLegacyCustomer = async (req, res) => {
       return res.status(400).json({ message: 'Nama customer Smartlink tidak valid' });
     }
 
+    const resolvedAddress = await resolveLegacyAddress({
+      idKonsumen,
+      name,
+      phone: legacy.nomor_telpon || null,
+    });
+
     try {
       const [result] = await cleanoxPool.query(
         `INSERT INTO mst_customers
@@ -508,7 +536,7 @@ export const ensureLegacyCustomer = async (req, res) => {
           idKonsumen,
           name,
           legacy.nomor_telpon || null,
-          legacy.alamat || null,
+          resolvedAddress,
           legacy.tanggal_lahir || null,
           legacy.member || null,
           legacy.is_active === 1 ? 'Aktif' : 'Nonaktif',
@@ -530,7 +558,16 @@ export const ensureLegacyCustomer = async (req, res) => {
         throw insertError;
       }
 
-      const customer = await fetchPosCustomerDetailById(Number(dupRows[0].id));
+      let customer = await fetchPosCustomerDetailById(Number(dupRows[0].id));
+      if (customer && isBlankAddress(customer.address) && resolvedAddress) {
+        await cleanoxPool.query(
+          `UPDATE mst_customers
+           SET address = ?, updated_at = CURRENT_TIMESTAMP(0)
+           WHERE id = ?`,
+          [resolvedAddress, customer.id]
+        );
+        customer = await fetchPosCustomerDetailById(Number(customer.id));
+      }
       return res.json({ customer, created: false });
     }
   } catch (error) {
@@ -538,6 +575,40 @@ export const ensureLegacyCustomer = async (req, res) => {
     return res.status(error.status || 500).json({
       message: error.message || 'Gagal menyiapkan customer Smartlink',
     });
+  }
+};
+
+export const patchPosCustomerAddress = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) {
+      return res.status(400).json({ message: 'ID customer tidak valid' });
+    }
+
+    const address = String(req.body?.address || '').trim();
+    if (isBlankAddress(address) || address.length < 3) {
+      return res.status(400).json({
+        message: 'Alamat wajib diisi minimal 3 karakter',
+      });
+    }
+
+    const existing = await fetchPosCustomerDetailById(id);
+    if (!existing) {
+      return res.status(404).json({ message: 'Customer tidak ditemukan' });
+    }
+
+    await cleanoxPool.query(
+      `UPDATE mst_customers
+       SET address = ?, updated_at = CURRENT_TIMESTAMP(0)
+       WHERE id = ?`,
+      [address, id]
+    );
+
+    const customer = await fetchPosCustomerDetailById(id);
+    return res.json({ customer });
+  } catch (error) {
+    console.error('[posCustomers/patchPosCustomerAddress]', error.message);
+    return res.status(500).json({ message: 'Gagal memperbarui alamat customer' });
   }
 };
 

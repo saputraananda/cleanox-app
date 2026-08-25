@@ -6,6 +6,7 @@ import {
   getPosCustomerDetail,
   getPosCustomers,
   getWaschenEmployees,
+  patchPosCustomerAddress,
   updatePosCustomer,
 } from '../controllers/posCustomers.controller.js';
 
@@ -35,6 +36,7 @@ router.post('/ensure-legacy', ensureLegacyCustomer);
 router.get('/', getPosCustomers);
 router.get('/:id', getPosCustomerDetail);
 router.post('/', createPosCustomer);
+router.patch('/:id/address', patchPosCustomerAddress);
 router.put('/:id', updatePosCustomer);
 
 export default router;
