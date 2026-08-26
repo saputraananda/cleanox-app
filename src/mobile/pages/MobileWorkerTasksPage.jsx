@@ -51,6 +51,11 @@ const CONFIRM_COPY = {
     description: 'Pastikan 5 stage take-home dan survey sudah lengkap.',
     confirmLabel: 'Selesai',
   },
+  survey_external: {
+    title: 'Tandai survei eksternal?',
+    description: 'Survei dianggap lengkap tanpa mengisi form di aplikasi. Pekerja lain tetap bisa mengubah nanti.',
+    confirmLabel: 'Tandai Eksternal',
+  },
 };
 
 const formatDateTime = (value) => {
@@ -68,6 +73,20 @@ const evidenceOf = (task) => task?.evidence || {};
 const serviceModeOf = (task) =>
   task?.service_mode || task?.transaction?.service_mode || 'home_service';
 const isTakeHomeTask = (task) => serviceModeOf(task) === 'take_home';
+const isSharedCrewTask = (task) => Number(task?.transaction?.total_people || 0) > 1;
+
+const surveyStatusText = (evidence, { readyHint, blockedHint, isReady }) => {
+  if (!evidence?.has_survey) {
+    return isReady ? readyHint : blockedHint;
+  }
+  if (evidence.survey_source === 'external') return 'Survei eksternal';
+  const answers = evidence.survey_answers || {};
+  const csat = answers.csat_score ?? answers.overall ?? evidence.survey_rating;
+  const nps = answers.nps_score;
+  if (csat != null && nps != null) return `Survei aplikasi · CSAT ${csat}/5 · NPS ${nps}/10`;
+  if (csat != null) return `Survei aplikasi · CSAT ${csat}/5`;
+  return 'Survei aplikasi';
+};
 
 const collectEvidencePhotos = (taskList = []) => {
   const map = new Map();
@@ -324,6 +343,7 @@ export default function MobileWorkerTasksPage() {
       return;
     }
     if (type === 'complete' || type === 'complete_takehome') await handleComplete(assignmentId);
+    if (type === 'survey_external') await handleSurveyExternal(assignmentId);
   };
 
   const openRejectForm = async (assignmentId) => {
@@ -446,6 +466,39 @@ export default function MobileWorkerTasksPage() {
       return;
     }
     navigate(`/mobile-worker/tasks/${assignmentId}/survey`);
+  };
+
+  const requestSurveyExternal = (assignmentId, evidence, task = null) => {
+    if (isTakeHomeTask(task || {})) {
+      if (!evidence?.has_takehome_complete) {
+        setEvidenceAlert(
+          'Lengkapi semua stage take-home terlebih dahulu sebelum menandai survey eksternal.'
+        );
+        return;
+      }
+    } else if (!evidence?.has_after) {
+      setEvidenceAlert('Lengkapi foto after terlebih dahulu sebelum menandai survey eksternal.');
+      return;
+    }
+    setConfirmDialog({ type: 'survey_external', assignmentId });
+  };
+
+  const handleSurveyExternal = async (assignmentId) => {
+    if (submitting) return;
+    setSubmitting(true);
+    setError('');
+    setSuccess('');
+    try {
+      await api.post(`/mobile-tasks/${assignmentId}/survey-external`);
+      setSuccess('Survei eksternal ditandai.');
+      setConfirmDialog(null);
+      await loadTasks(tab);
+      await loadDetail(assignmentId, true);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Gagal menandai survei eksternal');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleDeletePhoto = async (assignmentId, photoId) => {
@@ -747,11 +800,11 @@ export default function MobileWorkerTasksPage() {
                           <div>
                             <p className="text-[12px] font-extrabold text-slate-800">6. Survei Kepuasan</p>
                             <p className="text-[10.5px] text-slate-500">
-                              {evidence.has_survey
-                                ? 'Survei tersimpan'
-                                : evidence.has_takehome_complete
-                                  ? 'Isi setelah pengantaran selesai'
-                                  : 'Lengkapi stage Pengantaran dulu'}
+                              {surveyStatusText(evidence, {
+                                isReady: evidence.has_takehome_complete,
+                                readyHint: 'Isi di aplikasi atau tandai survei eksternal',
+                                blockedHint: 'Lengkapi stage Pengantaran dulu',
+                              })}
                             </p>
                           </div>
                           {evidence.has_survey ? (
@@ -764,7 +817,21 @@ export default function MobileWorkerTasksPage() {
                           onClick={() => openSurveyPage(task.assignment_id, evidence, task)}
                           className="w-full h-[38px] rounded-[12px] bg-[#163A22] text-white text-[12px] font-extrabold disabled:opacity-60"
                         >
-                          {evidence.has_survey ? 'Lihat / Ubah Survei' : 'Isi Survei Kepuasan'}
+                          {evidence.has_survey
+                            ? evidence.survey_source === 'external'
+                              ? 'Isi ulang di aplikasi'
+                              : 'Lihat / Ubah Survei'
+                            : 'Isi Survei di Aplikasi'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={submitting || !evidence.has_takehome_complete}
+                          onClick={() => requestSurveyExternal(task.assignment_id, evidence, task)}
+                          className="w-full h-[38px] rounded-[12px] border border-slate-300 bg-white text-slate-700 text-[12px] font-extrabold disabled:opacity-60"
+                        >
+                          {evidence.has_survey && evidence.survey_source === 'external'
+                            ? 'Tandai ulang survei eksternal'
+                            : 'Survey dari link luar'}
                         </button>
                       </div>
 
@@ -879,6 +946,9 @@ export default function MobileWorkerTasksPage() {
                               {(evidence.before_count || 0) > 0
                                 ? `${evidence.before_count} foto tersimpan`
                                 : 'Belum ada foto'}
+                              {isSharedCrewTask(task)
+                                ? ' · Bukti bersama untuk semua pekerja'
+                                : ''}
                             </p>
                           </div>
                           {evidence.has_before ? (
@@ -957,6 +1027,9 @@ export default function MobileWorkerTasksPage() {
                                 : evidence.has_before
                                   ? 'Belum ada foto'
                                   : 'Isi foto before dulu'}
+                              {isSharedCrewTask(task)
+                                ? ' · Bukti bersama untuk semua pekerja'
+                                : ''}
                             </p>
                           </div>
                           {evidence.has_after ? (
@@ -1034,25 +1107,11 @@ export default function MobileWorkerTasksPage() {
                           <div>
                             <p className="text-[12px] font-extrabold text-slate-800">3. Survei Kepuasan</p>
                             <p className="text-[10.5px] text-slate-500">
-                              {evidence.has_survey
-                                ? (() => {
-                                    const answers = evidence.survey_answers || {};
-                                    const csat =
-                                      answers.csat_score
-                                      ?? answers.overall
-                                      ?? evidence.survey_rating;
-                                    const nps = answers.nps_score;
-                                    if (csat != null && nps != null) {
-                                      return `Survei tersimpan · CSAT ${csat}/5 · NPS ${nps}/10`;
-                                    }
-                                    if (csat != null) {
-                                      return `Survei tersimpan · CSAT ${csat}/5`;
-                                    }
-                                    return 'Survei tersimpan';
-                                  })()
-                                : evidence.has_after
-                                  ? 'Isi di halaman survey khusus'
-                                  : 'Lengkapi foto after dulu'}
+                              {surveyStatusText(evidence, {
+                                isReady: evidence.has_after,
+                                readyHint: 'Isi di aplikasi atau tandai survei eksternal',
+                                blockedHint: 'Lengkapi foto after dulu',
+                              })}
                             </p>
                           </div>
                           {evidence.has_survey ? (
@@ -1065,7 +1124,21 @@ export default function MobileWorkerTasksPage() {
                           onClick={() => openSurveyPage(task.assignment_id, evidence, task)}
                           className="w-full h-[38px] rounded-[12px] bg-[#163A22] text-white text-[12px] font-extrabold disabled:opacity-60"
                         >
-                          {evidence.has_survey ? 'Lihat / Ubah Survei' : 'Isi Survei Kepuasan'}
+                          {evidence.has_survey
+                            ? evidence.survey_source === 'external'
+                              ? 'Isi ulang di aplikasi'
+                              : 'Lihat / Ubah Survei'
+                            : 'Isi Survei di Aplikasi'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={submitting || !evidence.has_after}
+                          onClick={() => requestSurveyExternal(task.assignment_id, evidence, task)}
+                          className="w-full h-[38px] rounded-[12px] border border-slate-300 bg-white text-slate-700 text-[12px] font-extrabold disabled:opacity-60"
+                        >
+                          {evidence.has_survey && evidence.survey_source === 'external'
+                            ? 'Tandai ulang survei eksternal'
+                            : 'Survey dari link luar'}
                         </button>
                       </div>
 

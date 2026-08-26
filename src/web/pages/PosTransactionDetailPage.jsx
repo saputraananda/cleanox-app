@@ -1654,112 +1654,111 @@ export default function PosTransactionDetailPage() {
         ) : (
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="text-lg font-semibold text-slate-900">Bukti Pengerjaan</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Gabungan foto before/after dari semua pekerja pada transaksi ini.
+          </p>
           <div className="mt-4 space-y-4">
             {(assignments || []).length === 0 ? (
               <p className="text-sm text-slate-500">Belum ada assignment pekerja.</p>
             ) : (
-              (assignments || []).map((assignment) => {
-                const beforePhotos = assignment.before_photos || [];
-                const afterPhotos = assignment.after_photos || [];
-                return (
-                  <div key={assignment.id} className="rounded-xl border border-slate-200 p-4 space-y-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="font-semibold text-slate-900">{assignment.employee_name || 'Pekerja'}</p>
-                      <span className="text-xs font-semibold text-slate-500">{assignment.assignment_status}</span>
-                    </div>
+              (() => {
+                const assignmentById = new Map(
+                  (assignments || []).map((row) => [Number(row.id), row])
+                );
+                const mergePhotos = (kind) => {
+                  const seen = new Set();
+                  const merged = [];
+                  for (const assignment of assignments || []) {
+                    const list =
+                      kind === 'before'
+                        ? assignment.before_photos || []
+                        : assignment.after_photos || [];
+                    for (const photo of list) {
+                      const dedupeKey = photo?.id ?? `${assignment.id}-${photo?.photo_path}`;
+                      if (seen.has(dedupeKey)) continue;
+                      seen.add(dedupeKey);
+                      merged.push({
+                        ...photo,
+                        assignment_id: photo.assignment_id ?? assignment.id,
+                        employee_name:
+                          assignmentById.get(Number(photo.assignment_id ?? assignment.id))
+                            ?.employee_name || assignment.employee_name,
+                      });
+                    }
+                  }
+                  return merged;
+                };
+                const beforePhotos = mergePhotos('before');
+                const afterPhotos = mergePhotos('after');
 
+                const renderPhotoGrid = (kind, photos) => {
+                  if (photos.length === 0) {
+                    return (
+                      <p className="text-sm text-slate-500">
+                        Belum ada foto {kind === 'before' ? 'before' : 'after'}
+                      </p>
+                    );
+                  }
+                  return (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {photos.map((photo, index) => {
+                        const assignmentId = Number(photo.assignment_id);
+                        const key = evidencePreviewKey(assignmentId, kind, photo, index);
+                        const preview = evidencePreviewMap[key];
+                        return preview ? (
+                          <div key={key} className="relative">
+                            <img
+                              src={preview}
+                              alt={`${kind} ${photo.employee_name || ''}`}
+                              className="h-28 w-full rounded-xl object-cover border border-slate-200"
+                            />
+                            {photo.employee_name ? (
+                              <p className="mt-1 truncate text-[11px] text-slate-500">
+                                {photo.employee_name}
+                              </p>
+                            ) : null}
+                            <button
+                              type="button"
+                              aria-label={`Unduh foto ${kind}`}
+                              onClick={() =>
+                                downloadEvidencePhoto({
+                                  blobUrl: preview,
+                                  photoPath: photo?.photo_path,
+                                  fileName: buildEvidenceDownloadName({
+                                    transactionNo: transaction.transaction_no,
+                                    employeeName: photo.employee_name,
+                                    kind,
+                                    index,
+                                    photo,
+                                  }),
+                                })
+                              }
+                              className="absolute right-1.5 top-1.5 z-[1] inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/65 text-white shadow-lg"
+                            >
+                              <Download className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div key={key} className="h-28 w-full rounded-xl bg-slate-200 animate-pulse" />
+                        );
+                      })}
+                    </div>
+                  );
+                };
+
+                return (
+                  <div className="rounded-xl border border-slate-200 p-4 space-y-4">
                     <div className="space-y-2">
                       <p className="text-sm font-semibold text-slate-800">Before</p>
-                      {beforePhotos.length === 0 ? (
-                        <p className="text-sm text-slate-500">Belum ada foto before</p>
-                      ) : (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                          {beforePhotos.map((photo, index) => {
-                            const key = evidencePreviewKey(assignment.id, 'before', photo, index);
-                            const preview = evidencePreviewMap[key];
-                            return preview ? (
-                              <div key={key} className="relative">
-                                <img
-                                  src={preview}
-                                  alt={`Before ${assignment.employee_name || ''}`}
-                                  className="h-28 w-full rounded-xl object-cover border border-slate-200"
-                                />
-                                <button
-                                  type="button"
-                                  aria-label="Unduh foto before"
-                                  onClick={() =>
-                                    downloadEvidencePhoto({
-                                      blobUrl: preview,
-                                      photoPath: photo?.photo_path,
-                                      fileName: buildEvidenceDownloadName({
-                                        transactionNo: transaction.transaction_no,
-                                        employeeName: assignment.employee_name,
-                                        kind: 'before',
-                                        index,
-                                        photo,
-                                      }),
-                                    })
-                                  }
-                                  className="absolute right-1.5 top-1.5 z-[1] inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/65 text-white shadow-lg"
-                                >
-                                  <Download className="h-3.5 w-3.5" />
-                                </button>
-                              </div>
-                            ) : (
-                              <div key={key} className="h-28 w-full rounded-xl bg-slate-200 animate-pulse" />
-                            );
-                          })}
-                        </div>
-                      )}
+                      {renderPhotoGrid('before', beforePhotos)}
                     </div>
-
                     <div className="space-y-2">
                       <p className="text-sm font-semibold text-slate-800">After</p>
-                      {afterPhotos.length === 0 ? (
-                        <p className="text-sm text-slate-500">Belum ada foto after</p>
-                      ) : (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                          {afterPhotos.map((photo, index) => {
-                            const key = evidencePreviewKey(assignment.id, 'after', photo, index);
-                            const preview = evidencePreviewMap[key];
-                            return preview ? (
-                              <div key={key} className="relative">
-                                <img
-                                  src={preview}
-                                  alt={`After ${assignment.employee_name || ''}`}
-                                  className="h-28 w-full rounded-xl object-cover border border-slate-200"
-                                />
-                                <button
-                                  type="button"
-                                  aria-label="Unduh foto after"
-                                  onClick={() =>
-                                    downloadEvidencePhoto({
-                                      blobUrl: preview,
-                                      photoPath: photo?.photo_path,
-                                      fileName: buildEvidenceDownloadName({
-                                        transactionNo: transaction.transaction_no,
-                                        employeeName: assignment.employee_name,
-                                        kind: 'after',
-                                        index,
-                                        photo,
-                                      }),
-                                    })
-                                  }
-                                  className="absolute right-1.5 top-1.5 z-[1] inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/65 text-white shadow-lg"
-                                >
-                                  <Download className="h-3.5 w-3.5" />
-                                </button>
-                              </div>
-                            ) : (
-                              <div key={key} className="h-28 w-full rounded-xl bg-slate-200 animate-pulse" />
-                            );
-                          })}
-                        </div>
-                      )}
+                      {renderPhotoGrid('after', afterPhotos)}
                     </div>
                   </div>
                 );
-              })
+              })()
             )}
           </div>
         </section>

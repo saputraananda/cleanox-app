@@ -17,6 +17,7 @@ import {
   serveMobileTakehomeEvidenceFile,
   startTask,
   submitSurvey,
+  submitSurveyExternal,
   taskEvidenceUploadMiddleware,
   takehomeStageUploadMiddleware,
   uploadAfterPhoto,
@@ -81,6 +82,7 @@ router.post(
 );
 router.delete('/:assignmentId/photos/:photoId', deleteAssignmentPhoto);
 router.post('/:assignmentId/survey', submitSurvey);
+router.post('/:assignmentId/survey-external', submitSurveyExternal);
 router.post('/:assignmentId/complete', completeTask);
 
 export default router;
