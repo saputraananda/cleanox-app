@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf';
 import { isGcPricingPending } from './posGeneralCleaningBilling.js';
+import { transactionHasMeterPending } from './posMeterServices.js';
 import {
   CLEANOX_RECEIPT_COMPANY,
   drawA4LandscapeHeader,
@@ -35,6 +36,7 @@ export async function downloadPosEReceiptPdf({ transaction, items = [], logoData
   const contentW = pageW - margin * 2;
   const itemRows = Array.isArray(items) ? items : [];
   const pendingGc = isGcPricingPending(transaction, itemRows);
+  const pendingMeter = transactionHasMeterPending(itemRows);
   const crew = Math.max(1, Number(transaction.total_people || 1));
 
   let y = drawA4LandscapeHeader(doc, {
@@ -78,6 +80,7 @@ export async function downloadPosEReceiptPdf({ transaction, items = [], logoData
   drawTotalsBox(doc, {
     transaction,
     pendingGc,
+    pendingMeter,
     pageW,
     margin,
     y,

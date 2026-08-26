@@ -1,4 +1,5 @@
 import { createPosTracking } from './posTracking.js';
+import { computeTransactionPromoDiscount } from './posTransactionPromo.js';
 
 export function isGeneralCleaningCategory(categoryName) {
   if (!categoryName) return false;
@@ -163,6 +164,7 @@ export async function finalizeGeneralCleaningPricingFromWindow(
 
   let subtotal = 0;
   let discount = 0;
+  const hasHeaderPromo = Boolean(tx.promo_type_snapshot);
 
   for (const item of items) {
     const isGc = isGeneralCleaningCategory(item.category_name);
@@ -170,8 +172,8 @@ export async function finalizeGeneralCleaningPricingFromWindow(
     if (isGc) {
       const computed = computeGcLineTotals({
         basePrice: item.base_price_snapshot,
-        promoType: item.promo_type_snapshot,
-        promoValue: item.promo_value_snapshot,
+        promoType: hasHeaderPromo ? null : item.promo_type_snapshot,
+        promoValue: hasHeaderPromo ? null : item.promo_value_snapshot,
         billingHours,
       });
 
@@ -185,7 +187,7 @@ export async function finalizeGeneralCleaningPricingFromWindow(
          WHERE id = ?`,
         [
           billingHours,
-          toMoney(computed.promoDiscountAmount),
+          toMoney(hasHeaderPromo ? 0 : computed.promoDiscountAmount),
           toMoney(computed.rateFinal),
           toMoney(computed.lineTotal),
           item.id,
@@ -193,16 +195,24 @@ export async function finalizeGeneralCleaningPricingFromWindow(
       );
 
       subtotal += Number(item.base_price_snapshot || 0) * billingHours;
-      discount += computed.promoDiscountAmount;
+      if (!hasHeaderPromo) discount += computed.promoDiscountAmount;
       item.qty = billingHours;
       item.final_price_snapshot = computed.rateFinal;
       item.line_total = computed.lineTotal;
-      item.promo_discount_amount = computed.promoDiscountAmount;
+      item.promo_discount_amount = hasHeaderPromo ? 0 : computed.promoDiscountAmount;
     } else {
       const qty = Math.max(1, Number(item.qty || 1));
       subtotal += Number(item.base_price_snapshot || 0) * qty;
-      discount += Number(item.promo_discount_amount || 0);
+      if (!hasHeaderPromo) discount += Number(item.promo_discount_amount || 0);
     }
+  }
+
+  if (hasHeaderPromo) {
+    discount = computeTransactionPromoDiscount({
+      subtotal,
+      promoType: tx.promo_type_snapshot,
+      promoValue: tx.promo_value_snapshot,
+    }).discountAmount;
   }
 
   const finalAmount = subtotal - discount;
@@ -222,8 +232,8 @@ export async function finalizeGeneralCleaningPricingFromWindow(
     base_price: item.base_price_snapshot,
     final_price_per_unit: item.final_price_snapshot,
     line_total: item.line_total,
-    promo_type: item.promo_type_snapshot,
-    promo_value: item.promo_value_snapshot,
+    promo_type: hasHeaderPromo ? null : item.promo_type_snapshot,
+    promo_value: hasHeaderPromo ? null : item.promo_value_snapshot,
     category_name: item.category_name || null,
   }));
 

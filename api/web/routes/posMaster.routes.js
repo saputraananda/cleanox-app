@@ -9,6 +9,7 @@ import {
   getPromoDetail,
   createPromo,
   updatePromo,
+  listPaymentMethods,
 } from '../controllers/posMaster.controller.js';
 
 const router = Router();
@@ -36,6 +37,8 @@ router.get('/categories', listCategories);
 router.get('/services', listServices);
 router.post('/services', createService);
 router.put('/services/:id', updateService);
+
+router.get('/payment-methods', listPaymentMethods);
 
 router.get('/promos', listPromos);
 router.get('/promos/:id', getPromoDetail);

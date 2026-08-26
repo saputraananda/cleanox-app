@@ -67,6 +67,24 @@ export function formatMeterDimensionsLabel({ length, width, meter }) {
   return null;
 }
 
+export function isMeterPricingPending({ serviceName, meter }) {
+  if (!isMeterPricedService(serviceName)) return false;
+  const value = Number(meter);
+  return meter == null || meter === '' || !Number.isFinite(value) || value <= 0;
+}
+
+export function transactionHasMeterPending(items = []) {
+  return (items || []).some((item) =>
+    isMeterPricingPending({
+      serviceName: item?.service_name || item?.name,
+      meter: item?.meter,
+    })
+  );
+}
+
+/**
+ * Billable multiplier. Meter service without size → 0 (pending).
+ */
 export function getBillableMultiplier({ serviceName, qty, meter }) {
   const safeQty = Math.max(1, Number(qty || 1));
   if (!isMeterPricedService(serviceName)) {
@@ -75,7 +93,7 @@ export function getBillableMultiplier({ serviceName, qty, meter }) {
 
   const meterValue = resolveMeterValue({ serviceName, meter });
   if (meterValue == null) {
-    return safeQty;
+    return 0;
   }
 
   return safeQty * meterValue;

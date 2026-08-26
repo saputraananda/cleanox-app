@@ -1,18 +1,32 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Download, FileSpreadsheet, FileText, ArrowLeft, Save, Copy, Send, ImagePlus, X } from 'lucide-react';
+import { Download, FileSpreadsheet, FileText, ArrowLeft, Save, Copy, Send, ImagePlus, X, Plus, Minus } from 'lucide-react';
 import api from '@shared/utils/api.js';
+import BodyPortal from '@web/components/BodyPortal.jsx';
 import { buildCustomerOrderMessage } from '@web/utils/posCustomerOrderMessage.js';
 import { buildGroupOrderMessage } from '@web/utils/posGroupOrderMessage.js';
 import {
   isGeneralCleaningCategory,
   transactionHasGeneralCleaning,
 } from '@web/utils/posGeneralCleaningBilling.js';
+import {
+  isMeterPricedService,
+  isMeterPricingPending,
+  resolveMeterFromDimensions,
+  transactionHasMeterPending,
+} from '@web/utils/posMeterServices.js';
 import { downloadPosEReceiptPdf, loadImageAsDataUrl } from '@web/utils/posEReceipt.js';
 import { downloadPosInternalInvoicePdf } from '@web/utils/posInternalInvoicePdf.js';
 import { downloadPosOrderFormPdf } from '@web/utils/posOrderFormPdf.js';
 import PosTakehomeStageTimeline from '@web/components/PosTakehomeStageTimeline.jsx';
 import cleanoxLogo from '../../assets/cleanox.png';
+
+const emptyAddItemDraft = () => ({
+  service_id: '',
+  qty: 1,
+  meter_length: '',
+  meter_width: '',
+});
 
 const formatCurrency = (value) =>
   new Intl.NumberFormat('id-ID', {
@@ -85,6 +99,27 @@ const toDatetimeLocalValue = (value) => {
 const evidencePreviewKey = (assignmentId, kind, photo, index) =>
   `${assignmentId}-${kind}-${photo?.id ?? photo?.photo_file ?? index}`;
 
+const sanitizeFilePart = (value) =>
+  String(value || '')
+    .trim()
+    .replace(/\s+/g, '_')
+    .replace(/[^a-zA-Z0-9._-]/g, '')
+    .slice(0, 80);
+
+const buildEvidenceDownloadName = ({ transactionNo, employeeName, kind, index, photo }) => {
+  const trx = sanitizeFilePart(transactionNo);
+  const emp = sanitizeFilePart(employeeName);
+  const kindPart = kind === 'after' ? 'after' : 'before';
+  if (trx || emp) {
+    return `${trx || 'trx'}_${emp || 'pekerja'}_${kindPart}_${Number(index) + 1}.jpg`;
+  }
+  const basename = String(photo?.photo_file || '')
+    .split(/[/\\]/)
+    .pop();
+  if (basename) return basename;
+  return `evidence-${kindPart}-${Number(index) + 1}.jpg`;
+};
+
 export default function PosTransactionDetailPage() {
   const { id } = useParams();
   const [detail, setDetail] = useState(null);
@@ -103,7 +138,26 @@ export default function PosTransactionDetailPage() {
   const [takehomePreviewMap, setTakehomePreviewMap] = useState({});
   const takehomePreviewMapRef = useRef({});
   const customerFileInputRef = useRef(null);
+  const paymentProofFileInputRef = useRef(null);
   const [customerPhotoUploading, setCustomerPhotoUploading] = useState(false);
+  const [paymentProofUploading, setPaymentProofUploading] = useState(false);
+  const [paymentPreviewMap, setPaymentPreviewMap] = useState({});
+  const paymentPreviewMapRef = useRef({});
+  const [paymentMethods, setPaymentMethods] = useState([]);
+  const [paymentForm, setPaymentForm] = useState({
+    payment_method_id: '',
+    payment_status: 'belum_lunas',
+    payment_group: '',
+  });
+  const [paymentSaving, setPaymentSaving] = useState(false);
+  const [meterDrafts, setMeterDrafts] = useState({});
+  const [meterSavingId, setMeterSavingId] = useState(null);
+  const [services, setServices] = useState([]);
+  const [addItemModalOpen, setAddItemModalOpen] = useState(false);
+  const [addItemDraft, setAddItemDraft] = useState(emptyAddItemDraft());
+  const [addItemSaving, setAddItemSaving] = useState(false);
+  const [addItemError, setAddItemError] = useState('');
+  const [serviceSearch, setServiceSearch] = useState('');
   const [scheduleDateInput, setScheduleDateInput] = useState('');
   const [cancelNote, setCancelNote] = useState('');
   const [scheduleSubmitting, setScheduleSubmitting] = useState(false);
@@ -159,6 +213,15 @@ export default function PosTransactionDetailPage() {
     await refreshBlobPreviews(needed, setCustomerPreviewMap);
   };
 
+  const refreshPaymentPreviews = async (photos = []) => {
+    const needed = new Map();
+    for (const photo of photos) {
+      if (!photo?.id || !photo?.photo_path) continue;
+      needed.set(String(photo.id), photo.photo_path);
+    }
+    await refreshBlobPreviews(needed, setPaymentPreviewMap);
+  };
+
   const refreshTakehomePreviews = async (progress) => {
     const needed = new Map();
     for (const stage of progress?.stages || []) {
@@ -168,12 +231,48 @@ export default function PosTransactionDetailPage() {
     await refreshBlobPreviews(needed, setTakehomePreviewMap);
   };
 
+  const downloadEvidencePhoto = async ({ blobUrl, photoPath, fileName }) => {
+    let url = blobUrl || null;
+    let shouldRevoke = false;
+    try {
+      if (!url && photoPath) {
+        const rawPath = String(photoPath || '')
+          .replace(/^\/api/, '')
+          .replace(/^\//, '');
+        const blobRes = await api.get(rawPath, { responseType: 'blob' });
+        url = URL.createObjectURL(blobRes.data);
+        shouldRevoke = true;
+      }
+      if (!url) {
+        setError('Gagal mengunduh foto evidence');
+        return;
+      }
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName || 'evidence.jpg';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch {
+      setError('Gagal mengunduh foto evidence');
+    } finally {
+      if (shouldRevoke && url) URL.revokeObjectURL(url);
+    }
+  };
+
   const loadData = async () => {
     setLoading(true);
     setError('');
     try {
-      const detailRes = await api.get(`/pos-transactions/${id}`);
+      const [detailRes, paymentRes, serviceRes] = await Promise.all([
+        api.get(`/pos-transactions/${id}`),
+        api.get('/pos-master/payment-methods', { params: { is_active: 1 } }),
+        api.get('/pos-transactions/services'),
+      ]);
       const nextDetail = detailRes.data;
+      const methods = paymentRes.data.data || [];
+      setPaymentMethods(methods);
+      setServices(serviceRes.data.services || []);
       const serviceDate = nextDetail.transaction?.service_date;
       const workerRes = await api.get('/pos-transactions/workers', {
         params: serviceDate
@@ -191,9 +290,16 @@ export default function PosTransactionDetailPage() {
       setScheduleDateInput(toDatetimeLocalValue(nextDetail.transaction?.service_date));
       setCancelNote('');
       setScheduleSuccess('');
+      const tx = nextDetail.transaction || {};
+      setPaymentForm({
+        payment_method_id: tx.payment_method_id ? String(tx.payment_method_id) : '',
+        payment_status: tx.payment_status || 'belum_lunas',
+        payment_group: tx.payment_method?.method_group || '',
+      });
       await Promise.all([
         refreshEvidencePreviews(nextDetail.assignments || []),
         refreshCustomerPreviews(nextDetail.customer_photos || []),
+        refreshPaymentPreviews(nextDetail.payment_proofs || []),
         refreshTakehomePreviews(nextDetail.takehome_progress),
       ]);
     } catch (err) {
@@ -216,6 +322,10 @@ export default function PosTransactionDetailPage() {
   }, [customerPreviewMap]);
 
   useEffect(() => {
+    paymentPreviewMapRef.current = paymentPreviewMap;
+  }, [paymentPreviewMap]);
+
+  useEffect(() => {
     takehomePreviewMapRef.current = takehomePreviewMap;
   }, [takehomePreviewMap]);
 
@@ -225,6 +335,9 @@ export default function PosTransactionDetailPage() {
         if (typeof url === 'string' && url.startsWith('blob:')) URL.revokeObjectURL(url);
       });
       Object.values(customerPreviewMapRef.current).forEach((url) => {
+        if (typeof url === 'string' && url.startsWith('blob:')) URL.revokeObjectURL(url);
+      });
+      Object.values(paymentPreviewMapRef.current).forEach((url) => {
         if (typeof url === 'string' && url.startsWith('blob:')) URL.revokeObjectURL(url);
       });
       Object.values(takehomePreviewMapRef.current).forEach((url) => {
@@ -431,9 +544,10 @@ export default function PosTransactionDetailPage() {
     return <div className="max-w-7xl mx-auto p-6 text-sm text-rose-600">Detail transaksi tidak ditemukan.</div>;
   }
 
-  const { transaction, items, assignments, tracking, customer_photos: customerPhotos = [], takehome_progress: takehomeProgress } = detail;
+  const { transaction, items, assignments, tracking, customer_photos: customerPhotos = [], payment_proofs: paymentProofs = [], takehome_progress: takehomeProgress } = detail;
   const isTakeHome = String(transaction.service_mode || 'home_service') === 'take_home';
   const isHistoryEntry = Boolean(transaction.is_history_entry);
+  const canAddItem = !isHistoryEntry && transaction.status !== 'Cancelled';
   const historyStartedAt = (assignments || [])
     .map((row) => row.started_at)
     .filter(Boolean)
@@ -449,6 +563,7 @@ export default function PosTransactionDetailPage() {
   );
   const isTerminalStatus = ['Completed', 'Cancelled'].includes(transaction.status);
   const hasGc = transactionHasGeneralCleaning(items);
+  const hasMeterPending = transactionHasMeterPending(items);
   const canReschedule =
     !isHistoryEntry &&
     !isTerminalStatus &&
@@ -458,6 +573,195 @@ export default function PosTransactionDetailPage() {
   const canCancel = !isHistoryEntry && !isTerminalStatus;
   const canUploadCustomerPhotos =
     transaction.status !== 'Cancelled' && customerPhotos.length < 10;
+  const canEditPayment = transaction.status !== 'Cancelled';
+  const canUploadPaymentProofs =
+    canEditPayment && paymentProofs.length < 10;
+  const edcPaymentMethods = paymentMethods.filter((m) => m.method_group === 'EDC');
+  const selectedPaymentMethod =
+    paymentMethods.find((m) => Number(m.id) === Number(paymentForm.payment_method_id)) ||
+    transaction.payment_method ||
+    null;
+
+  const handlePaymentGroupChange = (group) => {
+    setPaymentForm((prev) => {
+      if (group === 'EDC') {
+        const stillEdc = edcPaymentMethods.some(
+          (m) => Number(m.id) === Number(prev.payment_method_id)
+        );
+        return {
+          ...prev,
+          payment_group: group,
+          payment_method_id: stillEdc ? prev.payment_method_id : '',
+        };
+      }
+      const method = paymentMethods.find((m) => m.method_group === group);
+      return {
+        ...prev,
+        payment_group: group,
+        payment_method_id: method ? String(method.id) : '',
+      };
+    });
+  };
+
+  const handleSavePayment = async () => {
+    if (!canEditPayment || paymentSaving) return;
+    if (!paymentForm.payment_method_id) {
+      setError('Metode pembayaran wajib dipilih');
+      return;
+    }
+    if (paymentForm.payment_status === 'lunas' && paymentProofs.length < 1) {
+      setError('Unggah bukti pembayaran terlebih dahulu sebelum menandai lunas');
+      return;
+    }
+    setPaymentSaving(true);
+    setError('');
+    try {
+      await api.patch(`/pos-transactions/${id}/payment`, {
+        payment_method_id: Number(paymentForm.payment_method_id),
+        payment_status: paymentForm.payment_status,
+      });
+      await loadData();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Gagal menyimpan pembayaran');
+    } finally {
+      setPaymentSaving(false);
+    }
+  };
+
+  const handlePaymentProofsSelected = async (event) => {
+    const files = Array.from(event.target.files || []).filter((file) => /^image\//.test(file.type));
+    event.target.value = '';
+    if (files.length === 0 || paymentProofUploading) return;
+
+    const remaining = Math.max(0, 10 - paymentProofs.length);
+    if (remaining === 0) {
+      setError('Maksimal 10 bukti pembayaran');
+      return;
+    }
+
+    const toUpload = files.slice(0, remaining);
+    setPaymentProofUploading(true);
+    setError('');
+    try {
+      for (const file of toUpload) {
+        const formData = new FormData();
+        formData.append('photo', file);
+        await api.post(`/pos-transactions/${id}/payment-proofs`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+      }
+      await loadData();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Gagal mengunggah bukti pembayaran');
+    } finally {
+      setPaymentProofUploading(false);
+    }
+  };
+
+  const handleDeletePaymentProof = async (photoId) => {
+    if (paymentProofUploading) return;
+    setPaymentProofUploading(true);
+    setError('');
+    try {
+      await api.delete(`/pos-transactions/${id}/payment-proofs/${photoId}`);
+      await loadData();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Gagal menghapus bukti pembayaran');
+    } finally {
+      setPaymentProofUploading(false);
+    }
+  };
+
+  const handleSaveItemMeter = async (itemId) => {
+    const draft = meterDrafts[itemId] || { length: '', width: '' };
+    if (!draft.length || !draft.width) {
+      setError('Panjang dan lebar wajib diisi');
+      return;
+    }
+    setMeterSavingId(itemId);
+    setError('');
+    try {
+      await api.patch(`/pos-transactions/${id}/items/${itemId}/meter`, {
+        length: Number(draft.length),
+        width: Number(draft.width),
+      });
+      setMeterDrafts((prev) => ({
+        ...prev,
+        [itemId]: { length: '', width: '' },
+      }));
+      await loadData();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Gagal menyimpan ukuran meter');
+    } finally {
+      setMeterSavingId(null);
+    }
+  };
+
+  const openAddItemModal = () => {
+    setAddItemDraft(emptyAddItemDraft());
+    setAddItemError('');
+    setServiceSearch('');
+    setAddItemModalOpen(true);
+  };
+
+  const closeAddItemModal = () => {
+    setAddItemModalOpen(false);
+    setAddItemDraft(emptyAddItemDraft());
+    setAddItemError('');
+    setServiceSearch('');
+  };
+
+  const handleAddItemDraftChange = (key, value) => {
+    setAddItemDraft((prev) => {
+      const next = { ...prev, [key]: value };
+      if (key === 'service_id') {
+        const nextService = services.find((row) => Number(row.id) === Number(value));
+        if (!isMeterPricedService(nextService?.name)) {
+          next.meter_length = '';
+          next.meter_width = '';
+        }
+      }
+      return next;
+    });
+  };
+
+  const handleSaveAddItem = async (e) => {
+    e.preventDefault();
+    if (!addItemDraft.service_id) {
+      setAddItemError('Pilih service terlebih dahulu');
+      return;
+    }
+    const service = services.find((row) => Number(row.id) === Number(addItemDraft.service_id));
+    const isGc = isGeneralCleaningCategory(service?.category_name);
+    const needsMeter = isMeterPricedService(service?.name);
+    const meterValue = resolveMeterFromDimensions({
+      serviceName: service?.name,
+      length: addItemDraft.meter_length,
+      width: addItemDraft.meter_width,
+    });
+    const qtyValue = isGc ? 1 : Math.max(1, Number(addItemDraft.qty || 1));
+
+    setAddItemSaving(true);
+    setAddItemError('');
+    setError('');
+    try {
+      await api.post(`/pos-transactions/${id}/items`, {
+        service_id: Number(addItemDraft.service_id),
+        qty: qtyValue,
+        meter: needsMeter && !isGc ? meterValue : null,
+        meter_length:
+          needsMeter && !isGc && meterValue != null ? Number(addItemDraft.meter_length) : null,
+        meter_width:
+          needsMeter && !isGc && meterValue != null ? Number(addItemDraft.meter_width) : null,
+      });
+      closeAddItemModal();
+      await loadData();
+    } catch (err) {
+      setAddItemError(err.response?.data?.message || 'Gagal menambah layanan');
+    } finally {
+      setAddItemSaving(false);
+    }
+  };
 
   const handleCustomerPhotosSelected = async (event) => {
     const files = Array.from(event.target.files || []).filter((file) => /^image\//.test(file.type));
@@ -648,6 +952,25 @@ export default function PosTransactionDetailPage() {
               <p className="mt-1 font-semibold text-slate-900">{transaction.status}</p>
             </div>
             <div>
+              <p className="text-xs uppercase tracking-wide text-slate-400">Promo</p>
+              <p className="mt-1 font-semibold text-slate-900">
+                {transaction.promo_name_snapshot || '-'}
+              </p>
+              {transaction.promo_type_snapshot && transaction.promo_value_snapshot != null && (
+                <p className="text-sm text-slate-500">
+                  {transaction.promo_type_snapshot === 'persen'
+                    ? `${Number(transaction.promo_value_snapshot)}%`
+                    : formatCurrency(transaction.promo_value_snapshot)}
+                </p>
+              )}
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-wide text-slate-400">Diskon</p>
+              <p className="mt-1 font-semibold text-slate-900">
+                {formatCurrency(transaction.discount_amount)}
+              </p>
+            </div>
+            <div>
               <p className="text-xs uppercase tracking-wide text-slate-400">Mode Layanan</p>
               <p className="mt-1">
                 <span
@@ -662,10 +985,117 @@ export default function PosTransactionDetailPage() {
               </p>
             </div>
             <div>
+              <p className="text-xs uppercase tracking-wide text-slate-400">Pembayaran</p>
+              <p className="mt-1 font-semibold text-slate-900">
+                {transaction.payment_method?.label ||
+                  transaction.payment_method?.name ||
+                  'Belum dipilih'}
+              </p>
+              <span
+                className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+                  transaction.payment_status === 'lunas'
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                    : 'border-amber-200 bg-amber-50 text-amber-700'
+                }`}
+              >
+                {transaction.payment_status === 'lunas' ? 'Lunas' : 'Belum lunas'}
+              </span>
+            </div>
+            <div>
               <p className="text-xs uppercase tracking-wide text-slate-400">Catatan</p>
               <p className="mt-1 text-sm text-slate-600">{transaction.notes || '-'}</p>
             </div>
           </div>
+
+          {canEditPayment && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 space-y-4">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">Ubah Pembayaran</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Metode dan status dapat diubah. Status lunas wajib punya minimal 1 bukti.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {['Tunai', 'BCA', 'EDC'].map((group) => {
+                  const active =
+                    (paymentForm.payment_group || selectedPaymentMethod?.method_group || '') ===
+                    group;
+                  return (
+                    <button
+                      key={group}
+                      type="button"
+                      onClick={() => handlePaymentGroupChange(group)}
+                      className={`rounded-xl border px-3.5 py-2 text-sm font-semibold transition ${
+                        active
+                          ? 'border-slate-900 bg-slate-900 text-white'
+                          : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      {group}
+                    </button>
+                  );
+                })}
+              </div>
+              {(paymentForm.payment_group || selectedPaymentMethod?.method_group) === 'BCA' &&
+                selectedPaymentMethod && (
+                  <p className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
+                    {selectedPaymentMethod.label}
+                  </p>
+                )}
+              {(paymentForm.payment_group || selectedPaymentMethod?.method_group) === 'EDC' && (
+                <label className="block space-y-1.5">
+                  <span className="text-xs font-semibold text-slate-600">Jenis kartu EDC BCA</span>
+                  <select
+                    value={paymentForm.payment_method_id}
+                    onChange={(e) =>
+                      setPaymentForm((prev) => ({
+                        ...prev,
+                        payment_method_id: e.target.value,
+                        payment_group: 'EDC',
+                      }))
+                    }
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
+                  >
+                    <option value="">Pilih jenis kartu</option>
+                    {edcPaymentMethods.map((method) => (
+                      <option key={method.id} value={method.id}>
+                        {method.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <label className="block space-y-1.5">
+                <span className="text-xs font-semibold text-slate-600">Status pembayaran</span>
+                <select
+                  value={paymentForm.payment_status}
+                  onChange={(e) =>
+                    setPaymentForm((prev) => ({ ...prev, payment_status: e.target.value }))
+                  }
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
+                >
+                  <option value="belum_lunas">Belum lunas</option>
+                  <option value="lunas">Lunas</option>
+                </select>
+                {paymentForm.payment_status === 'lunas' && paymentProofs.length < 1 && (
+                  <p className="text-xs text-amber-700">Unggah bukti dulu sebelum menandai lunas.</p>
+                )}
+              </label>
+              <button
+                type="button"
+                disabled={
+                  paymentSaving ||
+                  !paymentForm.payment_method_id ||
+                  (paymentForm.payment_status === 'lunas' && paymentProofs.length < 1)
+                }
+                onClick={handleSavePayment}
+                className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+              >
+                <Save className="h-4 w-4" />
+                {paymentSaving ? 'Menyimpan...' : 'Simpan pembayaran'}
+              </button>
+            </div>
+          )}
 
           {!isHistoryEntry && (
           <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 space-y-4">
@@ -725,12 +1155,26 @@ export default function PosTransactionDetailPage() {
           </div>
           )}
 
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold text-slate-900">Item layanan</h3>
+            {canAddItem && (
+              <button
+                type="button"
+                onClick={openAddItemModal}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100"
+              >
+                <Plus className="h-4 w-4" />
+                Tambah Layanan
+              </button>
+            )}
+          </div>
+
           <div className="overflow-x-auto rounded-xl border border-slate-200">
             <table className="min-w-full text-[15px]">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-sm uppercase tracking-wide text-slate-400">
                   <th className="px-3 py-3">Service</th>
-                  <th className="px-3 py-3">Qty</th>
+                  <th className="px-3 py-3">Qty / Ukuran</th>
                   <th className="px-3 py-3">Promo</th>
                   <th className="px-3 py-3 text-right">Harga Final</th>
                   <th className="px-3 py-3 text-right">Line Total</th>
@@ -740,15 +1184,83 @@ export default function PosTransactionDetailPage() {
                 {items.map((item) => {
                   const isGc = isGeneralCleaningCategory(item.category_name);
                   const pendingGc = isGc && !transaction.pricing_finalized_at;
+                  const isMeter = isMeterPricedService(item.service_name);
+                  const pendingMeter = isMeterPricingPending({
+                    serviceName: item.service_name,
+                    meter: item.meter,
+                  });
+                  const draft = meterDrafts[item.id] || { length: '', width: '' };
+                  const canEditMeter = isMeter && transaction.status !== 'Cancelled';
                   return (
                   <tr key={item.id}>
-                    <td className="px-3 py-3 font-medium text-slate-800">{item.service_name}</td>
+                    <td className="px-3 py-3 font-medium text-slate-800">
+                      {item.service_name}
+                      {pendingMeter && (
+                        <span className="ml-2 inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+                          Pending meter
+                        </span>
+                      )}
+                    </td>
                     <td className="px-3 py-3 text-slate-600">
-                      {pendingGc
-                        ? '—'
-                        : item.meter != null && item.meter !== ''
-                          ? `Qty ${item.qty} · ${Number(item.meter)} m`
-                          : item.qty}
+                      {pendingGc ? (
+                        '—'
+                      ) : isMeter ? (
+                        <div className="space-y-2">
+                          <p>
+                            Qty {item.qty}
+                            {!pendingMeter ? ` · ${Number(item.meter)} m²` : ''}
+                          </p>
+                          {canEditMeter && (
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0.01"
+                                placeholder="P"
+                                value={draft.length}
+                                onChange={(e) =>
+                                  setMeterDrafts((prev) => ({
+                                    ...prev,
+                                    [item.id]: { ...draft, length: e.target.value },
+                                  }))
+                                }
+                                className="w-16 rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                                disabled={meterSavingId === item.id}
+                              />
+                              <span className="text-xs font-bold text-slate-400">×</span>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0.01"
+                                placeholder="L"
+                                value={draft.width}
+                                onChange={(e) =>
+                                  setMeterDrafts((prev) => ({
+                                    ...prev,
+                                    [item.id]: { ...draft, width: e.target.value },
+                                  }))
+                                }
+                                className="w-16 rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                                disabled={meterSavingId === item.id}
+                              />
+                              <button
+                                type="button"
+                                disabled={meterSavingId === item.id}
+                                onClick={() => handleSaveItemMeter(item.id)}
+                                className="rounded-lg bg-slate-900 px-2.5 py-1.5 text-[11px] font-semibold text-white disabled:opacity-60"
+                              >
+                                {meterSavingId === item.id
+                                  ? '...'
+                                  : pendingMeter
+                                    ? 'Simpan'
+                                    : 'Update'}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        item.qty
+                      )}
                       {isGc && transaction.pricing_finalized_at ? ' jam' : ''}
                     </td>
                     <td className="px-3 py-3 text-slate-600">{item.promo_name_snapshot || '-'}</td>
@@ -762,7 +1274,11 @@ export default function PosTransactionDetailPage() {
                       {isGc ? ' / jam' : ''}
                     </td>
                     <td className="px-3 py-3 text-right font-semibold text-slate-900">
-                      {pendingGc ? 'Pending jam' : formatCurrency(item.line_total)}
+                      {pendingGc
+                        ? 'Pending jam'
+                        : pendingMeter
+                          ? 'Pending meter'
+                          : formatCurrency(item.line_total)}
                     </td>
                   </tr>
                   );
@@ -770,6 +1286,13 @@ export default function PosTransactionDetailPage() {
               </tbody>
             </table>
           </div>
+          {(hasGc && !transaction.pricing_finalized_at) || hasMeterPending ? (
+            <p className="text-xs text-amber-700">
+              Ada harga yang masih pending
+              {hasGc && !transaction.pricing_finalized_at ? ' (jam GC)' : ''}
+              {hasMeterPending ? ' (ukuran meter)' : ''}. Total transaksi belum final.
+            </p>
+          ) : null}
         </section>
       </div>
 
@@ -957,6 +1480,79 @@ export default function PosTransactionDetailPage() {
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
+            <h2 className="text-lg font-semibold text-slate-900">Bukti Pembayaran</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Lampiran bukti transfer/EDC/tunai · {paymentProofs.length}/10
+            </p>
+          </div>
+          <div>
+            <input
+              ref={paymentProofFileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={handlePaymentProofsSelected}
+            />
+            <button
+              type="button"
+              disabled={!canUploadPaymentProofs || paymentProofUploading}
+              onClick={() => paymentProofFileInputRef.current?.click()}
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-800 shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <ImagePlus className="h-4 w-4" />
+              {paymentProofUploading ? 'Mengunggah...' : 'Tambah bukti'}
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4">
+          {paymentProofs.length === 0 ? (
+            <p className="text-sm text-slate-500">Belum ada bukti pembayaran.</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+              {paymentProofs.map((photo) => (
+                <div
+                  key={photo.id}
+                  className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-50"
+                >
+                  {canEditPayment && (
+                    <button
+                      type="button"
+                      disabled={paymentProofUploading}
+                      onClick={() => handleDeletePaymentProof(photo.id)}
+                      className="absolute right-1.5 top-1.5 z-[1] inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/65 text-white shadow-lg disabled:opacity-60"
+                      aria-label="Hapus bukti pembayaran"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                  {paymentPreviewMap[String(photo.id)] ? (
+                    <img
+                      src={paymentPreviewMap[String(photo.id)]}
+                      alt="Bukti pembayaran"
+                      className="h-36 w-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-36 w-full items-center justify-center text-xs text-slate-400">
+                      Memuat...
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        {transaction.status === 'Cancelled' && (
+          <p className="mt-3 text-xs text-amber-700">
+            Transaction cancelled — payment proof upload is disabled.
+          </p>
+        )}
+      </section>
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
             <h2 className="text-lg font-semibold text-slate-900">Referensi Customer</h2>
             <p className="mt-1 text-sm text-slate-500">
               Foto before dari customer — terlihat pekerja di mobile sebagai acuan · {customerPhotos.length}/10
@@ -1082,12 +1678,33 @@ export default function PosTransactionDetailPage() {
                             const key = evidencePreviewKey(assignment.id, 'before', photo, index);
                             const preview = evidencePreviewMap[key];
                             return preview ? (
-                              <img
-                                key={key}
-                                src={preview}
-                                alt={`Before ${assignment.employee_name || ''}`}
-                                className="h-28 w-full rounded-xl object-cover border border-slate-200"
-                              />
+                              <div key={key} className="relative">
+                                <img
+                                  src={preview}
+                                  alt={`Before ${assignment.employee_name || ''}`}
+                                  className="h-28 w-full rounded-xl object-cover border border-slate-200"
+                                />
+                                <button
+                                  type="button"
+                                  aria-label="Unduh foto before"
+                                  onClick={() =>
+                                    downloadEvidencePhoto({
+                                      blobUrl: preview,
+                                      photoPath: photo?.photo_path,
+                                      fileName: buildEvidenceDownloadName({
+                                        transactionNo: transaction.transaction_no,
+                                        employeeName: assignment.employee_name,
+                                        kind: 'before',
+                                        index,
+                                        photo,
+                                      }),
+                                    })
+                                  }
+                                  className="absolute right-1.5 top-1.5 z-[1] inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/65 text-white shadow-lg"
+                                >
+                                  <Download className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
                             ) : (
                               <div key={key} className="h-28 w-full rounded-xl bg-slate-200 animate-pulse" />
                             );
@@ -1106,12 +1723,33 @@ export default function PosTransactionDetailPage() {
                             const key = evidencePreviewKey(assignment.id, 'after', photo, index);
                             const preview = evidencePreviewMap[key];
                             return preview ? (
-                              <img
-                                key={key}
-                                src={preview}
-                                alt={`After ${assignment.employee_name || ''}`}
-                                className="h-28 w-full rounded-xl object-cover border border-slate-200"
-                              />
+                              <div key={key} className="relative">
+                                <img
+                                  src={preview}
+                                  alt={`After ${assignment.employee_name || ''}`}
+                                  className="h-28 w-full rounded-xl object-cover border border-slate-200"
+                                />
+                                <button
+                                  type="button"
+                                  aria-label="Unduh foto after"
+                                  onClick={() =>
+                                    downloadEvidencePhoto({
+                                      blobUrl: preview,
+                                      photoPath: photo?.photo_path,
+                                      fileName: buildEvidenceDownloadName({
+                                        transactionNo: transaction.transaction_no,
+                                        employeeName: assignment.employee_name,
+                                        kind: 'after',
+                                        index,
+                                        photo,
+                                      }),
+                                    })
+                                  }
+                                  className="absolute right-1.5 top-1.5 z-[1] inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/65 text-white shadow-lg"
+                                >
+                                  <Download className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
                             ) : (
                               <div key={key} className="h-28 w-full rounded-xl bg-slate-200 animate-pulse" />
                             );
@@ -1184,6 +1822,188 @@ export default function PosTransactionDetailPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {addItemModalOpen && (
+        <BodyPortal>
+          <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center bg-slate-900/40 p-3">
+            <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-[20px] border border-slate-200 bg-white shadow-xl">
+              <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+                <h3 className="text-[15px] font-bold text-slate-900">Tambah Layanan</h3>
+                <button
+                  type="button"
+                  onClick={closeAddItemModal}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-[10px] border border-slate-200 text-slate-600"
+                  aria-label="Tutup"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <form onSubmit={handleSaveAddItem} className="space-y-4 px-5 py-4">
+                {addItemError && (
+                  <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                    {addItemError}
+                  </div>
+                )}
+                <label className="block space-y-1.5">
+                  <span className="text-[9.5px] font-semibold uppercase tracking-[.14em] text-slate-400">
+                    Cari service
+                  </span>
+                  <input
+                    type="search"
+                    value={serviceSearch}
+                    onChange={(e) => setServiceSearch(e.target.value)}
+                    placeholder="Ketik nama service..."
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm focus:border-blue-400 focus:bg-white focus:outline-none"
+                  />
+                </label>
+                <div className="max-h-48 space-y-1.5 overflow-y-auto rounded-xl border border-slate-200 p-2">
+                  {services
+                    .filter((row) => {
+                      const term = serviceSearch.trim().toLowerCase();
+                      if (!term) return true;
+                      return String(row.name || '')
+                        .toLowerCase()
+                        .includes(term);
+                    })
+                    .map((row) => {
+                      const selected = Number(addItemDraft.service_id) === Number(row.id);
+                      return (
+                        <button
+                          key={row.id}
+                          type="button"
+                          onClick={() => handleAddItemDraftChange('service_id', String(row.id))}
+                          className={`flex w-full items-start justify-between gap-2 rounded-xl border px-3 py-2.5 text-left text-sm transition ${
+                            selected
+                              ? 'border-blue-300 bg-blue-50 text-blue-900'
+                              : 'border-transparent bg-white text-slate-800 hover:bg-slate-50'
+                          }`}
+                        >
+                          <span className="font-semibold">{row.name}</span>
+                          <span className="shrink-0 text-xs text-slate-500">
+                            {formatCurrency(row.coret_price != null ? row.coret_price : row.price)}
+                          </span>
+                        </button>
+                      );
+                    })}
+                </div>
+
+                {(() => {
+                  const draftService = services.find(
+                    (row) => Number(row.id) === Number(addItemDraft.service_id)
+                  );
+                  const draftIsGc = isGeneralCleaningCategory(draftService?.category_name);
+                  const draftNeedsMeter = isMeterPricedService(draftService?.name);
+                  const draftArea = resolveMeterFromDimensions({
+                    serviceName: draftService?.name,
+                    length: addItemDraft.meter_length,
+                    width: addItemDraft.meter_width,
+                  });
+                  if (!draftService) return null;
+                  return (
+                    <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+                      {!draftIsGc && (
+                        <label className="block space-y-1.5">
+                          <span className="text-[9.5px] font-semibold uppercase tracking-[.14em] text-slate-400">
+                            Qty
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleAddItemDraftChange(
+                                  'qty',
+                                  Math.max(1, Number(addItemDraft.qty || 1) - 1)
+                                )
+                              }
+                              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white"
+                              aria-label="Kurangi qty"
+                            >
+                              <Minus className="h-4 w-4" />
+                            </button>
+                            <input
+                              type="text"
+                              readOnly
+                              value={addItemDraft.qty}
+                              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-center text-sm font-bold"
+                            />
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleAddItemDraftChange(
+                                  'qty',
+                                  Math.max(1, Number(addItemDraft.qty || 1) + 1)
+                                )
+                              }
+                              className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900 text-white"
+                              aria-label="Tambah qty"
+                            >
+                              <Plus className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </label>
+                      )}
+                      {draftNeedsMeter && (
+                        <div className="space-y-1.5">
+                          <span className="text-[9.5px] font-semibold uppercase tracking-[.14em] text-slate-400">
+                            Ukuran (panjang × lebar)
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0.01"
+                              value={addItemDraft.meter_length}
+                              onChange={(e) =>
+                                handleAddItemDraftChange('meter_length', e.target.value)
+                              }
+                              placeholder="P"
+                              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
+                            />
+                            <span className="text-sm font-bold text-slate-400">×</span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0.01"
+                              value={addItemDraft.meter_width}
+                              onChange={(e) =>
+                                handleAddItemDraftChange('meter_width', e.target.value)
+                              }
+                              placeholder="L"
+                              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
+                            />
+                          </div>
+                          <p className="text-[11px] text-slate-500">
+                            {draftArea != null
+                              ? `Total ${draftArea} m²`
+                              : 'Opsional — bisa diisi nanti'}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                <div className="flex justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={closeAddItemModal}
+                    className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={addItemSaving || !addItemDraft.service_id}
+                    className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+                  >
+                    {addItemSaving ? 'Menyimpan...' : 'Tambah Layanan'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </BodyPortal>
       )}
     </div>
   );

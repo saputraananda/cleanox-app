@@ -263,13 +263,26 @@ export default function PosTransactionsPage() {
                         <td className="px-3 py-3 text-slate-600">{row.total_items}</td>
                         <td className="px-3 py-3 text-slate-600">{row.total_workers ?? '-'}</td>
                         <td className="px-3 py-3">
-                          <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-sm font-semibold text-slate-700">
-                            {row.status}
-                          </span>
+                          <div className="flex flex-col items-start gap-1">
+                            <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-sm font-semibold text-slate-700">
+                              {row.status}
+                            </span>
+                            {row.source_system === 'pos' && row.payment_status ? (
+                              <span
+                                className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                                  row.payment_status === 'lunas'
+                                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                    : 'border-amber-200 bg-amber-50 text-amber-700'
+                                }`}
+                              >
+                                {row.payment_status === 'lunas' ? 'Lunas' : 'Belum lunas'}
+                              </span>
+                            ) : null}
+                          </div>
                         </td>
                         <td className="px-3 py-3 text-right font-semibold text-slate-900">
                           {row.pricing_pending
-                            ? 'Pending jam'
+                            ? 'Pending harga'
                             : formatCurrency(row.final_amount)}
                         </td>
                         <td className="px-3 py-3 text-right">

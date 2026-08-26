@@ -19,7 +19,6 @@ import BodyPortal from '@web/components/BodyPortal.jsx';
 import TablePagination, { PAGE_SIZE_OPTIONS } from '@web/components/TablePagination.jsx';
 import {
   calculateGcBillingHours,
-  computeGcLineTotals,
   getGcCrewSizeFromItems,
   isGeneralCleaningCategory,
   parseGcCrewSizeFromServiceName,
@@ -32,6 +31,7 @@ import {
   resolveMeterFromDimensions,
 } from '@web/utils/posMeterServices.js';
 import { isBlankAddress } from '@web/utils/posCustomerAddress.js';
+import { computeTransactionPromoDiscount } from '@web/utils/posTransactionPromo.js';
 
 const inputClass =
   'w-full rounded-[12px] border border-slate-200 bg-slate-50 px-3 py-2.5 text-[13px] text-slate-800 transition duration-150 focus:bg-white focus:border-blue-400 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,.12)]';
@@ -67,7 +67,6 @@ function emptyItemDraft() {
     qty: 1,
     meter_length: '',
     meter_width: '',
-    promo_id: '',
   };
 }
 
@@ -101,7 +100,11 @@ export default function PosHistoryTransactionCreatePage() {
     items: [],
     worker_ids: [],
     service_mode: 'home_service',
+    payment_method_id: '',
+    promo_id: '',
   });
+  const [paymentMethods, setPaymentMethods] = useState([]);
+  const [paymentGroup, setPaymentGroup] = useState('');
   const [itemModalOpen, setItemModalOpen] = useState(false);
   const [editingItemIndex, setEditingItemIndex] = useState(null);
   const [itemDraft, setItemDraft] = useState(emptyItemDraft());
@@ -133,7 +136,6 @@ export default function PosHistoryTransactionCreatePage() {
     }
 
     let subtotal = 0;
-    let discount = 0;
     let hasGc = false;
     const gcRates = [];
 
@@ -142,15 +144,8 @@ export default function PosHistoryTransactionCreatePage() {
       if (!service) continue;
       const isGc = isGeneralCleaningCategory(service.category_name);
       const qty = Math.max(1, Number(item.qty || 1));
-      const promo = service.promos?.find((row) => Number(row.id) === Number(item.promo_id));
       const base = resolveEffectiveBasePrice(service);
-      const discountPerUnit = promo
-        ? promo.promo_type === 'persen'
-          ? (base * Number(promo.promo_value || 0)) / 100
-          : Number(promo.promo_value || 0)
-        : 0;
-      const safeDiscount = Math.min(base, discountPerUnit);
-      const rateFinal = Math.max(0, base - safeDiscount);
+      const rateFinal = base;
 
       if (isGc) {
         hasGc = true;
@@ -160,14 +155,7 @@ export default function PosHistoryTransactionCreatePage() {
           crew: parseGcCrewSizeFromServiceName(service.name) || Number(form.total_people || 1),
         });
         if (hoursOk && hours != null) {
-          const computed = computeGcLineTotals({
-            basePrice: base,
-            promoType: promo?.promo_type || null,
-            promoValue: promo?.promo_value || null,
-            billingHours: hours,
-          });
           subtotal += base * hours;
-          discount += computed.promoDiscountAmount;
         }
         continue;
       }
@@ -178,8 +166,20 @@ export default function PosHistoryTransactionCreatePage() {
         meter: item.meter,
       });
       subtotal += base * billable;
-      discount += safeDiscount * billable;
     }
+
+    const selectedPromo = (form.items || [])
+      .flatMap((item) => {
+        const service = services.find((row) => Number(row.id) === Number(item.service_id));
+        return service?.promos || [];
+      })
+      .find((row) => Number(row.id) === Number(form.promo_id));
+
+    const { discountAmount: discount } = computeTransactionPromoDiscount({
+      subtotal,
+      promoType: selectedPromo?.promo_type || null,
+      promoValue: selectedPromo?.promo_value ?? null,
+    });
 
     return {
       hours,
@@ -191,7 +191,26 @@ export default function PosHistoryTransactionCreatePage() {
       finalAmount: subtotal - discount,
       needsHours: hasGc,
     };
-  }, [form.items, form.total_people, jobEndedAt, jobStartedAt, services]);
+  }, [form.items, form.promo_id, form.total_people, jobEndedAt, jobStartedAt, services]);
+
+  const availablePromos = useMemo(() => {
+    const map = new Map();
+    for (const item of form.items || []) {
+      const service = services.find((row) => Number(row.id) === Number(item.service_id));
+      for (const promo of service?.promos || []) {
+        if (!map.has(Number(promo.id))) map.set(Number(promo.id), promo);
+      }
+    }
+    return [...map.values()];
+  }, [form.items, services]);
+
+  useEffect(() => {
+    if (!form.promo_id) return;
+    const stillValid = availablePromos.some((row) => Number(row.id) === Number(form.promo_id));
+    if (!stillValid) {
+      setForm((prev) => ({ ...prev, promo_id: '' }));
+    }
+  }, [availablePromos, form.promo_id]);
 
   const serviceCategories = useMemo(() => {
     const cats = [...serviceCategoriesMaster]
@@ -246,13 +265,15 @@ export default function PosHistoryTransactionCreatePage() {
     const loadData = async () => {
       setLoading(true);
       try {
-        const [serviceRes, workerRes] = await Promise.all([
+        const [serviceRes, workerRes, paymentRes] = await Promise.all([
           api.get('/pos-transactions/services'),
           api.get('/pos-transactions/workers'),
+          api.get('/pos-master/payment-methods', { params: { is_active: 1 } }),
         ]);
         setServices(serviceRes.data.services || []);
         setServiceCategoriesMaster(serviceRes.data.categories || []);
         setWorkers(workerRes.data.workers || []);
+        setPaymentMethods(paymentRes.data.data || []);
       } catch (err) {
         setError(err.response?.data?.message || 'Gagal memuat master POS');
       } finally {
@@ -330,7 +351,6 @@ export default function PosHistoryTransactionCreatePage() {
           : item.meter != null && item.meter !== ''
             ? '1'
             : '',
-      promo_id: item.promo_id || '',
     });
     setItemModalError('');
     resetServicePickerFilters(categoryId);
@@ -349,7 +369,6 @@ export default function PosHistoryTransactionCreatePage() {
     setItemDraft((prev) => {
       const next = { ...prev, [key]: value };
       if (key === 'service_id') {
-        next.promo_id = '';
         const nextService = services.find((row) => Number(row.id) === Number(value));
         if (!isMeterPricedService(nextService?.name)) {
           next.meter_length = '';
@@ -376,12 +395,7 @@ export default function PosHistoryTransactionCreatePage() {
       length: itemDraft.meter_length,
       width: itemDraft.meter_width,
     });
-    if (needsMeter && meterValue == null) {
-      setItemModalError(
-        `Ukuran panjang × lebar wajib diisi untuk service ${service?.name || ''}`
-      );
-      return;
-    }
+    // Meter ukuran opsional — bisa diisi nanti di detail
 
     const qtyValue = Math.max(1, Number(itemDraft.qty || 1));
     const nextItemsPreview =
@@ -392,9 +406,8 @@ export default function PosHistoryTransactionCreatePage() {
               service_id: itemDraft.service_id,
               qty: qtyValue,
               meter: needsMeter ? meterValue : null,
-              meter_length: needsMeter ? lengthValue : null,
-              meter_width: needsMeter ? widthValue : null,
-              promo_id: itemDraft.promo_id || '',
+              meter_length: needsMeter && meterValue != null ? lengthValue : null,
+              meter_width: needsMeter && meterValue != null ? widthValue : null,
             },
           ]
         : form.items.map((item, idx) =>
@@ -403,9 +416,8 @@ export default function PosHistoryTransactionCreatePage() {
                   service_id: itemDraft.service_id,
                   qty: qtyValue,
                   meter: needsMeter ? meterValue : null,
-                  meter_length: needsMeter ? lengthValue : null,
-                  meter_width: needsMeter ? widthValue : null,
-                  promo_id: itemDraft.promo_id || '',
+                  meter_length: needsMeter && meterValue != null ? lengthValue : null,
+                  meter_width: needsMeter && meterValue != null ? widthValue : null,
                 }
               : item
           );
@@ -420,9 +432,8 @@ export default function PosHistoryTransactionCreatePage() {
       service_id: itemDraft.service_id,
       qty: isGc ? 1 : qtyValue,
       meter: isGc || !needsMeter ? null : meterValue,
-      meter_length: isGc || !needsMeter ? null : lengthValue,
-      meter_width: isGc || !needsMeter ? null : widthValue,
-      promo_id: itemDraft.promo_id || '',
+      meter_length: isGc || !needsMeter || meterValue == null ? null : lengthValue,
+      meter_width: isGc || !needsMeter || meterValue == null ? null : widthValue,
     };
 
     setForm((prev) => {
@@ -515,6 +526,10 @@ export default function PosHistoryTransactionCreatePage() {
       setError(`Pilih tepat ${form.total_people} pekerja sesuai paket General Cleaning`);
       return;
     }
+    if (!form.payment_method_id) {
+      setError('Metode pembayaran wajib dipilih');
+      return;
+    }
 
     setSaving(true);
     setError('');
@@ -531,12 +546,13 @@ export default function PosHistoryTransactionCreatePage() {
         total_people: Number(form.total_people || 1),
         notes: form.notes,
         service_mode: form.service_mode || 'home_service',
+        payment_method_id: Number(form.payment_method_id),
+        promo_id: form.promo_id ? Number(form.promo_id) : null,
         worker_ids: form.worker_ids,
         items: form.items.map((item) => ({
           service_id: Number(item.service_id),
           qty: Number(item.qty || 1),
           meter: item.meter == null || item.meter === '' ? null : Number(item.meter),
-          promo_id: item.promo_id ? Number(item.promo_id) : null,
         })),
       };
       const { data } = await api.post('/pos-transactions', payload);
@@ -734,17 +750,9 @@ export default function PosHistoryTransactionCreatePage() {
             <div className="space-y-2.5">
               {form.items.map((item, index) => {
                 const service = services.find((row) => Number(row.id) === Number(item.service_id));
-                const promo = service?.promos?.find(
-                  (row) => Number(row.id) === Number(item.promo_id)
-                );
                 const qty = Math.max(1, Number(item.qty || 1));
                 const base = resolveEffectiveBasePrice(service || {});
-                const discountPerUnit = promo
-                  ? promo.promo_type === 'persen'
-                    ? (base * Number(promo.promo_value || 0)) / 100
-                    : Number(promo.promo_value || 0)
-                  : 0;
-                const rateFinal = Math.max(0, base - Math.min(base, discountPerUnit));
+                const rateFinal = base;
                 const isGc = isGeneralCleaningCategory(service?.category_name);
                 const crew =
                   parseGcCrewSizeFromServiceName(service?.name) ||
@@ -776,11 +784,6 @@ export default function PosHistoryTransactionCreatePage() {
                         {isGc && (
                           <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[10px] font-semibold text-sky-700">
                             General Cleaning
-                          </span>
-                        )}
-                        {promo && (
-                          <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10px] font-semibold text-amber-700">
-                            {promo.name}
                           </span>
                         )}
                       </div>
@@ -896,6 +899,90 @@ export default function PosHistoryTransactionCreatePage() {
         </section>
 
         <section className={sectionCardClass}>
+          <p className="text-[13px] font-semibold text-slate-800">Pembayaran</p>
+          <p className="mt-1 text-[11.5px] text-slate-400">
+            Status default belum lunas — bukti diunggah di detail transaksi
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {['Tunai', 'BCA', 'EDC'].map((group) => {
+              const selectedMethod = paymentMethods.find(
+                (m) => Number(m.id) === Number(form.payment_method_id)
+              );
+              const active = (paymentGroup || selectedMethod?.method_group || '') === group;
+              return (
+                <button
+                  key={group}
+                  type="button"
+                  onClick={() => {
+                    setPaymentGroup(group);
+                    if (group === 'EDC') {
+                      const stillEdc = paymentMethods.some(
+                        (m) =>
+                          m.method_group === 'EDC' &&
+                          Number(m.id) === Number(form.payment_method_id)
+                      );
+                      if (!stillEdc) {
+                        setForm((prev) => ({ ...prev, payment_method_id: '' }));
+                      }
+                      return;
+                    }
+                    const method = paymentMethods.find((m) => m.method_group === group);
+                    setForm((prev) => ({
+                      ...prev,
+                      payment_method_id: method ? String(method.id) : '',
+                    }));
+                  }}
+                  className={`rounded-xl border px-3.5 py-2 text-sm font-semibold transition ${
+                    active
+                      ? 'border-slate-900 bg-slate-900 text-white'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  {group}
+                </button>
+              );
+            })}
+          </div>
+          {(() => {
+            const selectedMethod = paymentMethods.find(
+              (m) => Number(m.id) === Number(form.payment_method_id)
+            );
+            const group = paymentGroup || selectedMethod?.method_group || '';
+            if (group === 'BCA' && selectedMethod) {
+              return (
+                <p className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                  {selectedMethod.label}
+                </p>
+              );
+            }
+            if (group === 'EDC') {
+              return (
+                <label className="mt-3 block space-y-1.5">
+                  <span className="text-[12px] font-semibold text-slate-600">Jenis kartu EDC BCA</span>
+                  <select
+                    value={form.payment_method_id}
+                    onChange={(e) =>
+                      setForm((prev) => ({ ...prev, payment_method_id: e.target.value }))
+                    }
+                    className={inputClass}
+                  >
+                    <option value="">Pilih jenis kartu</option>
+                    {paymentMethods
+                      .filter((m) => m.method_group === 'EDC')
+                      .map((method) => (
+                        <option key={method.id} value={method.id}>
+                          {method.name}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              );
+            }
+            return null;
+          })()}
+        </section>
+
+        <section className={sectionCardClass}>
           <label className="space-y-1.5 block">
             <span className="text-[12px] font-semibold text-slate-600">Catatan (opsional)</span>
             <textarea
@@ -906,7 +993,27 @@ export default function PosHistoryTransactionCreatePage() {
               placeholder="Catatan internal pencatatan history"
             />
           </label>
-          <div className="rounded-[14px] border border-slate-200 bg-slate-50 px-4 py-3 space-y-1">
+          <div className="rounded-[14px] border border-slate-200 bg-slate-50 px-4 py-3 space-y-3">
+            <label className="block space-y-1.5">
+              <span className="text-[12px] font-semibold text-slate-600">Promo (satu transaksi)</span>
+              <select
+                className={inputClass}
+                value={form.promo_id}
+                onChange={(e) => setForm((prev) => ({ ...prev, promo_id: e.target.value }))}
+                disabled={form.items.length === 0}
+              >
+                <option value="">Tanpa promo</option>
+                {availablePromos.map((promo) => (
+                  <option key={promo.id} value={promo.id}>
+                    {promo.name} -{' '}
+                    {promo.promo_type === 'persen'
+                      ? `${promo.promo_value}%`
+                      : `Rp ${Number(promo.promo_value || 0).toLocaleString('id-ID')}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="space-y-1">
             <p className="text-[12px] font-semibold uppercase tracking-wide text-slate-400">
               Estimasi total
             </p>
@@ -927,6 +1034,7 @@ export default function PosHistoryTransactionCreatePage() {
                 ? ` · GC ${pricingPreview.hours} jam`
                 : ''}
             </p>
+            </div>
           </div>
           <button
             type="submit"
@@ -1183,30 +1291,10 @@ export default function PosHistoryTransactionCreatePage() {
                         />
                       </div>
                       <p className="text-[11px] text-slate-500">
-                        {draftArea != null ? `Total ${draftArea} m²` : 'Isi panjang × lebar'}
+                        {draftArea != null ? `Total ${draftArea} m²` : 'Opsional — bisa diisi nanti di detail transaksi'}
                       </p>
                     </div>
                   )}
-
-                  <label className="block space-y-1.5">
-                    <span className={labelEyebrowClass}>Promo</span>
-                    <select
-                      value={itemDraft.promo_id}
-                      onChange={(e) => handleItemDraftChange('promo_id', e.target.value)}
-                      className={inputClass}
-                      disabled={!itemDraft.service_id}
-                    >
-                      <option value="">Tanpa promo</option>
-                      {(draftService?.promos || []).map((promo) => (
-                        <option key={promo.id} value={promo.id}>
-                          {promo.name} -{' '}
-                          {promo.promo_type === 'persen'
-                            ? `${promo.promo_value}%`
-                            : `Rp ${Number(promo.promo_value || 0).toLocaleString('id-ID')}`}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
                 </div>
                 <div className="flex justify-end gap-2">
                   <button

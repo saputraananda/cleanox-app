@@ -4,6 +4,7 @@ import {
   isGeneralCleaningCategory,
   isGcPricingPending,
 } from './posGeneralCleaningBilling.js';
+import { isMeterPricingPending } from './posMeterServices.js';
 import {
   PDF_HEADER_RGB,
   PENDING_TOTAL_TEXT,
@@ -22,6 +23,9 @@ function formatLongDateId(date = new Date()) {
 
 function formatQtyLabel(item, pendingGc) {
   if (pendingGc && isGeneralCleaningCategory(item.category_name)) return '—';
+  if (isMeterPricingPending({ serviceName: item.service_name, meter: item.meter })) {
+    return String(item.qty ?? 1);
+  }
   if (item.meter != null && item.meter !== '') {
     return `${item.qty ?? 1} × ${Number(item.meter)} m`;
   }
@@ -202,6 +206,10 @@ export async function downloadPosOrderFormPdf({ transaction, items = [], logoDat
     }
 
     const isGcPending = pendingGc && isGeneralCleaningCategory(item.category_name);
+    const isMeterPending = isMeterPricingPending({
+      serviceName: item.service_name,
+      meter: item.meter,
+    });
     const cells = [
       { text: String(index + 1), w: cols[0].w, align: 'left' },
       {
@@ -218,7 +226,7 @@ export async function downloadPosOrderFormPdf({ transaction, items = [], logoDat
         align: 'right',
       },
       {
-        text: isGcPending ? 'Pending' : formatMoney(item.line_total),
+        text: isGcPending || isMeterPending ? 'Pending' : formatMoney(item.line_total),
         w: cols[4].w,
         align: 'right',
       },

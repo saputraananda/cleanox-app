@@ -40,6 +40,7 @@ import {
   formatMeterDimensionsLabel,
 } from '@web/utils/posMeterServices.js';
 import { isBlankAddress } from '@web/utils/posCustomerAddress.js';
+import { computeTransactionPromoDiscount } from '@web/utils/posTransactionPromo.js';
 
 const inputClass =
   'w-full rounded-[12px] border border-slate-200 bg-slate-50 px-3 py-2.5 text-[13px] text-slate-800 transition duration-150 focus:bg-white focus:border-blue-400 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,.12)]';
@@ -187,7 +188,11 @@ export default function PosTransactionCreatePage() {
     items: [],
     worker_ids: [],
     service_mode: 'home_service',
+    payment_method_id: '',
+    promo_id: '',
   });
+  const [paymentMethods, setPaymentMethods] = useState([]);
+  const [paymentGroup, setPaymentGroup] = useState('');
   const [itemModalOpen, setItemModalOpen] = useState(false);
   const [editingItemIndex, setEditingItemIndex] = useState(null);
   const [itemDraft, setItemDraft] = useState({
@@ -195,7 +200,6 @@ export default function PosTransactionCreatePage() {
     qty: 1,
     meter_length: '',
     meter_width: '',
-    promo_id: '',
   });
   const [itemModalError, setItemModalError] = useState('');
   const [deleteItemIndex, setDeleteItemIndex] = useState(null);
@@ -323,12 +327,14 @@ export default function PosTransactionCreatePage() {
     const loadData = async () => {
       setLoading(true);
       try {
-        const [serviceRes] = await Promise.all([
+        const [serviceRes, paymentRes] = await Promise.all([
           api.get('/pos-transactions/services'),
+          api.get('/pos-master/payment-methods', { params: { is_active: 1 } }),
           loadCustomers({ search: '', page: 1, pageSize: PAGE_SIZE_OPTIONS[0] || 10 }),
         ]);
         setServices(serviceRes.data.services || []);
         setServiceCategoriesMaster(serviceRes.data.categories || []);
+        setPaymentMethods(paymentRes.data.data || []);
         const workerRes = await api.get('/pos-transactions/workers');
         setWorkers(workerRes.data.workers || []);
       } catch (err) {
@@ -380,10 +386,10 @@ export default function PosTransactionCreatePage() {
   }, [form.total_people]);
 
   const selectedTotals = useMemo(() => {
-    return form.items.reduce(
-      (acc, item) => {
+    const acc = form.items.reduce(
+      (state, item) => {
         const service = services.find((row) => Number(row.id) === Number(item.service_id));
-        if (!service) return acc;
+        if (!service) return state;
 
         const isGc = isGeneralCleaningCategory(service.category_name);
         const qty = Math.max(1, Number(item.qty || 1));
@@ -394,33 +400,59 @@ export default function PosTransactionCreatePage() {
               qty,
               meter: item.meter,
             });
-        const promo = service.promos?.find((row) => Number(row.id) === Number(item.promo_id));
         const base = resolveEffectiveBasePrice(service);
-        const discountPerUnit = promo
-          ? promo.promo_type === 'persen'
-            ? (base * Number(promo.promo_value || 0)) / 100
-            : Number(promo.promo_value || 0)
-          : 0;
-        const safeDiscountPerUnit = Math.min(base, discountPerUnit);
-        const finalPrice = Math.max(0, base - safeDiscountPerUnit);
+        const finalPrice = base;
 
         if (isGc) {
-          acc.hasGc = true;
-          acc.gcRates.push({
+          state.hasGc = true;
+          state.gcRates.push({
             name: service.name,
             rate: finalPrice,
             crew: parseGcCrewSizeFromServiceName(service.name) || Number(form.total_people || 1),
           });
-          return acc;
+          return state;
         }
 
-        acc.subtotal += base * billable;
-        acc.discount += safeDiscountPerUnit * billable;
-        return acc;
+        state.subtotal += base * billable;
+        return state;
       },
-      { subtotal: 0, discount: 0, hasGc: false, gcRates: [] }
+      { subtotal: 0, hasGc: false, gcRates: [] }
     );
-  }, [form.items, form.total_people, services]);
+
+    const selectedPromo = (form.items || [])
+      .flatMap((item) => {
+        const service = services.find((row) => Number(row.id) === Number(item.service_id));
+        return service?.promos || [];
+      })
+      .find((row) => Number(row.id) === Number(form.promo_id));
+
+    const { discountAmount: discount } = computeTransactionPromoDiscount({
+      subtotal: acc.subtotal,
+      promoType: selectedPromo?.promo_type || null,
+      promoValue: selectedPromo?.promo_value ?? null,
+    });
+
+    return { ...acc, discount };
+  }, [form.items, form.total_people, form.promo_id, services]);
+
+  const availablePromos = useMemo(() => {
+    const map = new Map();
+    for (const item of form.items || []) {
+      const service = services.find((row) => Number(row.id) === Number(item.service_id));
+      for (const promo of service?.promos || []) {
+        if (!map.has(Number(promo.id))) map.set(Number(promo.id), promo);
+      }
+    }
+    return [...map.values()];
+  }, [form.items, services]);
+
+  useEffect(() => {
+    if (!form.promo_id) return;
+    const stillValid = availablePromos.some((row) => Number(row.id) === Number(form.promo_id));
+    if (!stillValid) {
+      setForm((prev) => ({ ...prev, promo_id: '' }));
+    }
+  }, [availablePromos, form.promo_id]);
 
   const gcCrewInfo = useMemo(
     () => getGcCrewSizeFromItems(form.items, services),
@@ -447,19 +479,12 @@ export default function PosTransactionCreatePage() {
         if (!service) return null;
 
         const qty = Math.max(1, Number(item.qty || 1));
-        const promo = service.promos?.find((row) => Number(row.id) === Number(item.promo_id));
         const base = resolveEffectiveBasePrice(service);
         const originalPrice =
           service.coret_price != null && service.coret_price !== ''
             ? Number(service.price || 0)
             : null;
-        const discountPerUnit = promo
-          ? promo.promo_type === 'persen'
-            ? (base * Number(promo.promo_value || 0)) / 100
-            : Number(promo.promo_value || 0)
-          : 0;
-        const safeDiscountPerUnit = Math.min(base, discountPerUnit);
-        const finalPrice = Math.max(0, base - safeDiscountPerUnit);
+        const finalPrice = base;
         const isGc = isGeneralCleaningCategory(service.category_name);
         const meter = isGc ? null : resolveMeterValue({ serviceName: service.name, meter: item.meter });
         const billable = isGc
@@ -478,8 +503,8 @@ export default function PosTransactionCreatePage() {
           original_price: originalPrice,
           final_price_per_unit: finalPrice,
           line_total: isGc ? 0 : finalPrice * billable,
-          promo_type: promo?.promo_type || null,
-          promo_value: promo ? Number(promo.promo_value || 0) : null,
+          promo_type: null,
+          promo_value: null,
           category_name: service.category_name || null,
         };
       })
@@ -510,19 +535,12 @@ export default function PosTransactionCreatePage() {
         if (!service) return null;
 
         const qty = Math.max(1, Number(item.qty || 1));
-        const promo = service.promos?.find((row) => Number(row.id) === Number(item.promo_id));
         const base = resolveEffectiveBasePrice(service);
         const originalPrice =
           service.coret_price != null && service.coret_price !== ''
             ? Number(service.price || 0)
             : null;
-        const discountPerUnit = promo
-          ? promo.promo_type === 'persen'
-            ? (base * Number(promo.promo_value || 0)) / 100
-            : Number(promo.promo_value || 0)
-          : 0;
-        const safeDiscountPerUnit = Math.min(base, discountPerUnit);
-        const finalPrice = Math.max(0, base - safeDiscountPerUnit);
+        const finalPrice = base;
         const isGc = isGeneralCleaningCategory(service.category_name);
         const meter = isGc ? null : resolveMeterValue({ serviceName: service.name, meter: item.meter });
         const billable = isGc
@@ -541,8 +559,8 @@ export default function PosTransactionCreatePage() {
           original_price: originalPrice,
           final_price_per_unit: finalPrice,
           line_total: isGc ? 0 : finalPrice * billable,
-          promo_type: promo?.promo_type || null,
-          promo_value: promo ? Number(promo.promo_value || 0) : null,
+          promo_type: null,
+          promo_value: null,
           category_name: service.category_name || null,
         };
       })
@@ -609,7 +627,6 @@ export default function PosTransactionCreatePage() {
     qty: 1,
     meter_length: '',
     meter_width: '',
-    promo_id: '',
   });
 
   const openAddItemModal = () => {
@@ -641,7 +658,6 @@ export default function PosTransactionCreatePage() {
           : item.meter != null && item.meter !== ''
             ? '1'
             : '',
-      promo_id: item.promo_id || '',
     });
     setItemModalError('');
     resetServicePickerFilters(categoryId);
@@ -660,7 +676,6 @@ export default function PosTransactionCreatePage() {
     setItemDraft((prev) => {
       const next = { ...prev, [key]: value };
       if (key === 'service_id') {
-        next.promo_id = '';
         const nextService = services.find((row) => Number(row.id) === Number(value));
         if (!isMeterPricedService(nextService?.name)) {
           next.meter_length = '';
@@ -687,12 +702,7 @@ export default function PosTransactionCreatePage() {
       length: itemDraft.meter_length,
       width: itemDraft.meter_width,
     });
-    if (needsMeter && meterValue == null) {
-      setItemModalError(
-        `Ukuran panjang × lebar wajib diisi untuk service ${service?.name || ''}`
-      );
-      return;
-    }
+    // Meter ukuran opsional — bisa diisi nanti di detail
 
     const qtyValue = Math.max(1, Number(itemDraft.qty || 1));
     const nextItemsPreview =
@@ -703,9 +713,8 @@ export default function PosTransactionCreatePage() {
               service_id: itemDraft.service_id,
               qty: qtyValue,
               meter: needsMeter ? meterValue : null,
-              meter_length: needsMeter ? lengthValue : null,
-              meter_width: needsMeter ? widthValue : null,
-              promo_id: itemDraft.promo_id || '',
+              meter_length: needsMeter && meterValue != null ? lengthValue : null,
+              meter_width: needsMeter && meterValue != null ? widthValue : null,
             },
           ]
         : form.items.map((item, idx) =>
@@ -714,9 +723,8 @@ export default function PosTransactionCreatePage() {
                   service_id: itemDraft.service_id,
                   qty: qtyValue,
                   meter: needsMeter ? meterValue : null,
-                  meter_length: needsMeter ? lengthValue : null,
-                  meter_width: needsMeter ? widthValue : null,
-                  promo_id: itemDraft.promo_id || '',
+                  meter_length: needsMeter && meterValue != null ? lengthValue : null,
+                  meter_width: needsMeter && meterValue != null ? widthValue : null,
                 }
               : item
           );
@@ -731,9 +739,8 @@ export default function PosTransactionCreatePage() {
       service_id: itemDraft.service_id,
       qty: isGc ? 1 : qtyValue,
       meter: isGc || !needsMeter ? null : meterValue,
-      meter_length: isGc || !needsMeter ? null : lengthValue,
-      meter_width: isGc || !needsMeter ? null : widthValue,
-      promo_id: itemDraft.promo_id || '',
+      meter_length: isGc || !needsMeter || meterValue == null ? null : lengthValue,
+      meter_width: isGc || !needsMeter || meterValue == null ? null : widthValue,
     };
 
     setForm((prev) => {
@@ -972,6 +979,10 @@ export default function PosTransactionCreatePage() {
       setError('Tambah minimal 1 item service');
       return;
     }
+    if (!form.payment_method_id) {
+      setError('Metode pembayaran wajib dipilih');
+      return;
+    }
 
     setSaving(true);
     setError('');
@@ -985,12 +996,13 @@ export default function PosTransactionCreatePage() {
         total_people: Number(form.total_people || 1),
         notes: form.notes,
         service_mode: form.service_mode || 'home_service',
+        payment_method_id: Number(form.payment_method_id),
+        promo_id: form.promo_id ? Number(form.promo_id) : null,
         worker_ids: form.worker_ids,
         items: form.items.map((item) => ({
           service_id: Number(item.service_id),
           qty: Number(item.qty || 1),
           meter: item.meter == null || item.meter === '' ? null : Number(item.meter),
-          promo_id: item.promo_id ? Number(item.promo_id) : null,
         })),
       };
       const { data } = await api.post('/pos-transactions', payload);
@@ -1017,6 +1029,27 @@ export default function PosTransactionCreatePage() {
   const finalTotal = selectedTotals.subtotal - selectedTotals.discount;
   const stepOrder = STEPS.map((s) => s.key);
   const activeIndex = stepOrder.indexOf(activeStepKey);
+  const selectedPaymentMethod = paymentMethods.find(
+    (m) => Number(m.id) === Number(form.payment_method_id)
+  );
+  const edcMethods = paymentMethods.filter((m) => m.method_group === 'EDC');
+  const paymentGroups = ['Tunai', 'BCA', 'EDC'];
+
+  const handlePaymentGroupChange = (group) => {
+    setPaymentGroup(group);
+    if (group === 'EDC') {
+      const stillEdc = edcMethods.some((m) => Number(m.id) === Number(form.payment_method_id));
+      if (!stillEdc) {
+        setForm((prev) => ({ ...prev, payment_method_id: '' }));
+      }
+      return;
+    }
+    const method = paymentMethods.find((m) => m.method_group === group);
+    setForm((prev) => ({
+      ...prev,
+      payment_method_id: method ? String(method.id) : '',
+    }));
+  };
 
   return (
     <div className={`p-3 sm:p-5 space-y-5 max-w-[1400px] mx-auto bg-slate-50 min-h-full ${canShowItems ? 'pb-28' : 'pb-6'}`}>
@@ -1404,7 +1437,7 @@ export default function PosTransactionCreatePage() {
                   <div className="rounded-[16px] border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center">
                     <p className="text-[13px] font-semibold text-slate-700">Belum ada item</p>
                     <p className="mt-1 text-[11.5px] text-slate-500">
-                      Klik Tambah Item untuk memilih service, qty, dan promo.
+                      Klik Tambah Item untuk memilih service dan qty.
                     </p>
                   </div>
                 ) : (
@@ -1413,20 +1446,12 @@ export default function PosTransactionCreatePage() {
                       const service = services.find(
                         (row) => Number(row.id) === Number(item.service_id)
                       );
-                      const promo = service?.promos?.find(
-                        (row) => Number(row.id) === Number(item.promo_id)
-                      );
                       const qty = Math.max(1, Number(item.qty || 1));
                       const base = resolveEffectiveBasePrice(service || {});
                       const hasCoret =
                         service?.coret_price != null && service?.coret_price !== '';
                       const listPrice = Number(service?.price || 0);
-                      const discountPerUnit = promo
-                        ? promo.promo_type === 'persen'
-                          ? (base * Number(promo.promo_value || 0)) / 100
-                          : Number(promo.promo_value || 0)
-                        : 0;
-                      const rateFinal = Math.max(0, base - Math.min(base, discountPerUnit));
+                      const rateFinal = base;
                       const isGc = isGeneralCleaningCategory(service?.category_name);
                       const crew =
                         parseGcCrewSizeFromServiceName(service?.name) ||
@@ -1459,11 +1484,6 @@ export default function PosTransactionCreatePage() {
                                   General Cleaning
                                 </span>
                               )}
-                              {promo && (
-                                <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10px] font-semibold text-amber-700">
-                                  {promo.name}
-                                </span>
-                              )}
                             </div>
                             <p className="mt-2 text-[14px] font-bold tracking-[-0.01em] text-slate-900 truncate">
                               {service?.name || 'Service tidak ditemukan'}
@@ -1476,6 +1496,9 @@ export default function PosTransactionCreatePage() {
                                       <>
                                         Qty {qty}
                                         {(() => {
+                                          if (isMeterPricedService(service.name) && meterValue == null) {
+                                            return ' · Pending meter';
+                                          }
                                           const dimLabel = formatMeterDimensionsLabel({
                                             length: item.meter_length,
                                             width: item.meter_width,
@@ -1489,6 +1512,9 @@ export default function PosTransactionCreatePage() {
                                           </span>
                                         )}
                                         Rp {base.toLocaleString('id-ID')} / unit
+                                        {isMeterPricedService(service.name) && meterValue == null
+                                          ? ' (pending)'
+                                          : ''}
                                       </>
                                     )
                                   : `Qty ${qty}`}
@@ -1522,6 +1548,64 @@ export default function PosTransactionCreatePage() {
                     })}
                   </div>
                 )}
+              </section>
+
+              <section className={sectionCardClass}>
+                <SectionHeader
+                  icon={MessageSquareText}
+                  title="Pembayaran"
+                  hint="Status default belum lunas — bukti diunggah di detail transaksi"
+                />
+                <div className="space-y-3">
+                  <div className="flex flex-wrap gap-2">
+                    {paymentGroups.map((group) => {
+                      const active =
+                        (paymentGroup || selectedPaymentMethod?.method_group || '') === group;
+                      return (
+                        <button
+                          key={group}
+                          type="button"
+                          onClick={() => handlePaymentGroupChange(group)}
+                          className={`rounded-xl border px-3.5 py-2 text-sm font-semibold transition ${
+                            active
+                              ? 'border-slate-900 bg-slate-900 text-white'
+                              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          {group}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {(paymentGroup || selectedPaymentMethod?.method_group) === 'BCA' &&
+                    selectedPaymentMethod && (
+                      <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                        {selectedPaymentMethod.label}
+                      </p>
+                    )}
+                  {(paymentGroup || selectedPaymentMethod?.method_group) === 'EDC' && (
+                    <label className="block space-y-1.5">
+                      <span className={labelEyebrowClass}>Jenis kartu EDC BCA</span>
+                      <select
+                        value={form.payment_method_id}
+                        onChange={(e) =>
+                          setForm((prev) => ({ ...prev, payment_method_id: e.target.value }))
+                        }
+                        className={inputClass}
+                      >
+                        <option value="">Pilih jenis kartu</option>
+                        {edcMethods.map((method) => (
+                          <option key={method.id} value={method.id}>
+                            {method.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  <p className="text-[11.5px] text-slate-400">
+                    Status pembayaran: Belum lunas (otomatis saat dibuat)
+                  </p>
+                </div>
               </section>
 
               <section className={sectionCardClass}>
@@ -1603,7 +1687,33 @@ export default function PosTransactionCreatePage() {
                 }}
               >
                 <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                  <div>
+                  <div className="min-w-0 flex-1 space-y-3">
+                    <label className="block max-w-md space-y-1.5">
+                      <span className="text-[9.5px] font-semibold uppercase tracking-[.14em] text-blue-200/80">
+                        Promo (satu transaksi)
+                      </span>
+                      <select
+                        value={form.promo_id}
+                        onChange={(e) =>
+                          setForm((prev) => ({ ...prev, promo_id: e.target.value }))
+                        }
+                        disabled={form.items.length === 0}
+                        className="w-full rounded-[12px] border border-white/20 bg-white/10 px-3 py-2.5 text-[13px] text-white focus:border-white/40 focus:outline-none disabled:opacity-50"
+                      >
+                        <option value="" className="text-slate-800">
+                          Tanpa promo
+                        </option>
+                        {availablePromos.map((promo) => (
+                          <option key={promo.id} value={promo.id} className="text-slate-800">
+                            {promo.name} -{' '}
+                            {promo.promo_type === 'persen'
+                              ? `${promo.promo_value}%`
+                              : `Rp ${Number(promo.promo_value || 0).toLocaleString('id-ID')}`}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div>
                     <p className="text-[9.5px] font-semibold uppercase tracking-[.14em] text-blue-200/80">
                       Ringkasan biaya
                     </p>
@@ -1637,6 +1747,7 @@ export default function PosTransactionCreatePage() {
                         </>
                       )}
                     </p>
+                    </div>
                   </div>
                   <button
                     type="submit"
@@ -1928,7 +2039,7 @@ export default function PosTransactionCreatePage() {
                   {editingItemIndex === null ? 'Tambah Item' : `Edit Item ${editingItemIndex + 1}`}
                 </h2>
                 <p className="mt-1 text-[11.5px] text-slate-500">
-                  Cari dan pilih service, lalu atur qty, ukuran panjang × lebar (jika perlu), serta promo.
+                  Cari dan pilih service, lalu atur qty dan ukuran panjang × lebar (jika perlu).
                 </p>
               </div>
               <button
@@ -2118,7 +2229,6 @@ export default function PosTransactionCreatePage() {
                         onChange={(e) => handleItemDraftChange('meter_length', e.target.value)}
                         className={inputClass}
                         placeholder="P"
-                        required
                         aria-label="Panjang meter"
                       />
                       <span className="shrink-0 text-sm font-bold text-slate-400">×</span>
@@ -2130,37 +2240,17 @@ export default function PosTransactionCreatePage() {
                         onChange={(e) => handleItemDraftChange('meter_width', e.target.value)}
                         className={inputClass}
                         placeholder="L"
-                        required
                         aria-label="Lebar meter"
                       />
                     </div>
                     <p className="text-[11px] text-slate-500">
                       {draftArea != null
                         ? `Total ${draftArea} m²`
-                        : 'Isi panjang dan lebar dalam meter'}
+                        : 'Opsional — bisa diisi nanti di detail transaksi'}
                     </p>
                   </div>
                 )}
 
-                <label className="block space-y-1.5">
-                  <span className={labelEyebrowClass}>Promo</span>
-                  <select
-                    value={itemDraft.promo_id}
-                    onChange={(e) => handleItemDraftChange('promo_id', e.target.value)}
-                    className={inputClass}
-                    disabled={!itemDraft.service_id}
-                  >
-                    <option value="">Tanpa promo</option>
-                    {(draftService?.promos || []).map((promo) => (
-                      <option key={promo.id} value={promo.id}>
-                        {promo.name} -{' '}
-                        {promo.promo_type === 'persen'
-                          ? `${promo.promo_value}%`
-                          : `Rp ${promo.promo_value.toLocaleString('id-ID')}`}
-                      </option>
-                    ))}
-                  </select>
-                </label>
               </div>
                 );
               })()}

@@ -1,5 +1,6 @@
 import { formatServiceDateParts } from './posCustomerOrderMessage.js';
 import { isGeneralCleaningCategory } from './posGeneralCleaningBilling.js';
+import { isMeterPricingPending } from './posMeterServices.js';
 
 export const CLEANOX_RECEIPT_COMPANY = {
   name: 'Cleanox',
@@ -14,6 +15,8 @@ export const CLEANOX_RECEIPT_COMPANY = {
 
 export const PDF_HEADER_RGB = [12, 41, 93];
 export const PENDING_TOTAL_TEXT = 'Menyesuaikan total jam pengerjaan';
+export const PENDING_METER_TOTAL_TEXT = 'Menyesuaikan total ukuran meter';
+export const PENDING_PRICE_TOTAL_TEXT = 'Menyesuaikan total harga';
 
 export function toNumber(value) {
   return Number(value || 0);
@@ -129,7 +132,18 @@ export function drawTransactionMeta(
   if (includeCrewCount) {
     metaLines.push(['Jumlah Teknisi', String(transaction.total_people ?? '-')]);
   }
-  metaLines.push(['Pembayaran', pendingGc ? 'Menunggu konfirmasi' : 'LUNAS']);
+  metaLines.push([
+    'Pembayaran',
+    String(transaction.payment_status || '') === 'lunas' ? 'LUNAS' : 'BELUM LUNAS',
+  ]);
+  metaLines.push([
+    'Metode',
+    String(
+      transaction.payment_method?.label ||
+        transaction.payment_method?.name ||
+        '-'
+    ),
+  ]);
 
   for (const [label, value] of metaLines) {
     doc.setFont('helvetica', 'bold');
@@ -218,6 +232,10 @@ export function drawItemsTable(
     }
 
     const isGcItem = isGeneralCleaningCategory(item.category_name);
+    const pendingMeter = isMeterPricingPending({
+      serviceName: item.service_name,
+      meter: item.meter,
+    });
     const cells =
       pendingGc && isGcItem
         ? [
@@ -236,6 +254,19 @@ export function drawItemsTable(
             },
             { text: 'Pending jam', w: cols[5].w, align: 'center' },
           ]
+        : pendingMeter
+          ? [
+              { text: String(index + 1), w: cols[0].w, align: 'left' },
+              {
+                text: String(item.service_name || `Service #${item.service_id}`),
+                w: cols[1].w,
+                align: 'left',
+              },
+              { text: String(item.promo_name_snapshot || '-'), w: cols[2].w, align: 'left' },
+              { text: String(item.qty ?? 1), w: cols[3].w, align: 'right' },
+              { text: formatMoney(item.final_price_snapshot), w: cols[4].w, align: 'right' },
+              { text: 'Pending meter', w: cols[5].w, align: 'center' },
+            ]
         : [
             { text: String(index + 1), w: cols[0].w, align: 'left' },
             {
@@ -282,21 +313,31 @@ export function drawItemsTable(
 }
 
 /** @returns {number} y after totals box */
-export function drawTotalsBox(doc, { transaction, pendingGc = false, pageW, margin = 14, y }) {
+export function drawTotalsBox(
+  doc,
+  { transaction, pendingGc = false, pendingMeter = false, pageW, margin = 14, y }
+) {
   const boxW = 78;
   const boxX = pageW - margin - boxW;
   const boxY = y + 4;
-  const boxH = pendingGc ? 28 : 36;
+  const pending = pendingGc || pendingMeter;
+  const boxH = pending ? 28 : 36;
+  const pendingText =
+    pendingGc && pendingMeter
+      ? PENDING_PRICE_TOTAL_TEXT
+      : pendingMeter
+        ? PENDING_METER_TOTAL_TEXT
+        : PENDING_TOTAL_TEXT;
 
   doc.setFillColor(248, 250, 252);
   doc.setDrawColor(203, 213, 225);
   doc.roundedRect(boxX, boxY, boxW, boxH, 2, 2, 'FD');
 
-  if (pendingGc) {
+  if (pending) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
     doc.setTextColor(...PDF_HEADER_RGB);
-    const pendingLines = wrap(doc, PENDING_TOTAL_TEXT, boxW - 8, 9);
+    const pendingLines = wrap(doc, pendingText, boxW - 8, 9);
     doc.text(pendingLines, boxX + 4, boxY + 12);
   } else {
     const totals = [

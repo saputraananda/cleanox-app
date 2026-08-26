@@ -12,13 +12,20 @@ import {
   sendPosGroupNotification,
   servePosTaskEvidenceFile,
   servePosCustomerPhoto,
+  servePosPaymentProof,
   servePosTakehomeEvidenceFile,
   customerPhotoUploadMiddleware,
+  paymentProofUploadMiddleware,
   takehomeEvidenceUploadMiddleware,
   uploadPosCustomerPhoto,
   deletePosCustomerPhoto,
+  uploadPosPaymentProof,
+  deletePosPaymentProof,
+  updatePosTransactionPayment,
   updatePosAssignments,
   updatePosTransactionStatus,
+  updatePosTransactionItemMeter,
+  addPosTransactionItem,
   reschedulePosTransaction,
   cancelPosTransaction,
   updatePosTakehomeStage,
@@ -56,6 +63,18 @@ const handleCustomerPhotoUpload = (req, res, next) => {
   });
 };
 
+const handlePaymentProofUpload = (req, res, next) => {
+  paymentProofUploadMiddleware(req, res, (err) => {
+    if (err) {
+      const message = err.code === 'LIMIT_FILE_SIZE'
+        ? 'Ukuran bukti pembayaran melebihi 5 MB'
+        : err.message || 'Upload bukti pembayaran gagal';
+      return res.status(400).json({ message });
+    }
+    next();
+  });
+};
+
 const handleTakehomeEvidenceUpload = (req, res, next) => {
   takehomeEvidenceUploadMiddleware(req, res, (err) => {
     if (err) {
@@ -77,11 +96,15 @@ router.get('/workers', getPosWorkers);
 router.get('/calendar', getPosCalendar);
 router.get('/task-evidence/:filename', servePosTaskEvidenceFile);
 router.get('/customer-photo/:filename', servePosCustomerPhoto);
+router.get('/payment-proof/:filename', servePosPaymentProof);
 router.get('/takehome-evidence/:filename', servePosTakehomeEvidenceFile);
 router.get('/', getPosTransactions);
 router.get('/:id', getPosTransactionDetail);
 router.post('/', createPosTransaction);
 router.patch('/:id/status', updatePosTransactionStatus);
+router.patch('/:id/payment', updatePosTransactionPayment);
+router.patch('/:id/items/:itemId/meter', updatePosTransactionItemMeter);
+router.post('/:id/items', addPosTransactionItem);
 router.patch('/:id/reschedule', reschedulePosTransaction);
 router.patch('/:id/cancel', cancelPosTransaction);
 router.patch('/:id/assignments', updatePosAssignments);
@@ -94,6 +117,8 @@ router.post(
 );
 router.post('/:id/customer-photos', handleCustomerPhotoUpload, uploadPosCustomerPhoto);
 router.delete('/:id/customer-photos/:photoId', deletePosCustomerPhoto);
+router.post('/:id/payment-proofs', handlePaymentProofUpload, uploadPosPaymentProof);
+router.delete('/:id/payment-proofs/:photoId', deletePosPaymentProof);
 router.post('/:id/notify-group', sendPosGroupNotification);
 router.post('/:id/notify-customer', sendPosCustomerNotification);
 

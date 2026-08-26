@@ -492,3 +492,38 @@ export const updatePromo = async (req, res) => {
     connection.release();
   }
 };
+
+export const listPaymentMethods = async (req, res) => {
+  const isActiveRaw = req.query.is_active;
+  try {
+    let sql = `
+      SELECT
+        id,
+        \`group\` AS method_group,
+        code,
+        name,
+        label,
+        is_active
+      FROM mst_payment_method
+      WHERE 1 = 1`;
+    const params = [];
+
+    if (isActiveRaw !== undefined && isActiveRaw !== '') {
+      sql += ` AND is_active = ?`;
+      params.push(Number(isActiveRaw) ? 1 : 0);
+    }
+
+    sql += ` ORDER BY FIELD(\`group\`, 'Tunai', 'BCA', 'EDC'), id ASC`;
+
+    const [rows] = await cleanoxPool.query(sql, params);
+    return res.json({
+      data: rows.map((row) => ({
+        ...row,
+        is_active: Boolean(Number(row.is_active)),
+      })),
+    });
+  } catch (error) {
+    console.error('[pos-master/listPaymentMethods]', error.message);
+    return res.status(500).json({ message: 'Gagal mengambil metode pembayaran' });
+  }
+};
