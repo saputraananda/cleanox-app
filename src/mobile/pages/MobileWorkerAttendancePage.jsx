@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { ArrowLeft, Camera, CheckCircle2, X } from 'lucide-react';
 import api from '@shared/utils/api.js';
@@ -93,6 +94,9 @@ export default function MobileWorkerAttendancePage() {
   const [photoPreview, setPhotoPreview] = useState(null);
   const [activeLeave, setActiveLeave] = useState(null);
   const [absenOffice, setAbsenOffice] = useState(null);
+  const [overtimeConfirmOpen, setOvertimeConfirmOpen] = useState(false);
+  const [overtimeDescription, setOvertimeDescription] = useState('');
+  const [overtimeConfirmError, setOvertimeConfirmError] = useState('');
   const checkInPreviewUrlRef = useRef('');
   const checkoutProofPreviewUrlRef = useRef('');
   const savedCheckInPhotoUrlRef = useRef('');
@@ -282,15 +286,30 @@ export default function MobileWorkerAttendancePage() {
     }
   };
 
-  const handleCheckOut = async () => {
+  const isJakartaAfterOvertimeThreshold = () => {
+    const fmt = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Jakarta',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+    const parts = Object.fromEntries(
+      fmt.formatToParts(new Date())
+        .filter((p) => p.type !== 'literal')
+        .map((p) => [p.type, p.value])
+    );
+    const h = Number(parts.hour);
+    const m = Number(parts.minute);
+    const s = Number(parts.second);
+    if (h > 18) return true;
+    if (h === 18 && (m > 0 || s > 0)) return true;
+    return false;
+  };
+
+  const submitCheckOut = async ({ recordOvertime = false, description = '' } = {}) => {
     setError('');
     setSuccess('');
-
-    if (!checkoutProofFile) {
-      setCheckoutPhotoRequirementAlertOpen(true);
-      return;
-    }
-
     setSubmitting(true);
     try {
       const formData = new FormData();
@@ -302,14 +321,66 @@ export default function MobileWorkerAttendancePage() {
       await api.post('/mobile-attendance/check-out', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      setSuccess('Absen pulang berhasil disimpan.');
+
       handleCheckoutProofChange(null);
+      setOvertimeConfirmOpen(false);
+      setOvertimeDescription('');
+      setOvertimeConfirmError('');
+
+      if (recordOvertime) {
+        try {
+          await api.post('/mobile-overtime/from-checkout', {
+            description: String(description || '').trim(),
+          });
+          setSuccess('Absen pulang & lembur berhasil dicatat.');
+        } catch (otErr) {
+          setSuccess('Absen pulang berhasil. Lembur gagal dicatat — coba lagi di menu Lembur.');
+          setError(otErr.response?.data?.message || 'Gagal mencatat lembur checkout');
+        }
+      } else {
+        setSuccess('Absen pulang berhasil disimpan.');
+      }
+
       await loadStatus();
     } catch (err) {
       setError(err.response?.data?.message || 'Gagal menyimpan absen pulang');
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleCheckOut = async () => {
+    setError('');
+    setSuccess('');
+
+    if (!checkoutProofFile) {
+      setCheckoutPhotoRequirementAlertOpen(true);
+      return;
+    }
+
+    if (isJakartaAfterOvertimeThreshold()) {
+      setOvertimeDescription('');
+      setOvertimeConfirmError('');
+      setOvertimeConfirmOpen(true);
+      return;
+    }
+
+    await submitCheckOut({ recordOvertime: false });
+  };
+
+  const handleConfirmOvertimeCheckout = async () => {
+    const desc = overtimeDescription.trim();
+    if (!desc) {
+      setOvertimeConfirmError('Deskripsi lembur wajib diisi');
+      return;
+    }
+    setOvertimeConfirmError('');
+    await submitCheckOut({ recordOvertime: true, description: desc });
+  };
+
+  const handleSkipOvertimeCheckout = async () => {
+    setOvertimeConfirmError('');
+    await submitCheckOut({ recordOvertime: false });
   };
 
   return (
@@ -630,6 +701,70 @@ export default function MobileWorkerAttendancePage() {
         onCancel={() => setCheckoutPhotoRequirementAlertOpen(false)}
         onClose={() => setCheckoutPhotoRequirementAlertOpen(false)}
       />
+
+      {overtimeConfirmOpen && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4"
+              onClick={() => {
+                if (!submitting) setOvertimeConfirmOpen(false);
+              }}
+              role="presentation"
+            >
+              <div
+                className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-5 shadow-xl space-y-3"
+                onClick={(e) => e.stopPropagation()}
+                role="dialog"
+                aria-modal="true"
+              >
+                <h3 className="text-sm font-bold text-slate-800 text-center">Catat sebagai lembur?</h3>
+                <p className="text-xs text-slate-500 text-center leading-relaxed">
+                  Checkout setelah pukul 18:00 WIB. Jika ya, isi deskripsi kenapa lembur. Durasi dihitung dari jam 17:00
+                  sampai jam checkout.
+                </p>
+                <textarea
+                  value={overtimeDescription}
+                  onChange={(e) => setOvertimeDescription(e.target.value)}
+                  rows={3}
+                  maxLength={1000}
+                  placeholder="Deskripsi lembur..."
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#163A22]/20 focus:border-[#163A22]"
+                  disabled={submitting}
+                />
+                {overtimeConfirmError ? (
+                  <p className="text-[11px] text-rose-600 font-medium">{overtimeConfirmError}</p>
+                ) : null}
+                <div className="flex flex-col gap-2 pt-1">
+                  <button
+                    type="button"
+                    disabled={submitting}
+                    onClick={handleConfirmOvertimeCheckout}
+                    className="w-full rounded-xl bg-[#163A22] py-2.5 text-xs font-bold text-white disabled:opacity-60"
+                  >
+                    {submitting ? 'Menyimpan...' : 'Ya, catat lembur'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={submitting}
+                    onClick={handleSkipOvertimeCheckout}
+                    className="w-full rounded-xl border border-slate-200 bg-white py-2.5 text-xs font-bold text-slate-600 disabled:opacity-60"
+                  >
+                    Tidak, checkout saja
+                  </button>
+                  <button
+                    type="button"
+                    disabled={submitting}
+                    onClick={() => setOvertimeConfirmOpen(false)}
+                    className="w-full py-1.5 text-[11px] font-semibold text-slate-400"
+                  >
+                    Batal
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
     </div>
   );
 }

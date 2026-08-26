@@ -12,6 +12,8 @@ import MobileWorkerRiwayatPage from '@mobile/pages/MobileWorkerRiwayatPage.jsx';
 import MobileWorkerLeavePage from '@mobile/pages/MobileWorkerLeavePage.jsx';
 import MobileWorkerKasbonPage from '@mobile/pages/MobileWorkerKasbonPage.jsx';
 import MobileWorkerGroomingPage from '@mobile/pages/MobileWorkerGroomingPage.jsx';
+import MobileWorkerOvertimePage from '@mobile/pages/MobileWorkerOvertimePage.jsx';
+import MobileWorkerMealPage from '@mobile/pages/MobileWorkerMealPage.jsx';
 
 function withMorningUnlock(page) {
   return (
@@ -101,6 +103,24 @@ const mobileRoutes = [
     element={
       <PrivateRoute companyIds={[3]}>
         <MobileWorkerKasbonPage />
+      </PrivateRoute>
+    }
+  />,
+  <Route
+    key="mobile-overtime"
+    path="/mobile-worker/overtime"
+    element={
+      <PrivateRoute companyIds={[3]}>
+        <MobileWorkerOvertimePage />
+      </PrivateRoute>
+    }
+  />,
+  <Route
+    key="mobile-meal"
+    path="/mobile-worker/meal"
+    element={
+      <PrivateRoute companyIds={[3]}>
+        <MobileWorkerMealPage />
       </PrivateRoute>
     }
   />,
