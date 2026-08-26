@@ -137,27 +137,6 @@ export default function MobileWorkerOvertimePage() {
     }
   };
 
-  const handleRetryFromCheckout = async () => {
-    const desc = description.trim();
-    if (!desc) {
-      setError('Deskripsi lembur wajib diisi');
-      return;
-    }
-    setSubmitting(true);
-    setError('');
-    setSuccess('');
-    try {
-      await api.post('/mobile-overtime/from-checkout', { description: desc });
-      setDescription('');
-      setSuccess('Lembur checkout berhasil dicatat.');
-      await load();
-    } catch (err) {
-      setError(err.response?.data?.message || 'Gagal mencatat lembur');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   const handleSelesai = async () => {
     if (!overtime?.id) return;
     setSubmitting(true);
@@ -255,7 +234,7 @@ export default function MobileWorkerOvertimePage() {
                   </p>
                 ) : null}
 
-                {(todayStatus?.can_pengajuan || todayStatus?.can_retry_from_checkout) && (
+                {todayStatus?.can_pengajuan ? (
                   <>
                     <textarea
                       value={description}
@@ -266,35 +245,21 @@ export default function MobileWorkerOvertimePage() {
                       className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#163A22]/20"
                       disabled={submitting}
                     />
-                    {todayStatus?.can_pengajuan ? (
-                      <button
-                        type="button"
-                        disabled={submitting}
-                        onClick={handlePengajuan}
-                        className="w-full h-[40px] rounded-[12px] bg-[#163A22] text-white text-[12px] font-extrabold disabled:opacity-60"
-                      >
-                        {submitting ? 'Mengajukan...' : 'Ajukan Lembur'}
-                      </button>
-                    ) : null}
-                    {todayStatus?.can_retry_from_checkout ? (
-                      <button
-                        type="button"
-                        disabled={submitting}
-                        onClick={handleRetryFromCheckout}
-                        className="w-full h-[40px] rounded-[12px] border-2 border-[#163A22] text-[#163A22] text-[12px] font-extrabold disabled:opacity-60"
-                      >
-                        Catat Lembur dari Checkout
-                      </button>
-                    ) : null}
-                    {todayStatus?.can_retry_from_checkout && todayStatus?.can_pengajuan ? (
-                      <p className="text-[10.5px] text-slate-400">
-                        Pilih satu: ajukan mulai sekarang, atau catat dari jam 17:00 sampai jam checkout.
-                      </p>
-                    ) : null}
+                    <button
+                      type="button"
+                      disabled={submitting}
+                      onClick={handlePengajuan}
+                      className="w-full h-[40px] rounded-[12px] bg-[#163A22] text-white text-[12px] font-extrabold disabled:opacity-60"
+                    >
+                      {submitting ? 'Mengajukan...' : 'Ajukan Lembur'}
+                    </button>
+                    <p className="text-[10.5px] text-slate-400">
+                      Ajukan lembur setelah check-out. Durasi dihitung dari jam ajukan sampai selesai.
+                    </p>
                   </>
-                )}
+                ) : null}
 
-                {!todayStatus?.can_pengajuan && !todayStatus?.can_retry_from_checkout && todayStatus?.attendance?.check_out_at ? (
+                {!todayStatus?.can_pengajuan && todayStatus?.attendance?.check_out_at ? (
                   <p className="text-[12px] text-slate-500">Tidak ada aksi lembur tersedia untuk hari ini.</p>
                 ) : null}
               </div>

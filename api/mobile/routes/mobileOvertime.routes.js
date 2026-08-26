@@ -3,7 +3,6 @@ import { authenticate } from '../../shared/middleware/auth.middleware.js';
 import {
   getTodayOvertimeStatus,
   listMyOvertime,
-  createFromCheckout,
   createPengajuan,
   selesaiOvertime,
 } from '../controllers/mobileOvertime.controller.js';
@@ -22,7 +21,6 @@ router.use(requireMobileWorker);
 
 router.get('/today', getTodayOvertimeStatus);
 router.get('/list', listMyOvertime);
-router.post('/from-checkout', createFromCheckout);
 router.post('/pengajuan', createPengajuan);
 router.post('/:id/selesai', selesaiOvertime);
 

@@ -3,7 +3,7 @@ import cleanoxPool from '../../shared/db/cleanox.js';
 const ALLOWED_TYPES = new Set(['half_day', 'full_day']);
 const OFFICE_AMOUNT = 10000;
 const HALF_ADDON = 15000;
-const FULL_AMOUNT = 20000;
+const FULL_ADDON = 20000;
 
 function todayDateString() {
   const now = new Date();
@@ -26,7 +26,7 @@ function toDateOnly(value) {
 
 function amountForType(type) {
   if (type === 'half_day') return OFFICE_AMOUNT + HALF_ADDON;
-  if (type === 'full_day') return FULL_AMOUNT;
+  if (type === 'full_day') return OFFICE_AMOUNT + FULL_ADDON;
   return null;
 }
 
@@ -59,7 +59,7 @@ export const getTodayMeal = async (req, res) => {
       amounts: {
         office: OFFICE_AMOUNT,
         half_day: OFFICE_AMOUNT + HALF_ADDON,
-        full_day: FULL_AMOUNT,
+        full_day: OFFICE_AMOUNT + FULL_ADDON,
       },
     });
   } catch (error) {

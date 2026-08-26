@@ -394,17 +394,37 @@ export const getPosServices = async (_req, res) => {
   }
 };
 
+async function getProduksiWorkerIds() {
+  const [rows] = await cleanoxPool.query(
+    `SELECT employee_id FROM mst_role WHERE role = 'produksi'`
+  );
+  return [
+    ...new Set(
+      (rows || [])
+        .map((r) => Number(r.employee_id))
+        .filter((id) => Number.isInteger(id) && id > 0)
+    ),
+  ];
+}
+
 export const getPosWorkers = async (req, res) => {
   try {
     const serviceDateTime = req.query.service_date || null;
     const excludeTransactionId = Number(req.query.exclude_transaction_id) || null;
+
+    const produksiIds = await getProduksiWorkerIds();
+    if (produksiIds.length === 0) {
+      return res.json({ workers: [], service_date: serviceDateTime });
+    }
 
     const [rows] = await aloraPool.query(
       `SELECT employee_id, full_name, phone_number
        FROM mst_employee
        WHERE company_id = 3
          AND exit_date IS NULL
-       ORDER BY full_name`
+         AND employee_id IN (${produksiIds.map(() => '?').join(',')})
+       ORDER BY full_name`,
+      produksiIds
     );
 
     let busyMap = new Map();
@@ -1027,6 +1047,17 @@ export const createPosTransaction = async (req, res) => {
 
     let assignedWorkers = [];
     if (uniqueWorkerIds.length > 0) {
+      const produksiIds = await getProduksiWorkerIds();
+      const produksiSet = new Set(produksiIds);
+      const invalidIds = uniqueWorkerIds.filter((id) => !produksiSet.has(Number(id)));
+      if (invalidIds.length > 0) {
+        await connection.rollback();
+        return res.status(400).json({
+          message:
+            'Worker tidak valid untuk assignment (hanya produksi aktif tanpa exit date)',
+        });
+      }
+
       const [workerRows] = await aloraPool.query(
         `SELECT employee_id, full_name, phone_number
          FROM mst_employee
@@ -1036,6 +1067,14 @@ export const createPosTransaction = async (req, res) => {
         uniqueWorkerIds
       );
       assignedWorkers = workerRows;
+
+      if (assignedWorkers.length !== uniqueWorkerIds.length) {
+        await connection.rollback();
+        return res.status(400).json({
+          message:
+            'Worker tidak valid untuk assignment (hanya produksi aktif tanpa exit date)',
+        });
+      }
 
       if (!isHistoryEntry) {
         const busyIds = await getBusyEmployeeIdsOnServiceDate(connection, service_date);
@@ -1607,6 +1646,17 @@ export const updatePosAssignments = async (req, res) => {
     const toInsertIds = desiredIds.filter((id) => !remainingActiveIds.has(id));
 
     if (toInsertIds.length > 0) {
+      const produksiIds = await getProduksiWorkerIds();
+      const produksiSet = new Set(produksiIds);
+      const invalidIds = toInsertIds.filter((id) => !produksiSet.has(Number(id)));
+      if (invalidIds.length > 0) {
+        await connection.rollback();
+        return res.status(400).json({
+          message:
+            'Worker tidak valid untuk assignment (hanya produksi aktif tanpa exit date)',
+        });
+      }
+
       const [[txRow]] = await connection.query(
         `SELECT service_date FROM tr_transactions WHERE id = ?`,
         [transactionId]
@@ -1644,6 +1694,14 @@ export const updatePosAssignments = async (req, res) => {
         toInsertIds
       );
       workers = workerRows;
+
+      if (workers.length !== toInsertIds.length) {
+        await connection.rollback();
+        return res.status(400).json({
+          message:
+            'Worker tidak valid untuk assignment (hanya produksi aktif tanpa exit date)',
+        });
+      }
 
       for (const worker of workers) {
         await connection.query(

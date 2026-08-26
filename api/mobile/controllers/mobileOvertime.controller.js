@@ -1,8 +1,5 @@
 import cleanoxPool from '../../shared/db/cleanox.js';
 
-const OVERTIME_THRESHOLD_HOUR = 18;
-const OVERTIME_START_HOUR = 17;
-
 function jakartaNowParts(date = new Date()) {
   const utc = date.getTime() + date.getTimezoneOffset() * 60000;
   const jakarta = new Date(utc + 7 * 60 * 60000);
@@ -31,60 +28,6 @@ function toDateOnly(value) {
     return `${y}-${m}-${d}`;
   }
   return String(value).slice(0, 10);
-}
-
-function pad2(n) {
-  return String(n).padStart(2, '0');
-}
-
-function buildCheckoutOvertimeStart(overtimeDate) {
-  const dateStr = toDateOnly(overtimeDate);
-  return `${dateStr} ${pad2(OVERTIME_START_HOUR)}:00:00`;
-}
-
-function parseJakartaDateTime(value) {
-  if (!value) return null;
-  if (value instanceof Date) return value;
-  const s = String(value).trim();
-  // MySQL DATETIME without TZ — treat as WIB
-  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
-  if (m) {
-    return new Date(
-      Date.UTC(
-        Number(m[1]),
-        Number(m[2]) - 1,
-        Number(m[3]),
-        Number(m[4]) - 7,
-        Number(m[5]),
-        Number(m[6])
-      )
-    );
-  }
-  const d = new Date(s);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-function isAfterOvertimeThreshold(dateTime) {
-  const d = parseJakartaDateTime(dateTime);
-  if (!d) return false;
-  const p = jakartaNowParts(d);
-  // Re-parse as WIB wall: if we got absolute Date, jakartaNowParts converts correctly
-  // For check_out_at from MySQL as Date object in node mysql2, it's often local or UTC depending on config.
-  // Prefer extracting HH:mm from string representation when available.
-  if (typeof dateTime === 'string') {
-    const m = dateTime.match(/(\d{2}):(\d{2}):(\d{2})/);
-    if (m) {
-      const hour = Number(m[1]);
-      const min = Number(m[2]);
-      const sec = Number(m[3]);
-      if (hour > OVERTIME_THRESHOLD_HOUR) return true;
-      if (hour === OVERTIME_THRESHOLD_HOUR && (min > 0 || sec > 0)) return true;
-      return false;
-    }
-  }
-  if (p.h > OVERTIME_THRESHOLD_HOUR) return true;
-  if (p.h === OVERTIME_THRESHOLD_HOUR && (p.min > 0 || p.s > 0)) return true;
-  return false;
 }
 
 function isDuplicateKeyError(error) {
@@ -132,7 +75,6 @@ export const getTodayOvertimeStatus = async (req, res) => {
     ]);
 
     const hasCheckout = Boolean(attendance?.check_out_at);
-    const checkoutAfterThreshold = hasCheckout && isAfterOvertimeThreshold(attendance.check_out_at);
 
     return res.json({
       overtime_date: today,
@@ -145,8 +87,6 @@ export const getTodayOvertimeStatus = async (req, res) => {
           }
         : null,
       can_pengajuan: hasCheckout && !overtime,
-      can_retry_from_checkout: checkoutAfterThreshold && !overtime,
-      can_checkout_confirm: false,
     });
   } catch (error) {
     console.error('[mobileOvertime/getToday]', error.message);
@@ -189,69 +129,6 @@ export const listMyOvertime = async (req, res) => {
   } catch (error) {
     console.error('[mobileOvertime/list]', error.message);
     return res.status(500).json({ message: 'Gagal memuat riwayat lembur' });
-  } finally {
-    connection.release();
-  }
-};
-
-export const createFromCheckout = async (req, res) => {
-  const workerId = req.user?.id;
-  const today = todayDateString();
-  const description = String(req.body?.description || '').trim();
-  const attendanceIdHint = req.body?.attendance_id != null ? Number(req.body.attendance_id) : null;
-
-  if (!description) {
-    return res.status(400).json({ message: 'Deskripsi lembur wajib diisi' });
-  }
-  if (description.length > 1000) {
-    return res.status(400).json({ message: 'Deskripsi maksimal 1000 karakter' });
-  }
-
-  const connection = await cleanoxPool.getConnection();
-  try {
-    const attendance = await getTodayAttendance(connection, workerId, today);
-    if (!attendance?.check_out_at) {
-      return res.status(400).json({ message: 'Check-out hari ini belum ditemukan' });
-    }
-    if (!isAfterOvertimeThreshold(attendance.check_out_at)) {
-      return res.status(400).json({
-        message: 'Lembur checkout hanya untuk check-out setelah pukul 18:00 WIB',
-      });
-    }
-
-    const existing = await getTodayOvertime(connection, workerId, today);
-    if (existing) {
-      return res.status(409).json({ message: 'Lembur hari ini sudah tercatat' });
-    }
-
-    const startAt = buildCheckoutOvertimeStart(today);
-    const attendanceId =
-      Number.isInteger(attendanceIdHint) && attendanceIdHint > 0
-        ? attendanceIdHint
-        : attendance.id;
-
-    // end_at: use MySQL check_out_at value as stored
-    const [result] = await connection.query(
-      `INSERT INTO tr_worker_overtime
-        (worker_id, overtime_date, type, start_at, end_at, description, status, attendance_id, created_at, updated_at)
-       VALUES (?, ?, 'checkout', ?, ?, ?, 'selesai', ?, NOW(), NOW())`,
-      [workerId, today, startAt, attendance.check_out_at, description, attendanceId]
-    );
-
-    const [rows] = await connection.query(`SELECT * FROM tr_worker_overtime WHERE id = ? LIMIT 1`, [
-      result.insertId,
-    ]);
-
-    return res.status(201).json({
-      message: 'Lembur checkout berhasil dicatat',
-      overtime: serializeOvertime(rows?.[0]),
-    });
-  } catch (error) {
-    if (isDuplicateKeyError(error)) {
-      return res.status(409).json({ message: 'Lembur hari ini sudah tercatat' });
-    }
-    console.error('[mobileOvertime/fromCheckout]', error.message);
-    return res.status(500).json({ message: 'Gagal mencatat lembur checkout' });
   } finally {
     connection.release();
   }
