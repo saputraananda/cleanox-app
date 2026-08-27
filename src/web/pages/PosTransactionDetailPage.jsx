@@ -166,6 +166,14 @@ export default function PosTransactionDetailPage() {
   const [scheduleSubmitting, setScheduleSubmitting] = useState(false);
   const [scheduleSuccess, setScheduleSuccess] = useState('');
   const [scheduleConfirm, setScheduleConfirm] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(null);
+
+  const openPhotoPreview = (src, title) => {
+    if (!src) return;
+    setPhotoPreview({ src, title });
+  };
+
+  const closePhotoPreview = () => setPhotoPreview(null);
 
   const refreshBlobPreviews = async (entries, setMap) => {
     const next = {};
@@ -331,6 +339,15 @@ export default function PosTransactionDetailPage() {
   useEffect(() => {
     takehomePreviewMapRef.current = takehomePreviewMap;
   }, [takehomePreviewMap]);
+
+  useEffect(() => {
+    if (!photoPreview) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') closePhotoPreview();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [photoPreview]);
 
   useEffect(() => {
     return () => {
@@ -1607,11 +1624,20 @@ export default function PosTransactionDetailPage() {
                     </button>
                   )}
                   {paymentPreviewMap[String(photo.id)] ? (
-                    <img
-                      src={paymentPreviewMap[String(photo.id)]}
-                      alt="Bukti pembayaran"
-                      className="h-36 w-full object-cover"
-                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        openPhotoPreview(paymentPreviewMap[String(photo.id)], 'Bukti Pembayaran')
+                      }
+                      aria-label="Preview bukti pembayaran"
+                      className="block w-full cursor-pointer"
+                    >
+                      <img
+                        src={paymentPreviewMap[String(photo.id)]}
+                        alt="Bukti pembayaran"
+                        className="h-36 w-full object-cover"
+                      />
+                    </button>
                   ) : (
                     <div className="flex h-36 w-full items-center justify-center text-xs text-slate-400">
                       Memuat...
@@ -1677,11 +1703,20 @@ export default function PosTransactionDetailPage() {
                     </button>
                   )}
                   {customerPreviewMap[String(photo.id)] ? (
-                    <img
-                      src={customerPreviewMap[String(photo.id)]}
-                      alt="Referensi customer"
-                      className="h-36 w-full object-cover"
-                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        openPhotoPreview(customerPreviewMap[String(photo.id)], 'Referensi Customer')
+                      }
+                      aria-label="Preview foto referensi customer"
+                      className="block w-full cursor-pointer"
+                    >
+                      <img
+                        src={customerPreviewMap[String(photo.id)]}
+                        alt="Referensi customer"
+                        className="h-36 w-full object-cover"
+                      />
+                    </button>
                   ) : (
                     <div className="flex h-36 w-full items-center justify-center text-xs text-slate-400">
                       Memuat...
@@ -2086,6 +2121,30 @@ export default function PosTransactionDetailPage() {
                 </div>
               </form>
             </div>
+          </div>
+        </BodyPortal>
+      )}
+
+      {photoPreview && (
+        <BodyPortal>
+          <div
+            className="fixed inset-0 z-[90] flex items-center justify-center bg-black/80 p-4"
+            onClick={closePhotoPreview}
+          >
+            <button
+              type="button"
+              onClick={closePhotoPreview}
+              className="absolute right-4 top-4 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25"
+              aria-label="Tutup preview"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            <img
+              src={photoPreview.src}
+              alt={photoPreview.title}
+              onClick={(e) => e.stopPropagation()}
+              className="max-h-[90vh] max-w-[90vw] rounded-xl object-contain shadow-xl"
+            />
           </div>
         </BodyPortal>
       )}

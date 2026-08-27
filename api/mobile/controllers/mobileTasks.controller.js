@@ -28,6 +28,7 @@ import {
   normalizeTagsList,
   npsCategoryFromScore,
 } from '../../shared/utils/satisfactionSurveyFields.js';
+import { upsertCleanoxSatisfactionByNota } from '../../shared/utils/upsertCleanoxSatisfaction.js';
 import {
   loadSharedBeforeAfterPhotos,
   loadSharedEvidenceByTransactionIds,
@@ -1306,6 +1307,27 @@ export const submitSurvey = async (req, res) => {
        WHERE id = ?`,
       [csatScore, feedbackText, JSON.stringify(surveyAnswers), assignmentId]
     );
+
+    try {
+      await upsertCleanoxSatisfactionByNota({
+        no_nota: row.transaction_no,
+        nama: row.customer_name || null,
+        csat_score: csatScore,
+        csat_label: csatLabel,
+        nps_score: npsScore,
+        nps_category: npsCategory,
+        feedback_tags: surveyAnswers.feedback_tags,
+        feedback_text: feedbackText,
+        layanan: surveyAnswers.layanan,
+        user_agent: 'mobile-worker',
+        ip_address: null,
+      });
+    } catch (syncErr) {
+      console.error(
+        '[mobileTasks/submitSurvey] CSAT sync failed (assignment survey kept):',
+        syncErr.message
+      );
+    }
 
     const refreshed = await getAssignmentOwnedByUser(assignmentId, employeeId);
     const sharedAfter = await buildSharedContextForRow(refreshed || row);
