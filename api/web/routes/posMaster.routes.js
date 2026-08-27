@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authenticate } from '../../shared/middleware/auth.middleware.js';
 import {
   listCategories,
+  listSatuans,
   listServices,
   createService,
   updateService,
@@ -34,6 +35,7 @@ router.use(authenticate);
 router.use(authorizePosAccess);
 
 router.get('/categories', listCategories);
+router.get('/satuans', listSatuans);
 router.get('/services', listServices);
 router.post('/services', createService);
 router.put('/services/:id', updateService);

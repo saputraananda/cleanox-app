@@ -26,6 +26,18 @@ export const listCategories = async (_req, res) => {
   }
 };
 
+export const listSatuans = async (_req, res) => {
+  try {
+    const [rows] = await cleanoxPool.query(
+      `SELECT id, satuan_name FROM mst_satuan WHERE is_active = 1 ORDER BY satuan_name ASC`
+    );
+    return res.json({ satuans: rows });
+  } catch (error) {
+    console.error('[pos-master/listSatuans]', error.message);
+    return res.status(500).json({ message: 'Gagal mengambil satuan' });
+  }
+};
+
 export const listServices = async (req, res) => {
   const search = String(req.query.search || '').trim();
   const status = String(req.query.status || '').trim();
@@ -38,6 +50,7 @@ export const listServices = async (req, res) => {
         s.name,
         s.category_id,
         c.name AS category_name,
+        s.satuan_id,
         s.satuan_name,
         s.duration_value,
         s.duration_unit,
@@ -98,12 +111,35 @@ async function upsertServicePrice(connection, serviceId, price, coretPrice) {
   return money;
 }
 
-function parseServiceBody(body) {
+async function resolveSatuan(connection, satuanIdRaw) {
+  if (satuanIdRaw === '' || satuanIdRaw == null) {
+    return { satuan_id: null, satuan_name: null };
+  }
+
+  const satuanId = Number(satuanIdRaw);
+  if (!Number.isFinite(satuanId) || satuanId <= 0) {
+    return { error: 'Satuan tidak valid' };
+  }
+
+  const [[row]] = await connection.query(
+    `SELECT id, satuan_name FROM mst_satuan WHERE id = ? AND is_active = 1 LIMIT 1`,
+    [satuanId]
+  );
+  if (!row) {
+    return { error: 'Satuan tidak valid' };
+  }
+
+  return {
+    satuan_id: Number(row.id),
+    satuan_name: row.satuan_name,
+  };
+}
+
+function parseServiceBody(body, { includeSatuan = true } = {}) {
   const name = String(body?.name || '').trim();
   const price = Number(body?.price);
   const category_id =
     body?.category_id === '' || body?.category_id == null ? null : Number(body.category_id);
-  const satuan_name = String(body?.satuan_name || '').trim() || null;
   const duration_value =
     body?.duration_value === '' || body?.duration_value == null
       ? null
@@ -116,6 +152,20 @@ function parseServiceBody(body) {
     : null;
   const status = normalizeStatus(body?.status);
   const coretParsed = normalizeCoretPrice(body?.coret_price);
+
+  let satuan_id;
+  if (includeSatuan) {
+    if (!Object.prototype.hasOwnProperty.call(body, 'satuan_id')) {
+      satuan_id = undefined;
+    } else if (body.satuan_id === '' || body.satuan_id == null) {
+      satuan_id = null;
+    } else {
+      satuan_id = Number(body.satuan_id);
+      if (!Number.isFinite(satuan_id) || satuan_id <= 0) {
+        return { error: 'Satuan tidak valid' };
+      }
+    }
+  }
 
   if (!name) return { error: 'Nama service wajib diisi' };
   if (!Number.isFinite(price) || price < 0) return { error: 'Harga tidak valid' };
@@ -136,7 +186,7 @@ function parseServiceBody(body) {
       price,
       coret_price: coretParsed.value,
       category_id,
-      satuan_name,
+      satuan_id,
       duration_value,
       duration_unit,
       status,
@@ -162,14 +212,21 @@ export const createService = async (req, res) => {
       }
     }
 
+    const satuanResolved = await resolveSatuan(connection, parsed.data.satuan_id);
+    if (satuanResolved.error) {
+      await connection.rollback();
+      return res.status(400).json({ message: satuanResolved.error });
+    }
+
     const [result] = await connection.query(
       `INSERT INTO mst_services
-        (name, price, satuan_name, category_id, duration_value, duration_unit, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(0), CURRENT_TIMESTAMP(0))`,
+        (name, price, satuan_id, satuan_name, category_id, duration_value, duration_unit, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(0), CURRENT_TIMESTAMP(0))`,
       [
         parsed.data.name,
         toMoney(parsed.data.price),
-        parsed.data.satuan_name,
+        satuanResolved.satuan_id,
+        satuanResolved.satuan_name,
         parsed.data.category_id,
         parsed.data.duration_value,
         parsed.data.duration_unit,
@@ -200,7 +257,7 @@ export const updateService = async (req, res) => {
   const serviceId = Number(req.params.id);
   if (!serviceId) return res.status(400).json({ message: 'ID service tidak valid' });
 
-  const parsed = parseServiceBody(req.body);
+  const parsed = parseServiceBody(req.body, { includeSatuan: true });
   if (parsed.error) return res.status(400).json({ message: parsed.error });
 
   const connection = await cleanoxPool.getConnection();
@@ -208,7 +265,7 @@ export const updateService = async (req, res) => {
     await connection.beginTransaction();
 
     const [[existing]] = await connection.query(
-      `SELECT id FROM mst_services WHERE id = ? LIMIT 1`,
+      `SELECT id, satuan_id, satuan_name FROM mst_services WHERE id = ? LIMIT 1`,
       [serviceId]
     );
     if (!existing) {
@@ -226,10 +283,23 @@ export const updateService = async (req, res) => {
       }
     }
 
+    let satuan_id = existing.satuan_id;
+    let satuan_name = existing.satuan_name;
+    if (parsed.data.satuan_id !== undefined) {
+      const satuanResolved = await resolveSatuan(connection, parsed.data.satuan_id);
+      if (satuanResolved.error) {
+        await connection.rollback();
+        return res.status(400).json({ message: satuanResolved.error });
+      }
+      satuan_id = satuanResolved.satuan_id;
+      satuan_name = satuanResolved.satuan_name;
+    }
+
     await connection.query(
       `UPDATE mst_services
        SET name = ?,
            price = ?,
+           satuan_id = ?,
            satuan_name = ?,
            category_id = ?,
            duration_value = ?,
@@ -240,7 +310,8 @@ export const updateService = async (req, res) => {
       [
         parsed.data.name,
         toMoney(parsed.data.price),
-        parsed.data.satuan_name,
+        satuan_id,
+        satuan_name,
         parsed.data.category_id,
         parsed.data.duration_value,
         parsed.data.duration_unit,

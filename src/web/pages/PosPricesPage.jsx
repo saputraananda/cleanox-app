@@ -15,7 +15,8 @@ const primaryBtnStyle = { background: 'linear-gradient(135deg, #1E3A8A 0%, #3B82
 const emptyForm = {
   name: '',
   category_id: '',
-  satuan_name: '',
+  satuan_id: '',
+  legacySatuanName: '',
   duration_value: '',
   duration_unit: '',
   price: '',
@@ -23,22 +24,56 @@ const emptyForm = {
   status: 'Aktif',
 };
 
-function rowToForm(row) {
+const LEGACY_SATUAN_VALUE = '__legacy__';
+
+function resolveSatuanFormValue(row, satuans) {
+  if (!row) {
+    return { satuan_id: '', legacySatuanName: '' };
+  }
+
+  const list = satuans || [];
+  const rowSatuanId = row.satuan_id == null ? null : Number(row.satuan_id);
+  const rowSatuanName = String(row.satuan_name || '').trim();
+
+  if (rowSatuanId != null) {
+    const byId = list.find((item) => Number(item.id) === rowSatuanId);
+    if (byId) {
+      return { satuan_id: String(byId.id), legacySatuanName: '' };
+    }
+  }
+
+  if (rowSatuanName) {
+    const byName = list.find(
+      (item) => String(item.satuan_name || '').trim().toLowerCase() === rowSatuanName.toLowerCase()
+    );
+    if (byName) {
+      return { satuan_id: String(byName.id), legacySatuanName: '' };
+    }
+    return { satuan_id: LEGACY_SATUAN_VALUE, legacySatuanName: rowSatuanName };
+  }
+
+  return { satuan_id: '', legacySatuanName: '' };
+}
+
+function rowToForm(row, satuans) {
+  const { satuan_id, legacySatuanName } = resolveSatuanFormValue(row, satuans);
   return {
     name: row.name || '',
     category_id: row.category_id == null ? '' : String(row.category_id),
-    satuan_name: row.satuan_name || '',
+    satuan_id,
     duration_value: row.duration_value == null ? '' : String(row.duration_value),
     duration_unit: row.duration_unit || '',
     price: row.price == null ? '' : String(row.price),
     coret_price: row.coret_price == null ? '' : String(row.coret_price),
     status: row.status || 'Aktif',
+    legacySatuanName,
   };
 }
 
 export default function PosPricesPage() {
   const [services, setServices] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [satuans, setSatuans] = useState([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -54,6 +89,11 @@ export default function PosPricesPage() {
   const loadCategories = async () => {
     const { data } = await api.get('/pos-master/categories');
     setCategories(data.categories || []);
+  };
+
+  const loadSatuans = async () => {
+    const { data } = await api.get('/pos-master/satuans');
+    setSatuans(data.satuans || []);
   };
 
   const loadData = async () => {
@@ -76,7 +116,7 @@ export default function PosPricesPage() {
   };
 
   useEffect(() => {
-    loadCategories().catch(() => {});
+    Promise.all([loadCategories(), loadSatuans()]).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -99,9 +139,19 @@ export default function PosPricesPage() {
 
   const openEdit = (row) => {
     setEditingId(row.id);
-    setForm(rowToForm(row));
+    setForm(rowToForm(row, satuans));
     setError('');
     setPanelOpen(true);
+  };
+
+  const buildSatuanPayload = () => {
+    if (form.satuan_id === LEGACY_SATUAN_VALUE) {
+      return editingId ? undefined : null;
+    }
+    if (!form.satuan_id) {
+      return null;
+    }
+    return Number(form.satuan_id);
   };
 
   const handleSubmit = async (e) => {
@@ -112,13 +162,16 @@ export default function PosPricesPage() {
       const payload = {
         name: form.name,
         category_id: form.category_id || null,
-        satuan_name: form.satuan_name || null,
         duration_value: form.duration_value === '' ? null : Number(form.duration_value),
         duration_unit: form.duration_unit || null,
         price: Number(form.price),
         coret_price: form.coret_price === '' ? null : Number(form.coret_price),
         status: form.status,
       };
+      const satuanPayload = buildSatuanPayload();
+      if (satuanPayload !== undefined) {
+        payload.satuan_id = satuanPayload;
+      }
       if (editingId) {
         await api.put(`/pos-master/services/${editingId}`, payload);
       } else {
@@ -375,12 +428,30 @@ export default function PosPricesPage() {
                   <span className="text-[9.5px] font-semibold uppercase tracking-[.14em] text-slate-400">
                     Satuan
                   </span>
-                  <input
-                    value={form.satuan_name}
-                    onChange={(e) => setForm((prev) => ({ ...prev, satuan_name: e.target.value }))}
+                  <select
+                    value={form.satuan_id}
+                    onChange={(e) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        satuan_id: e.target.value,
+                        legacySatuanName:
+                          e.target.value === LEGACY_SATUAN_VALUE ? prev.legacySatuanName : '',
+                      }))
+                    }
                     className={inputClass}
-                    placeholder="pcs, m2, sesi..."
-                  />
+                  >
+                    <option value="">Pilih Satuan (Opsional)</option>
+                    {form.legacySatuanName && (
+                      <option value={LEGACY_SATUAN_VALUE}>
+                        {form.legacySatuanName} (legacy)
+                      </option>
+                    )}
+                    {satuans.map((item) => (
+                      <option key={item.id} value={String(item.id)}>
+                        {String(item.satuan_name || '').toUpperCase()}
+                      </option>
+                    ))}
+                  </select>
                 </label>
               </div>
 
