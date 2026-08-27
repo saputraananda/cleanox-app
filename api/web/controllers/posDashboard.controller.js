@@ -178,15 +178,21 @@ export const getDashboardData = async (req, res) => {
 
     const [paymentMethodRows] = await cleanoxPool.query(
       `SELECT
-        COALESCE(pm.\`group\`, 'Belum diisi') AS method_group,
-        COUNT(*) AS total,
-        SUM(t.final_amount) AS revenue
-       FROM tr_transactions t
-       LEFT JOIN mst_payment_method pm ON pm.id = t.payment_method_id
-       WHERE t.status <> 'Cancelled'
-         AND DATE(t.service_date) BETWEEN ? AND ?
-       GROUP BY COALESCE(pm.\`group\`, 'Belum diisi')
-       ORDER BY FIELD(COALESCE(pm.\`group\`, 'Belum diisi'), 'Tunai', 'BCA', 'EDC', 'Belum diisi'), method_group`,
+        method_group,
+        total,
+        revenue
+       FROM (
+         SELECT
+           COALESCE(pm.\`group\`, 'Belum diisi') AS method_group,
+           COUNT(*) AS total,
+           SUM(t.final_amount) AS revenue
+         FROM tr_transactions t
+         LEFT JOIN mst_payment_method pm ON pm.id = t.payment_method_id
+         WHERE t.status <> 'Cancelled'
+           AND DATE(t.service_date) BETWEEN ? AND ?
+         GROUP BY COALESCE(pm.\`group\`, 'Belum diisi')
+       ) AS payment_method_agg
+       ORDER BY FIELD(method_group, 'Tunai', 'BCA', 'EDC', 'Belum diisi'), method_group`,
       [date_start, date_end]
     );
 
