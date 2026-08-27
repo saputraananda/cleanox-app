@@ -161,7 +161,7 @@ export default function PosHistoryTransactionCreatePage() {
       }
 
       const billable = getBillableMultiplier({
-        serviceName: service.name,
+        satuanName: service.satuan_name,
         qty,
         meter: item.meter,
       });
@@ -370,7 +370,7 @@ export default function PosHistoryTransactionCreatePage() {
       const next = { ...prev, [key]: value };
       if (key === 'service_id') {
         const nextService = services.find((row) => Number(row.id) === Number(value));
-        if (!isMeterPricedService(nextService?.name)) {
+        if (!isMeterPricedService({ satuanName: nextService?.satuan_name })) {
           next.meter_length = '';
           next.meter_width = '';
         }
@@ -387,11 +387,11 @@ export default function PosHistoryTransactionCreatePage() {
     }
 
     const service = services.find((row) => Number(row.id) === Number(itemDraft.service_id));
-    const needsMeter = isMeterPricedService(service?.name);
+    const needsMeter = isMeterPricedService({ satuanName: service?.satuan_name });
     const lengthValue = Number(itemDraft.meter_length);
     const widthValue = Number(itemDraft.meter_width);
     const meterValue = resolveMeterFromDimensions({
-      serviceName: service?.name,
+      satuanName: service?.satuan_name,
       length: itemDraft.meter_length,
       width: itemDraft.meter_width,
     });
@@ -576,10 +576,10 @@ export default function PosHistoryTransactionCreatePage() {
   }
 
   const draftService = services.find((row) => Number(row.id) === Number(itemDraft.service_id));
-  const draftNeedsMeter = isMeterPricedService(draftService?.name);
+  const draftNeedsMeter = isMeterPricedService({ satuanName: draftService?.satuan_name });
   const draftIsGc = isGeneralCleaningCategory(draftService?.category_name);
   const draftArea = resolveMeterFromDimensions({
-    serviceName: draftService?.name,
+    satuanName: draftService?.satuan_name,
     length: itemDraft.meter_length,
     width: itemDraft.meter_width,
   });
@@ -760,7 +760,7 @@ export default function PosHistoryTransactionCreatePage() {
                 const billable = isGc
                   ? 1
                   : getBillableMultiplier({
-                      serviceName: service?.name,
+                      satuanName: service?.satuan_name,
                       qty,
                       meter: item.meter,
                     });

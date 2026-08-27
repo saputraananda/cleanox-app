@@ -30,6 +30,7 @@ export async function recalcPosTransactionMoney(connection, transactionId, { act
     `SELECT
       i.*,
       s.name AS service_name,
+      s.satuan_name,
       c.name AS category_name
      FROM tr_transaction_items i
      INNER JOIN mst_services s ON s.id = i.service_id
@@ -50,7 +51,8 @@ export async function recalcPosTransactionMoney(connection, transactionId, { act
     if (isGc && !pricingFinalizedAt) continue;
     if (
       isMeterPricingPending({
-        serviceName: row.service_name,
+        satuanName: row.satuan_name,
+        unitLabel: row.unit_label,
         meter: row.meter,
       })
     ) {
@@ -59,10 +61,14 @@ export async function recalcPosTransactionMoney(connection, transactionId, { act
 
     const rowQty = Math.max(1, Number(row.qty || 1));
     const rowMeter = resolveMeterValue({
-      serviceName: row.service_name,
+      satuanName: row.satuan_name,
+      unitLabel: row.unit_label,
       meter: row.meter,
     });
-    const rowBillable = isMeterPricedService(row.service_name)
+    const rowBillable = isMeterPricedService({
+      satuanName: row.satuan_name,
+      unitLabel: row.unit_label,
+    })
       ? rowQty * Number(rowMeter || 0)
       : rowQty;
 

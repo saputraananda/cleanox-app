@@ -396,7 +396,7 @@ export default function PosTransactionCreatePage() {
         const billable = isGc
           ? 1
           : getBillableMultiplier({
-              serviceName: service.name,
+              satuanName: service.satuan_name,
               qty,
               meter: item.meter,
             });
@@ -486,11 +486,11 @@ export default function PosTransactionCreatePage() {
             : null;
         const finalPrice = base;
         const isGc = isGeneralCleaningCategory(service.category_name);
-        const meter = isGc ? null : resolveMeterValue({ serviceName: service.name, meter: item.meter });
+        const meter = isGc ? null : resolveMeterValue({ satuanName: service.satuan_name, meter: item.meter });
         const billable = isGc
           ? 1
           : getBillableMultiplier({
-              serviceName: service.name,
+              satuanName: service.satuan_name,
               qty,
               meter: item.meter,
             });
@@ -542,11 +542,11 @@ export default function PosTransactionCreatePage() {
             : null;
         const finalPrice = base;
         const isGc = isGeneralCleaningCategory(service.category_name);
-        const meter = isGc ? null : resolveMeterValue({ serviceName: service.name, meter: item.meter });
+        const meter = isGc ? null : resolveMeterValue({ satuanName: service.satuan_name, meter: item.meter });
         const billable = isGc
           ? 1
           : getBillableMultiplier({
-              serviceName: service.name,
+              satuanName: service.satuan_name,
               qty,
               meter: item.meter,
             });
@@ -677,7 +677,7 @@ export default function PosTransactionCreatePage() {
       const next = { ...prev, [key]: value };
       if (key === 'service_id') {
         const nextService = services.find((row) => Number(row.id) === Number(value));
-        if (!isMeterPricedService(nextService?.name)) {
+        if (!isMeterPricedService({ satuanName: nextService?.satuan_name })) {
           next.meter_length = '';
           next.meter_width = '';
         }
@@ -694,11 +694,11 @@ export default function PosTransactionCreatePage() {
     }
 
     const service = services.find((row) => Number(row.id) === Number(itemDraft.service_id));
-    const needsMeter = isMeterPricedService(service?.name);
+    const needsMeter = isMeterPricedService({ satuanName: service?.satuan_name });
     const lengthValue = Number(itemDraft.meter_length);
     const widthValue = Number(itemDraft.meter_width);
     const meterValue = resolveMeterFromDimensions({
-      serviceName: service?.name,
+      satuanName: service?.satuan_name,
       length: itemDraft.meter_length,
       width: itemDraft.meter_width,
     });
@@ -1457,13 +1457,13 @@ export default function PosTransactionCreatePage() {
                         parseGcCrewSizeFromServiceName(service?.name) ||
                         Number(form.total_people || 1);
                       const meterValue = resolveMeterValue({
-                        serviceName: service?.name,
+                        satuanName: service?.satuan_name,
                         meter: item.meter,
                       });
                       const billable = isGc
                         ? 1
                         : getBillableMultiplier({
-                            serviceName: service?.name,
+                            satuanName: service?.satuan_name,
                             qty,
                             meter: item.meter,
                           });
@@ -1496,7 +1496,7 @@ export default function PosTransactionCreatePage() {
                                       <>
                                         Qty {qty}
                                         {(() => {
-                                          if (isMeterPricedService(service.name) && meterValue == null) {
+                                          if (isMeterPricedService({ satuanName: service.satuan_name }) && meterValue == null) {
                                             return ' · Pending meter';
                                           }
                                           const dimLabel = formatMeterDimensionsLabel({
@@ -1512,7 +1512,7 @@ export default function PosTransactionCreatePage() {
                                           </span>
                                         )}
                                         Rp {base.toLocaleString('id-ID')} / unit
-                                        {isMeterPricedService(service.name) && meterValue == null
+                                        {isMeterPricedService({ satuanName: service.satuan_name }) && meterValue == null
                                           ? ' (pending)'
                                           : ''}
                                       </>
@@ -2171,9 +2171,9 @@ export default function PosTransactionCreatePage() {
                 const draftService = services.find(
                   (row) => Number(row.id) === Number(itemDraft.service_id)
                 );
-                const draftNeedsMeter = isMeterPricedService(draftService?.name);
+                const draftNeedsMeter = isMeterPricedService({ satuanName: draftService?.satuan_name });
                 const draftArea = resolveMeterFromDimensions({
-                  serviceName: draftService?.name,
+                  satuanName: draftService?.satuan_name,
                   length: itemDraft.meter_length,
                   width: itemDraft.meter_width,
                 });

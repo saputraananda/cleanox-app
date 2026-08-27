@@ -716,7 +716,7 @@ export default function PosTransactionDetailPage() {
       const next = { ...prev, [key]: value };
       if (key === 'service_id') {
         const nextService = services.find((row) => Number(row.id) === Number(value));
-        if (!isMeterPricedService(nextService?.name)) {
+        if (!isMeterPricedService({ satuanName: nextService?.satuan_name })) {
           next.meter_length = '';
           next.meter_width = '';
         }
@@ -733,9 +733,9 @@ export default function PosTransactionDetailPage() {
     }
     const service = services.find((row) => Number(row.id) === Number(addItemDraft.service_id));
     const isGc = isGeneralCleaningCategory(service?.category_name);
-    const needsMeter = isMeterPricedService(service?.name);
+    const needsMeter = isMeterPricedService({ satuanName: service?.satuan_name });
     const meterValue = resolveMeterFromDimensions({
-      serviceName: service?.name,
+      satuanName: service?.satuan_name,
       length: addItemDraft.meter_length,
       width: addItemDraft.meter_width,
     });
@@ -1184,9 +1184,9 @@ export default function PosTransactionDetailPage() {
                 {items.map((item) => {
                   const isGc = isGeneralCleaningCategory(item.category_name);
                   const pendingGc = isGc && !transaction.pricing_finalized_at;
-                  const isMeter = isMeterPricedService(item.service_name);
+                  const isMeter = isMeterPricedService({ satuanName: item.satuan_name, unitLabel: item.unit_label });
                   const pendingMeter = isMeterPricingPending({
-                    serviceName: item.service_name,
+                    satuanName: item.satuan_name, unitLabel: item.unit_label,
                     meter: item.meter,
                   });
                   const draft = meterDrafts[item.id] || { length: '', width: '' };
@@ -1892,9 +1892,9 @@ export default function PosTransactionDetailPage() {
                     (row) => Number(row.id) === Number(addItemDraft.service_id)
                   );
                   const draftIsGc = isGeneralCleaningCategory(draftService?.category_name);
-                  const draftNeedsMeter = isMeterPricedService(draftService?.name);
+                  const draftNeedsMeter = isMeterPricedService({ satuanName: draftService?.satuan_name });
                   const draftArea = resolveMeterFromDimensions({
-                    serviceName: draftService?.name,
+                    satuanName: draftService?.satuan_name,
                     length: addItemDraft.meter_length,
                     width: addItemDraft.meter_width,
                   });

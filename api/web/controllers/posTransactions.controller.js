@@ -656,6 +656,7 @@ export const getPosTransactionDetail = async (req, res) => {
       `SELECT
         i.*,
         s.name AS service_name,
+        s.satuan_name,
         c.name AS category_name
        FROM tr_transaction_items i
        INNER JOIN mst_services s ON s.id = i.service_id
@@ -1301,16 +1302,17 @@ export const createPosTransaction = async (req, res) => {
 
       const isGc = isGeneralCleaningCategory(service.category_name);
       const qty = isGc ? 1 : Math.max(1, Number(item.qty || 1));
-      const needsMeter = !isGc && isMeterPricedService(service.name);
+      const needsMeter =
+        !isGc && isMeterPricedService({ satuanName: service.satuan_name });
       const meter = isGc
         ? null
         : needsMeter
-          ? resolveMeterValue({ serviceName: service.name, meter: item.meter })
+          ? resolveMeterValue({ satuanName: service.satuan_name, meter: item.meter })
           : null;
       const billable = isGc
         ? 1
         : getBillableMultiplier({
-            serviceName: service.name,
+            satuanName: service.satuan_name,
             qty,
             meter,
           });
@@ -1678,6 +1680,7 @@ export const updatePosTransactionItemMeter = async (req, res) => {
       `SELECT
         i.*,
         s.name AS service_name,
+        s.satuan_name,
         c.name AS category_name
        FROM tr_transaction_items i
        INNER JOIN mst_services s ON s.id = i.service_id
@@ -1690,13 +1693,19 @@ export const updatePosTransactionItemMeter = async (req, res) => {
       await connection.rollback();
       return res.status(404).json({ message: 'Item transaksi tidak ditemukan' });
     }
-    if (!isMeterPricedService(item.service_name)) {
+    if (
+      !isMeterPricedService({
+        satuanName: item.satuan_name,
+        unitLabel: item.unit_label,
+      })
+    ) {
       await connection.rollback();
       return res.status(400).json({ message: 'Service ini bukan tipe meter' });
     }
 
     const meter = resolveMeterFromDimensions({
-      serviceName: item.service_name,
+      satuanName: item.satuan_name,
+      unitLabel: item.unit_label,
       length,
       width,
     });
@@ -1906,14 +1915,15 @@ export const addPosTransactionItem = async (req, res) => {
     }
 
     const qty = isGc ? 1 : Math.max(1, Number(qtyRaw || 1));
-    const needsMeter = !isGc && isMeterPricedService(service.name);
+    const needsMeter =
+      !isGc && isMeterPricedService({ satuanName: service.satuan_name });
     let meter = null;
     if (needsMeter) {
       if (meterRaw != null && meterRaw !== '') {
-        meter = resolveMeterValue({ serviceName: service.name, meter: meterRaw });
+        meter = resolveMeterValue({ satuanName: service.satuan_name, meter: meterRaw });
       } else {
         meter = resolveMeterFromDimensions({
-          serviceName: service.name,
+          satuanName: service.satuan_name,
           length: lengthRaw,
           width: widthRaw,
         });
@@ -1952,7 +1962,7 @@ export const addPosTransactionItem = async (req, res) => {
       lineTotal = toMoney(0);
     } else {
       const billable = getBillableMultiplier({
-        serviceName: service.name,
+        satuanName: service.satuan_name,
         qty,
         meter,
       });

@@ -233,7 +233,8 @@ export function drawItemsTable(
 
     const isGcItem = isGeneralCleaningCategory(item.category_name);
     const pendingMeter = isMeterPricingPending({
-      serviceName: item.service_name,
+      satuanName: item.satuan_name,
+      unitLabel: item.unit_label,
       meter: item.meter,
     });
     const cells =

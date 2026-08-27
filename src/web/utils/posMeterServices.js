@@ -1,27 +1,27 @@
-export const METER_PRICED_SERVICE_NAMES = [
-  'Carpet',
-  'Gordyn',
-  'Gordyn & Vitrase (Fast Cleaning)',
-  'Gordyn Blind',
-  'Gordyn Office',
-  'Karpet Sedang',
-  'Karpet Tebal',
-  'Karpet Tipis',
-  'Vitrase',
-];
+export function normalizeSatuanName(value) {
+  return String(value || '').trim().toLowerCase();
+}
 
-const METER_NAME_SET = new Set(METER_PRICED_SERVICE_NAMES);
-
-export function isMeterPricedService(serviceName) {
-  const name = String(serviceName || '').trim();
-  return METER_NAME_SET.has(name);
+/** True jika satuan = Meter (dan alias umum). */
+export function isMeterSatuan(satuanName) {
+  const s = normalizeSatuanName(satuanName);
+  return s === 'meter' || s === 'm' || s === 'm2' || s === 'm²';
 }
 
 /**
- * @returns {number|null} null when not a meter service or meter invalid
+ * Deteksi layanan berharga per meter berdasarkan satuan (bukan nama service).
+ * @param {{ satuanName?: string|null, unitLabel?: string|null }} [args]
  */
-export function resolveMeterValue({ serviceName, meter }) {
-  if (!isMeterPricedService(serviceName)) {
+export function isMeterPricedService({ satuanName = null, unitLabel = null } = {}) {
+  return isMeterSatuan(satuanName) || isMeterSatuan(unitLabel);
+}
+
+/**
+ * Soft resolve for create/list — returns null when meter missing (deferred pricing).
+ * @returns {number|null}
+ */
+export function resolveMeterValue({ satuanName = null, unitLabel = null, meter } = {}) {
+  if (!isMeterPricedService({ satuanName, unitLabel })) {
     return null;
   }
 
@@ -37,8 +37,13 @@ export function resolveMeterValue({ serviceName, meter }) {
  * Area (m²) from panjang × lebar for meter-priced services.
  * @returns {number|null}
  */
-export function resolveMeterFromDimensions({ serviceName, length, width }) {
-  if (!isMeterPricedService(serviceName)) {
+export function resolveMeterFromDimensions({
+  satuanName = null,
+  unitLabel = null,
+  length,
+  width,
+} = {}) {
+  if (!isMeterPricedService({ satuanName, unitLabel })) {
     return null;
   }
 
@@ -67,8 +72,8 @@ export function formatMeterDimensionsLabel({ length, width, meter }) {
   return null;
 }
 
-export function isMeterPricingPending({ serviceName, meter }) {
-  if (!isMeterPricedService(serviceName)) return false;
+export function isMeterPricingPending({ satuanName = null, unitLabel = null, meter } = {}) {
+  if (!isMeterPricedService({ satuanName, unitLabel })) return false;
   const value = Number(meter);
   return meter == null || meter === '' || !Number.isFinite(value) || value <= 0;
 }
@@ -76,7 +81,8 @@ export function isMeterPricingPending({ serviceName, meter }) {
 export function transactionHasMeterPending(items = []) {
   return (items || []).some((item) =>
     isMeterPricingPending({
-      serviceName: item?.service_name || item?.name,
+      satuanName: item?.satuan_name,
+      unitLabel: item?.unit_label,
       meter: item?.meter,
     })
   );
@@ -85,13 +91,18 @@ export function transactionHasMeterPending(items = []) {
 /**
  * Billable multiplier. Meter service without size → 0 (pending).
  */
-export function getBillableMultiplier({ serviceName, qty, meter }) {
+export function getBillableMultiplier({
+  satuanName = null,
+  unitLabel = null,
+  qty,
+  meter,
+} = {}) {
   const safeQty = Math.max(1, Number(qty || 1));
-  if (!isMeterPricedService(serviceName)) {
+  if (!isMeterPricedService({ satuanName, unitLabel })) {
     return safeQty;
   }
 
-  const meterValue = resolveMeterValue({ serviceName, meter });
+  const meterValue = resolveMeterValue({ satuanName, unitLabel, meter });
   if (meterValue == null) {
     return 0;
   }

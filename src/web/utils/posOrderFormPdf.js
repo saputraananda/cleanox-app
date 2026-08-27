@@ -23,7 +23,7 @@ function formatLongDateId(date = new Date()) {
 
 function formatQtyLabel(item, pendingGc) {
   if (pendingGc && isGeneralCleaningCategory(item.category_name)) return '—';
-  if (isMeterPricingPending({ serviceName: item.service_name, meter: item.meter })) {
+  if (isMeterPricingPending({ satuanName: item.satuan_name, unitLabel: item.unit_label, meter: item.meter })) {
     return String(item.qty ?? 1);
   }
   if (item.meter != null && item.meter !== '') {
@@ -207,7 +207,8 @@ export async function downloadPosOrderFormPdf({ transaction, items = [], logoDat
 
     const isGcPending = pendingGc && isGeneralCleaningCategory(item.category_name);
     const isMeterPending = isMeterPricingPending({
-      serviceName: item.service_name,
+      satuanName: item.satuan_name,
+      unitLabel: item.unit_label,
       meter: item.meter,
     });
     const cells = [
