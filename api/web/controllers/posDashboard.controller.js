@@ -148,15 +148,57 @@ export const getDashboardData = async (req, res) => {
         t.service_date,
         t.status,
         t.final_amount,
+        t.payment_method_id,
+        t.payment_status,
+        pm.label AS payment_method_label,
+        pm.\`group\` AS payment_method_group,
         GROUP_CONCAT(DISTINCT s.name ORDER BY s.name SEPARATOR ', ') AS daftar_item,
         COUNT(DISTINCT a.id) AS total_workers
        FROM tr_transactions t
+       LEFT JOIN mst_payment_method pm ON pm.id = t.payment_method_id
        LEFT JOIN tr_transaction_items i ON i.transaction_id = t.id
        LEFT JOIN mst_services s ON s.id = i.service_id
        LEFT JOIN tr_worker_assignments a ON a.transaction_id = t.id
        WHERE DATE(t.service_date) BETWEEN ? AND ?
-       GROUP BY t.id, t.transaction_no, t.customer_name, t.customer_phone, t.service_date, t.status, t.final_amount
+       GROUP BY
+         t.id,
+         t.transaction_no,
+         t.customer_name,
+         t.customer_phone,
+         t.service_date,
+         t.status,
+         t.final_amount,
+         t.payment_method_id,
+         t.payment_status,
+         pm.label,
+         pm.\`group\`
        ORDER BY t.service_date DESC, t.id DESC`,
+      [date_start, date_end]
+    );
+
+    const [paymentMethodRows] = await cleanoxPool.query(
+      `SELECT
+        COALESCE(pm.\`group\`, 'Belum diisi') AS method_group,
+        COUNT(*) AS total,
+        SUM(t.final_amount) AS revenue
+       FROM tr_transactions t
+       LEFT JOIN mst_payment_method pm ON pm.id = t.payment_method_id
+       WHERE t.status <> 'Cancelled'
+         AND DATE(t.service_date) BETWEEN ? AND ?
+       GROUP BY COALESCE(pm.\`group\`, 'Belum diisi')
+       ORDER BY FIELD(COALESCE(pm.\`group\`, 'Belum diisi'), 'Tunai', 'BCA', 'EDC', 'Belum diisi'), method_group`,
+      [date_start, date_end]
+    );
+
+    const [paymentStatusRows] = await cleanoxPool.query(
+      `SELECT
+        COALESCE(t.payment_status, 'belum_lunas') AS payment_status,
+        COUNT(*) AS total,
+        SUM(t.final_amount) AS revenue
+       FROM tr_transactions t
+       WHERE t.status <> 'Cancelled'
+         AND DATE(t.service_date) BETWEEN ? AND ?
+       GROUP BY COALESCE(t.payment_status, 'belum_lunas')`,
       [date_start, date_end]
     );
 
@@ -211,6 +253,16 @@ export const getDashboardData = async (req, res) => {
         total_items: Number(row.total_items || 0),
         revenue: Number(row.revenue || 0),
       })),
+      paymentMethodBreakdown: paymentMethodRows.map((row) => ({
+        method_group: row.method_group,
+        total: Number(row.total || 0),
+        revenue: Number(row.revenue || 0),
+      })),
+      paymentStatusBreakdown: paymentStatusRows.map((row) => ({
+        payment_status: row.payment_status,
+        total: Number(row.total || 0),
+        revenue: Number(row.revenue || 0),
+      })),
       trends: trendRows.map((row) => ({
         tanggal: row.tanggal,
         sales: Number(row.sales || 0),
@@ -231,6 +283,11 @@ export const getDashboardData = async (req, res) => {
         final_amount: Number(row.final_amount || 0),
         daftar_item: row.daftar_item || '—',
         total_workers: Number(row.total_workers || 0),
+        payment_method_id:
+          row.payment_method_id == null ? null : Number(row.payment_method_id),
+        payment_status: row.payment_status || 'belum_lunas',
+        payment_method_label: row.payment_method_label || null,
+        payment_method_group: row.payment_method_group || null,
       })),
     });
   } catch (err) {

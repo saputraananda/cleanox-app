@@ -99,6 +99,8 @@ const emptyDashboard = {
   },
   statusBreakdown: [],
   categoryBreakdown: [],
+  paymentMethodBreakdown: [],
+  paymentStatusBreakdown: [],
   trends: [],
   target: { target_nominal: 0, realisasi: 0, persen: 0 },
   details: [],
@@ -225,6 +227,23 @@ export default function CleanoxOnlyDashboardPage() {
     }));
   }, [dashboardData.categoryBreakdown]);
 
+  const paymentMethodChartData = useMemo(() => {
+    return (dashboardData.paymentMethodBreakdown || []).map((row) => ({
+      name: row.method_group,
+      revenue: row.revenue,
+      total: row.total,
+    }));
+  }, [dashboardData.paymentMethodBreakdown]);
+
+  const paymentStatusChartData = useMemo(() => {
+    return (dashboardData.paymentStatusBreakdown || []).map((row) => ({
+      name: row.payment_status === 'lunas' ? 'Lunas' : 'Belum lunas',
+      value: row.total,
+      revenue: row.revenue,
+      payment_status: row.payment_status,
+    }));
+  }, [dashboardData.paymentStatusBreakdown]);
+
   const filteredDetails = useMemo(() => {
     const details = dashboardData.details || [];
     if (!searchTerm.trim()) return details;
@@ -233,7 +252,12 @@ export default function CleanoxOnlyDashboardPage() {
       (row.transaction_no && row.transaction_no.toLowerCase().includes(term)) ||
       (row.customer_name && row.customer_name.toLowerCase().includes(term)) ||
       (row.status && row.status.toLowerCase().includes(term)) ||
-      (row.daftar_item && row.daftar_item.toLowerCase().includes(term))
+      (row.daftar_item && row.daftar_item.toLowerCase().includes(term)) ||
+      (row.payment_method_label && row.payment_method_label.toLowerCase().includes(term)) ||
+      (row.payment_method_group && row.payment_method_group.toLowerCase().includes(term)) ||
+      (row.payment_status && row.payment_status.toLowerCase().includes(term)) ||
+      (row.payment_status === 'lunas' && 'lunas'.includes(term)) ||
+      (row.payment_status !== 'lunas' && 'belum lunas'.includes(term))
     );
   }, [dashboardData.details, searchTerm]);
 
@@ -549,6 +573,67 @@ export default function CleanoxOnlyDashboardPage() {
             </div>
           )}
 
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+              <h3 className="text-sm font-bold text-slate-800">Omzet per Metode Pembayaran</h3>
+              <p className="text-[11px] text-slate-400 mt-0.5 mb-4">Tunai, BCA, EDC (exclude cancelled)</p>
+              <div className="h-56">
+                {paymentMethodChartData.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-xs text-slate-400">
+                    Tidak ada data metode pembayaran.
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={paymentMethodChartData} barSize={28} margin={{ top: 4, right: 4, left: 4, bottom: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                      <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
+                      <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
+                      <Tooltip
+                        formatter={(v, name) => (name === 'Omzet' ? formatRp(v) : v)}
+                      />
+                      <Bar dataKey="revenue" name="Omzet" fill="#0ea5e9" radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+              <h3 className="text-sm font-bold text-slate-800">Status Pembayaran</h3>
+              <p className="text-[11px] text-slate-400 mt-0.5 mb-4">Lunas vs belum lunas</p>
+              <div className="h-56 flex items-center justify-center">
+                {paymentStatusChartData.length === 0 ? (
+                  <p className="text-xs text-slate-400">Tidak ada data status pembayaran.</p>
+                ) : (
+                  <PieChart width={220} height={220}>
+                    <Pie
+                      data={paymentStatusChartData}
+                      cx={110}
+                      cy={110}
+                      innerRadius={50}
+                      outerRadius={80}
+                      dataKey="value"
+                      paddingAngle={2}
+                    >
+                      {paymentStatusChartData.map((row, i) => (
+                        <Cell
+                          key={i}
+                          fill={row.payment_status === 'lunas' ? '#10b981' : '#f59e0b'}
+                        />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(v, _name, item) => [
+                        `${v} trx · ${formatRp(item?.payload?.revenue || 0)}`,
+                        item?.payload?.name || '',
+                      ]}
+                    />
+                  </PieChart>
+                )}
+              </div>
+            </div>
+          </div>
+
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden p-5 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
@@ -578,6 +663,8 @@ export default function CleanoxOnlyDashboardPage() {
                     <th className="px-4 py-2.5 text-left">Customer</th>
                     <th className="px-4 py-2.5 text-left">Tanggal Layanan</th>
                     <th className="px-4 py-2.5 text-left">Status</th>
+                    <th className="px-4 py-2.5 text-left">Pembayaran</th>
+                    <th className="px-4 py-2.5 text-left">Metode</th>
                     <th className="px-4 py-2.5 text-left min-w-[180px]">Item Layanan</th>
                     <th className="px-4 py-2.5 text-center">Worker</th>
                     <th className="px-4 py-2.5 text-right">Total</th>
@@ -586,7 +673,7 @@ export default function CleanoxOnlyDashboardPage() {
                 <tbody className="divide-y divide-slate-50">
                   {paginatedDetails.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-4 py-8 text-center text-slate-400 text-sm">
+                      <td colSpan={9} className="px-4 py-8 text-center text-slate-400 text-sm">
                         Tidak ada transaksi untuk periode ini.
                       </td>
                     </tr>
@@ -607,6 +694,20 @@ export default function CleanoxOnlyDashboardPage() {
                           <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-bold border ${STATUS_STYLE[row.status] || STATUS_STYLE.Draft}`}>
                             {String(row.status || '').replace(/_/g, ' ')}
                           </span>
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <span
+                            className={`inline-flex rounded-full border px-2 py-0.5 text-[9px] font-bold ${
+                              row.payment_status === 'lunas'
+                                ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                : 'border-amber-200 bg-amber-50 text-amber-700'
+                            }`}
+                          >
+                            {row.payment_status === 'lunas' ? 'Lunas' : 'Belum lunas'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5 text-slate-600 text-[13px]">
+                          {row.payment_method_label || row.payment_method_group || '—'}
                         </td>
                         <td className="px-4 py-2.5 text-slate-600 text-[13px] leading-relaxed">{row.daftar_item}</td>
                         <td className="px-4 py-2.5 text-center text-slate-600">{row.total_workers}</td>

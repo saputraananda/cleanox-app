@@ -267,17 +267,23 @@ export default function PosTransactionsPage() {
                             <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-sm font-semibold text-slate-700">
                               {row.status}
                             </span>
-                            {row.source_system === 'pos' && row.payment_status ? (
-                              <span
-                                className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-                                  row.payment_status === 'lunas'
-                                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                                    : 'border-amber-200 bg-amber-50 text-amber-700'
-                                }`}
-                              >
-                                {row.payment_status === 'lunas' ? 'Lunas' : 'Belum lunas'}
-                              </span>
-                            ) : null}
+                            {(() => {
+                              const isSmartlink = row.source_system === 'smartlink';
+                              const isLunas = isSmartlink || row.payment_status === 'lunas';
+                              const showPaymentBadge = isSmartlink || Boolean(row.payment_status);
+                              if (!showPaymentBadge) return null;
+                              return (
+                                <span
+                                  className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                                    isLunas
+                                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                      : 'border-amber-200 bg-amber-50 text-amber-700'
+                                  }`}
+                                >
+                                  {isLunas ? 'Lunas' : 'Belum lunas'}
+                                </span>
+                              );
+                            })()}
                           </div>
                         </td>
                         <td className="px-3 py-3 text-right font-semibold text-slate-900">
