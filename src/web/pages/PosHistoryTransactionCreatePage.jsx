@@ -102,8 +102,11 @@ export default function PosHistoryTransactionCreatePage() {
     service_mode: 'home_service',
     payment_method_id: '',
     promo_id: '',
+    discount_id: '',
+    discount_value: '',
   });
   const [paymentMethods, setPaymentMethods] = useState([]);
+  const [discountOptions, setDiscountOptions] = useState([]);
   const [paymentGroup, setPaymentGroup] = useState('');
   const [itemModalOpen, setItemModalOpen] = useState(false);
   const [editingItemIndex, setEditingItemIndex] = useState(null);
@@ -175,11 +178,25 @@ export default function PosHistoryTransactionCreatePage() {
       })
       .find((row) => Number(row.id) === Number(form.promo_id));
 
-    const { discountAmount: discount } = computeTransactionPromoDiscount({
+    const { discountAmount: promoPart } = computeTransactionPromoDiscount({
       subtotal,
       promoType: selectedPromo?.promo_type || null,
       promoValue: selectedPromo?.promo_value ?? null,
     });
+
+    const selectedDiscount = discountOptions.find(
+      (row) => Number(row.id) === Number(form.discount_id)
+    );
+    const discountValueForCalc =
+      selectedDiscount?.discount_type === 'additional'
+        ? form.discount_value
+        : selectedDiscount?.discount_value ?? null;
+    const { discountAmount: diskonPart } = computeTransactionPromoDiscount({
+      subtotal,
+      promoType: selectedDiscount?.discount_type || null,
+      promoValue: discountValueForCalc,
+    });
+    const discount = Math.min(subtotal, Math.max(0, promoPart) + Math.max(0, diskonPart));
 
     return {
       hours,
@@ -188,10 +205,22 @@ export default function PosHistoryTransactionCreatePage() {
       gcRates,
       subtotal,
       discount,
+      promoPart,
+      diskonPart,
       finalAmount: subtotal - discount,
       needsHours: hasGc,
     };
-  }, [form.items, form.promo_id, form.total_people, jobEndedAt, jobStartedAt, services]);
+  }, [
+    form.items,
+    form.promo_id,
+    form.discount_id,
+    form.discount_value,
+    form.total_people,
+    jobEndedAt,
+    jobStartedAt,
+    services,
+    discountOptions,
+  ]);
 
   const availablePromos = useMemo(() => {
     const map = new Map();
@@ -265,15 +294,17 @@ export default function PosHistoryTransactionCreatePage() {
     const loadData = async () => {
       setLoading(true);
       try {
-        const [serviceRes, workerRes, paymentRes] = await Promise.all([
+        const [serviceRes, workerRes, paymentRes, discountRes] = await Promise.all([
           api.get('/pos-transactions/services'),
           api.get('/pos-transactions/workers'),
           api.get('/pos-master/payment-methods', { params: { is_active: 1 } }),
+          api.get('/pos-master/discounts', { params: { status: 'Aktif' } }),
         ]);
         setServices(serviceRes.data.services || []);
         setServiceCategoriesMaster(serviceRes.data.categories || []);
         setWorkers(workerRes.data.workers || []);
         setPaymentMethods(paymentRes.data.data || []);
+        setDiscountOptions(discountRes.data.discounts || []);
       } catch (err) {
         setError(err.response?.data?.message || 'Gagal memuat master POS');
       } finally {
@@ -548,6 +579,13 @@ export default function PosHistoryTransactionCreatePage() {
         service_mode: form.service_mode || 'home_service',
         payment_method_id: Number(form.payment_method_id),
         promo_id: form.promo_id ? Number(form.promo_id) : null,
+        discount_id: form.discount_id ? Number(form.discount_id) : null,
+        discount_value:
+          form.discount_id &&
+          discountOptions.find((row) => Number(row.id) === Number(form.discount_id))
+            ?.discount_type === 'additional'
+            ? Number(form.discount_value)
+            : undefined,
         worker_ids: form.worker_ids,
         items: form.items.map((item) => ({
           service_id: Number(item.service_id),
@@ -1013,6 +1051,52 @@ export default function PosHistoryTransactionCreatePage() {
                 ))}
               </select>
             </label>
+            <label className="block space-y-1.5">
+              <span className="text-[12px] font-semibold text-slate-600">Diskon (satu transaksi)</span>
+              <select
+                className={inputClass}
+                value={form.discount_id}
+                onChange={(e) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    discount_id: e.target.value,
+                    discount_value: '',
+                  }))
+                }
+              >
+                <option value="">Tanpa diskon</option>
+                {discountOptions.map((discount) => (
+                  <option key={discount.id} value={discount.id}>
+                    {discount.discount_type === 'additional'
+                      ? `${discount.name} (Additional)`
+                      : `${discount.name} - ${
+                          discount.discount_type === 'persen'
+                            ? `${discount.discount_value}%`
+                            : `Rp ${Number(discount.discount_value || 0).toLocaleString('id-ID')}`
+                        }`}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {discountOptions.find((row) => Number(row.id) === Number(form.discount_id))
+              ?.discount_type === 'additional' && (
+              <label className="block space-y-1.5">
+                <span className="text-[12px] font-semibold text-slate-600">
+                  Nominal diskon tambahan
+                </span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  className={inputClass}
+                  value={form.discount_value}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, discount_value: e.target.value }))
+                  }
+                  placeholder="Contoh: 500"
+                />
+              </label>
+            )}
             <div className="space-y-1">
             <p className="text-[12px] font-semibold uppercase tracking-wide text-slate-400">
               Estimasi total
@@ -1029,7 +1113,9 @@ export default function PosHistoryTransactionCreatePage() {
                 : formatCurrency(pricingPreview.finalAmount)}
             </p>
             <p className="text-[12px] text-slate-500">
-              Diskon {formatCurrency(pricingPreview.discount)}
+              Diskon promo {formatCurrency(pricingPreview.promoPart || 0)} · Diskon tambahan{' '}
+              {formatCurrency(pricingPreview.diskonPart || 0)} · Total{' '}
+              {formatCurrency(pricingPreview.discount)}
               {pricingPreview.hasGc && pricingPreview.hoursOk
                 ? ` · GC ${pricingPreview.hours} jam`
                 : ''}

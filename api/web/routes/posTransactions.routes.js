@@ -22,6 +22,7 @@ import {
   uploadPosPaymentProof,
   deletePosPaymentProof,
   updatePosTransactionPayment,
+  updatePosTransactionHeaderOffers,
   updatePosAssignments,
   updatePosTransactionStatus,
   updatePosTransactionItemMeter,
@@ -105,6 +106,7 @@ router.get('/:id', getPosTransactionDetail);
 router.post('/', createPosTransaction);
 router.patch('/:id/status', updatePosTransactionStatus);
 router.patch('/:id/payment', updatePosTransactionPayment);
+router.patch('/:id/header-offers', updatePosTransactionHeaderOffers);
 router.patch('/:id/items/:itemId/meter', updatePosTransactionItemMeter);
 router.patch('/:id/items/:itemId', updatePosTransactionItem);
 router.delete('/:id/items/:itemId', deletePosTransactionItem);

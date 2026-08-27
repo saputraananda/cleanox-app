@@ -18,7 +18,7 @@ export function computeTransactionPromoDiscount({ subtotal, promoType, promoValu
   let discount = 0;
   if (type === 'persen') {
     discount = (base * rawValue) / 100;
-  } else if (type === 'nominal') {
+  } else if (type === 'nominal' || type === 'additional') {
     discount = rawValue;
   } else {
     return { discountAmount: 0 };

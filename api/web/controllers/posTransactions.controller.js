@@ -313,6 +313,34 @@ function toMoney(value) {
   return Number(Number(value || 0).toFixed(2));
 }
 
+/** Resolve discount header snapshot from master + optional body value (additional). */
+function resolveDiscountSnapshot(discountRow, inputValue) {
+  if (!discountRow) return { data: null };
+  const type = String(discountRow.discount_type || '').trim();
+  if (type === 'additional') {
+    const value = Number(inputValue);
+    if (!Number.isFinite(value) || value <= 0) {
+      return { error: 'Nominal diskon additional wajib lebih dari 0' };
+    }
+    return {
+      data: {
+        id: Number(discountRow.id),
+        name: discountRow.name || null,
+        discount_type: 'additional',
+        discount_value: toMoney(value),
+      },
+    };
+  }
+  return {
+    data: {
+      id: Number(discountRow.id),
+      name: discountRow.name || null,
+      discount_type: discountRow.discount_type || null,
+      discount_value: toMoney(discountRow.discount_value),
+    },
+  };
+}
+
 function assertTransactionItemsMutable(transaction) {
   if (!transaction) {
     const err = new Error('Transaksi POS tidak ditemukan');
@@ -809,6 +837,13 @@ export const getPosTransactionDetail = async (req, res) => {
           transaction.promo_value_snapshot == null
             ? null
             : Number(transaction.promo_value_snapshot),
+        discount_id: transaction.discount_id == null ? null : Number(transaction.discount_id),
+        discount_name_snapshot: transaction.discount_name_snapshot || null,
+        discount_type_snapshot: transaction.discount_type_snapshot || null,
+        discount_value_snapshot:
+          transaction.discount_value_snapshot == null
+            ? null
+            : Number(transaction.discount_value_snapshot),
         final_amount: Number(transaction.final_amount || 0),
         billing_hours:
           transaction.billing_hours == null ? null : Number(transaction.billing_hours),
@@ -1023,6 +1058,198 @@ export const updatePosTransactionPayment = async (req, res) => {
   }
 };
 
+export const updatePosTransactionHeaderOffers = async (req, res) => {
+  const transactionId = Number(req.params.id);
+  if (!transactionId) {
+    return res.status(400).json({ message: 'ID transaksi tidak valid' });
+  }
+
+  const hasPromo = Object.prototype.hasOwnProperty.call(req.body || {}, 'promo_id');
+  const hasDiscount = Object.prototype.hasOwnProperty.call(req.body || {}, 'discount_id');
+  if (!hasPromo && !hasDiscount) {
+    return res.status(400).json({ message: 'promo_id atau discount_id wajib diisi' });
+  }
+
+  const connection = await cleanoxPool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const [[transaction]] = await connection.query(
+      `SELECT *
+       FROM tr_transactions
+       WHERE id = ?
+       LIMIT 1
+       FOR UPDATE`,
+      [transactionId]
+    );
+    if (!transaction) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Transaksi POS tidak ditemukan' });
+    }
+    if (transaction.status === 'Cancelled') {
+      await connection.rollback();
+      return res.status(409).json({ message: 'Transaksi yang dibatalkan tidak dapat diubah' });
+    }
+
+    let nextPromoId = transaction.promo_id == null ? null : Number(transaction.promo_id);
+    let nextPromoName = transaction.promo_name_snapshot || null;
+    let nextPromoType = transaction.promo_type_snapshot || null;
+    let nextPromoValue =
+      transaction.promo_value_snapshot == null ? null : Number(transaction.promo_value_snapshot);
+
+    let nextDiscountId = transaction.discount_id == null ? null : Number(transaction.discount_id);
+    let nextDiscountName = transaction.discount_name_snapshot || null;
+    let nextDiscountType = transaction.discount_type_snapshot || null;
+    let nextDiscountValue =
+      transaction.discount_value_snapshot == null
+        ? null
+        : Number(transaction.discount_value_snapshot);
+
+    if (hasPromo) {
+      const raw = req.body.promo_id;
+      if (raw == null || raw === '') {
+        nextPromoId = null;
+        nextPromoName = null;
+        nextPromoType = null;
+        nextPromoValue = null;
+      } else {
+        const promoId = Number(raw);
+        if (!Number.isFinite(promoId) || promoId <= 0) {
+          await connection.rollback();
+          return res.status(400).json({ message: 'Promo tidak valid' });
+        }
+        const [itemRows] = await connection.query(
+          `SELECT DISTINCT service_id FROM tr_transaction_items WHERE transaction_id = ?`,
+          [transactionId]
+        );
+        const serviceIds = itemRows.map((row) => Number(row.service_id)).filter(Boolean);
+        if (serviceIds.length === 0) {
+          await connection.rollback();
+          return res.status(400).json({ message: 'Transaksi belum punya item service' });
+        }
+        const [[promoRow]] = await connection.query(
+          `SELECT p.id, p.name, p.promo_type, p.promo_value
+           FROM mst_promos p
+           WHERE p.id = ? AND COALESCE(p.status, 'Aktif') = 'Aktif'
+           LIMIT 1`,
+          [promoId]
+        );
+        if (!promoRow) {
+          await connection.rollback();
+          return res.status(400).json({ message: 'Promo tidak ditemukan atau tidak aktif' });
+        }
+        const [linkRows] = await connection.query(
+          `SELECT service_id
+           FROM mst_service_promos
+           WHERE promo_id = ?
+             AND service_id IN (${serviceIds.map(() => '?').join(',')})`,
+          [promoId, ...serviceIds]
+        );
+        if (!linkRows.length) {
+          await connection.rollback();
+          return res.status(400).json({
+            message: 'Promo tidak berlaku untuk service pada transaksi ini',
+          });
+        }
+        nextPromoId = Number(promoRow.id);
+        nextPromoName = promoRow.name || null;
+        nextPromoType = promoRow.promo_type || null;
+        nextPromoValue = toMoney(promoRow.promo_value);
+      }
+    }
+
+    if (hasDiscount) {
+      const raw = req.body.discount_id;
+      if (raw == null || raw === '') {
+        nextDiscountId = null;
+        nextDiscountName = null;
+        nextDiscountType = null;
+        nextDiscountValue = null;
+      } else {
+        const discountId = Number(raw);
+        if (!Number.isFinite(discountId) || discountId <= 0) {
+          await connection.rollback();
+          return res.status(400).json({ message: 'Diskon tidak valid' });
+        }
+        const [[discountRow]] = await connection.query(
+          `SELECT id, name, discount_type, discount_value
+           FROM mst_discounts
+           WHERE id = ? AND COALESCE(status, 'Aktif') = 'Aktif'
+           LIMIT 1`,
+          [discountId]
+        );
+        if (!discountRow) {
+          await connection.rollback();
+          return res.status(400).json({ message: 'Diskon tidak ditemukan atau tidak aktif' });
+        }
+        const resolved = resolveDiscountSnapshot(discountRow, req.body?.discount_value);
+        if (resolved.error) {
+          await connection.rollback();
+          return res.status(400).json({ message: resolved.error });
+        }
+        nextDiscountId = resolved.data.id;
+        nextDiscountName = resolved.data.name;
+        nextDiscountType = resolved.data.discount_type;
+        nextDiscountValue = resolved.data.discount_value;
+      }
+    }
+
+    await connection.query(
+      `UPDATE tr_transactions
+       SET promo_id = ?,
+           promo_name_snapshot = ?,
+           promo_type_snapshot = ?,
+           promo_value_snapshot = ?,
+           discount_id = ?,
+           discount_name_snapshot = ?,
+           discount_type_snapshot = ?,
+           discount_value_snapshot = ?,
+           updated_by = ?,
+           updated_at = NOW()
+       WHERE id = ?`,
+      [
+        nextPromoId,
+        nextPromoName,
+        nextPromoType,
+        nextPromoValue,
+        nextDiscountId,
+        nextDiscountName,
+        nextDiscountType,
+        nextDiscountValue,
+        req.user?.id || null,
+        transactionId,
+      ]
+    );
+
+    const totals = await recalcPosTransactionMoney(connection, transactionId, {
+      actorId: req.user?.id || null,
+    });
+
+    await connection.commit();
+
+    return res.json({
+      message: 'Promo & diskon transaksi diperbarui',
+      promo_id: nextPromoId,
+      promo_name_snapshot: nextPromoName,
+      promo_type_snapshot: nextPromoType,
+      promo_value_snapshot: nextPromoValue,
+      discount_id: nextDiscountId,
+      discount_name_snapshot: nextDiscountName,
+      discount_type_snapshot: nextDiscountType,
+      discount_value_snapshot: nextDiscountValue,
+      subtotal_amount: totals.subtotal,
+      discount_amount: totals.discount,
+      final_amount: totals.finalAmount,
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[pos/updatePosTransactionHeaderOffers]', error.message);
+    return res.status(500).json({ message: 'Gagal memperbarui promo & diskon transaksi' });
+  } finally {
+    connection.release();
+  }
+};
+
 export const uploadPosPaymentProof = async (req, res) => {
   const transactionId = Number(req.params.id);
   if (!transactionId) {
@@ -1153,12 +1380,16 @@ export const createPosTransaction = async (req, res) => {
     job_ended_at: jobEndedRaw,
     payment_method_id: paymentMethodIdRaw,
     promo_id: promoIdRaw,
+    discount_id: discountIdRaw,
+    discount_value: discountValueRaw,
   } = req.body;
 
   const isHistoryEntry = parseTruthyFlag(req.body?.is_history_entry);
   const service_mode = String(serviceModeRaw || 'home_service').trim();
   const paymentMethodId = Number(paymentMethodIdRaw);
   const rootPromoId = promoIdRaw == null || promoIdRaw === '' ? null : Number(promoIdRaw);
+  const rootDiscountId =
+    discountIdRaw == null || discountIdRaw === '' ? null : Number(discountIdRaw);
 
   if (!customer_id || !service_date || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ message: 'Customer, tanggal layanan, dan item wajib diisi' });
@@ -1268,6 +1499,31 @@ export const createPosTransaction = async (req, res) => {
         });
       }
       headerPromo = promoRow;
+    }
+
+    let headerDiscount = null;
+    if (rootDiscountId) {
+      if (!Number.isFinite(rootDiscountId) || rootDiscountId <= 0) {
+        await connection.rollback();
+        return res.status(400).json({ message: 'Diskon tidak valid' });
+      }
+      const [[discountRow]] = await connection.query(
+        `SELECT id, name, discount_type, discount_value
+         FROM mst_discounts
+         WHERE id = ? AND COALESCE(status, 'Aktif') = 'Aktif'
+         LIMIT 1`,
+        [rootDiscountId]
+      );
+      if (!discountRow) {
+        await connection.rollback();
+        return res.status(400).json({ message: 'Diskon tidak ditemukan atau tidak aktif' });
+      }
+      const resolved = resolveDiscountSnapshot(discountRow, discountValueRaw);
+      if (resolved.error) {
+        await connection.rollback();
+        return res.status(400).json({ message: resolved.error });
+      }
+      headerDiscount = resolved.data;
     }
 
     const gcCrewSizes = [];
@@ -1406,11 +1662,17 @@ export const createPosTransaction = async (req, res) => {
       };
     });
 
-    const { discountAmount: discount } = computeTransactionPromoDiscount({
+    const { discountAmount: promoPart } = computeTransactionPromoDiscount({
       subtotal,
       promoType: headerPromo?.promo_type || null,
       promoValue: headerPromo?.promo_value ?? null,
     });
+    const { discountAmount: diskonPart } = computeTransactionPromoDiscount({
+      subtotal,
+      promoType: headerDiscount?.discount_type || null,
+      promoValue: headerDiscount?.discount_value ?? null,
+    });
+    const discount = toMoney(Math.min(subtotal, Math.max(0, promoPart) + Math.max(0, diskonPart)));
     const finalAmount = subtotal - discount;
     const transactionNo = buildTransactionNo();
     const resolvedServiceDate = isHistoryEntry ? historyStarted.mysql : service_date;
@@ -1508,10 +1770,11 @@ export const createPosTransaction = async (req, res) => {
       `INSERT INTO tr_transactions
         (transaction_no, customer_id, customer_name, customer_phone, customer_address, service_date, total_people,
          subtotal_amount, discount_amount, promo_id, promo_name_snapshot, promo_type_snapshot, promo_value_snapshot,
+         discount_id, discount_name_snapshot, discount_type_snapshot, discount_value_snapshot,
          final_amount, billing_hours, pricing_finalized_at, notes,
          group_message_template, customer_message_template, service_mode, is_history_entry,
          payment_method_id, payment_status, status, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, 'belum_lunas', ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, 'belum_lunas', ?, ?, ?)`,
       [
         transactionNo,
         customer.id,
@@ -1526,6 +1789,10 @@ export const createPosTransaction = async (req, res) => {
         headerPromo?.name || null,
         headerPromo?.promo_type || null,
         headerPromo ? toMoney(headerPromo.promo_value) : null,
+        headerDiscount ? Number(headerDiscount.id) : null,
+        headerDiscount?.name || null,
+        headerDiscount?.discount_type || null,
+        headerDiscount ? toMoney(headerDiscount.discount_value) : null,
         toMoney(finalAmount),
         notes || null,
         groupMessageTemplate,

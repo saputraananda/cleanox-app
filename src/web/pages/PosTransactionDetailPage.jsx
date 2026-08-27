@@ -167,6 +167,13 @@ export default function PosTransactionDetailPage() {
   const [scheduleSuccess, setScheduleSuccess] = useState('');
   const [scheduleConfirm, setScheduleConfirm] = useState(null);
   const [photoPreview, setPhotoPreview] = useState(null);
+  const [discountOptions, setDiscountOptions] = useState([]);
+  const [offerForm, setOfferForm] = useState({
+    promo_id: '',
+    discount_id: '',
+    discount_value: '',
+  });
+  const [offersSaving, setOffersSaving] = useState(false);
 
   const openPhotoPreview = (src, title) => {
     if (!src) return;
@@ -275,15 +282,17 @@ export default function PosTransactionDetailPage() {
     setLoading(true);
     setError('');
     try {
-      const [detailRes, paymentRes, serviceRes] = await Promise.all([
+      const [detailRes, paymentRes, serviceRes, discountRes] = await Promise.all([
         api.get(`/pos-transactions/${id}`),
         api.get('/pos-master/payment-methods', { params: { is_active: 1 } }),
         api.get('/pos-transactions/services'),
+        api.get('/pos-master/discounts', { params: { status: 'Aktif' } }),
       ]);
       const nextDetail = detailRes.data;
       const methods = paymentRes.data.data || [];
       setPaymentMethods(methods);
       setServices(serviceRes.data.services || []);
+      setDiscountOptions(discountRes.data.discounts || []);
       const serviceDate = nextDetail.transaction?.service_date;
       const workerRes = await api.get('/pos-transactions/workers', {
         params: serviceDate
@@ -306,6 +315,14 @@ export default function PosTransactionDetailPage() {
         payment_method_id: tx.payment_method_id ? String(tx.payment_method_id) : '',
         payment_status: tx.payment_status || 'belum_lunas',
         payment_group: tx.payment_method?.method_group || '',
+      });
+      setOfferForm({
+        promo_id: tx.promo_id ? String(tx.promo_id) : '',
+        discount_id: tx.discount_id ? String(tx.discount_id) : '',
+        discount_value:
+          tx.discount_type_snapshot === 'additional' && tx.discount_value_snapshot != null
+            ? String(tx.discount_value_snapshot)
+            : '',
       });
       await Promise.all([
         refreshEvidencePreviews(nextDetail.assignments || []),
@@ -556,6 +573,29 @@ export default function PosTransactionDetailPage() {
     }
   };
 
+  const handleSaveHeaderOffers = async () => {
+    if (offersSaving) return;
+    setOffersSaving(true);
+    setError('');
+    try {
+      await api.patch(`/pos-transactions/${id}/header-offers`, {
+        promo_id: offerForm.promo_id ? Number(offerForm.promo_id) : null,
+        discount_id: offerForm.discount_id ? Number(offerForm.discount_id) : null,
+        discount_value:
+          offerForm.discount_id &&
+          discountOptions.find((row) => Number(row.id) === Number(offerForm.discount_id))
+            ?.discount_type === 'additional'
+            ? Number(offerForm.discount_value)
+            : undefined,
+      });
+      await loadData();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Gagal menyimpan promo & diskon');
+    } finally {
+      setOffersSaving(false);
+    }
+  };
+
   if (loading) {
     return <div className="max-w-7xl mx-auto p-6 text-sm text-slate-500">Memuat detail transaksi POS...</div>;
   }
@@ -567,6 +607,17 @@ export default function PosTransactionDetailPage() {
   const { transaction, items, assignments, tracking, customer_photos: customerPhotos = [], payment_proofs: paymentProofs = [], takehome_progress: takehomeProgress } = detail;
   const isTakeHome = String(transaction.service_mode || 'home_service') === 'take_home';
   const isHistoryEntry = Boolean(transaction.is_history_entry);
+  const canEditOffers = transaction.status !== 'Cancelled';
+  const availablePromos = (() => {
+    const map = new Map();
+    for (const item of items || []) {
+      const service = services.find((row) => Number(row.id) === Number(item.service_id));
+      for (const promo of service?.promos || []) {
+        if (!map.has(Number(promo.id))) map.set(Number(promo.id), promo);
+      }
+    }
+    return [...map.values()];
+  })();
   const canMutateItems =
     !isHistoryEntry &&
     transaction.status !== 'Cancelled' &&
@@ -1023,24 +1074,123 @@ export default function PosTransactionDetailPage() {
               <p className="text-xs uppercase tracking-wide text-slate-400">Status</p>
               <p className="mt-1 font-semibold text-slate-900">{transaction.status}</p>
             </div>
-            <div>
-              <p className="text-xs uppercase tracking-wide text-slate-400">Promo</p>
-              <p className="mt-1 font-semibold text-slate-900">
-                {transaction.promo_name_snapshot || '-'}
-              </p>
-              {transaction.promo_type_snapshot && transaction.promo_value_snapshot != null && (
-                <p className="text-sm text-slate-500">
-                  {transaction.promo_type_snapshot === 'persen'
-                    ? `${Number(transaction.promo_value_snapshot)}%`
-                    : formatCurrency(transaction.promo_value_snapshot)}
-                </p>
-              )}
-            </div>
-            <div>
-              <p className="text-xs uppercase tracking-wide text-slate-400">Diskon</p>
-              <p className="mt-1 font-semibold text-slate-900">
-                {formatCurrency(transaction.discount_amount)}
-              </p>
+            <div className="sm:col-span-2 space-y-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block space-y-1">
+                  <span className="text-xs uppercase tracking-wide text-slate-400">Promo</span>
+                  {canEditOffers ? (
+                    <select
+                      value={offerForm.promo_id}
+                      onChange={(e) =>
+                        setOfferForm((prev) => ({ ...prev, promo_id: e.target.value }))
+                      }
+                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900"
+                    >
+                      <option value="">Tanpa promo</option>
+                      {availablePromos.map((promo) => (
+                        <option key={promo.id} value={promo.id}>
+                          {promo.name} -{' '}
+                          {promo.promo_type === 'persen'
+                            ? `${promo.promo_value}%`
+                            : formatCurrency(promo.promo_value)}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <>
+                      <p className="mt-1 font-semibold text-slate-900">
+                        {transaction.promo_name_snapshot || '-'}
+                      </p>
+                      {transaction.promo_type_snapshot && transaction.promo_value_snapshot != null && (
+                        <p className="text-sm text-slate-500">
+                          {transaction.promo_type_snapshot === 'persen'
+                            ? `${Number(transaction.promo_value_snapshot)}%`
+                            : formatCurrency(transaction.promo_value_snapshot)}
+                        </p>
+                      )}
+                    </>
+                  )}
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-xs uppercase tracking-wide text-slate-400">Diskon master</span>
+                  {canEditOffers ? (
+                    <select
+                      value={offerForm.discount_id}
+                      onChange={(e) =>
+                        setOfferForm((prev) => ({
+                          ...prev,
+                          discount_id: e.target.value,
+                          discount_value: '',
+                        }))
+                      }
+                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900"
+                    >
+                      <option value="">Tanpa diskon</option>
+                      {discountOptions.map((discount) => (
+                        <option key={discount.id} value={discount.id}>
+                          {discount.discount_type === 'additional'
+                            ? `${discount.name} (Additional)`
+                            : `${discount.name} - ${
+                                discount.discount_type === 'persen'
+                                  ? `${discount.discount_value}%`
+                                  : formatCurrency(discount.discount_value)
+                              }`}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <>
+                      <p className="mt-1 font-semibold text-slate-900">
+                        {transaction.discount_name_snapshot || '-'}
+                      </p>
+                      {transaction.discount_type_snapshot === 'additional' &&
+                        transaction.discount_value_snapshot != null && (
+                          <p className="text-sm text-slate-500">
+                            {formatCurrency(transaction.discount_value_snapshot)}
+                          </p>
+                        )}
+                    </>
+                  )}
+                </label>
+                {canEditOffers &&
+                  discountOptions.find((row) => Number(row.id) === Number(offerForm.discount_id))
+                    ?.discount_type === 'additional' && (
+                    <label className="block space-y-1 sm:col-span-2">
+                      <span className="text-xs uppercase tracking-wide text-slate-400">
+                        Nominal diskon tambahan
+                      </span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={offerForm.discount_value}
+                        onChange={(e) =>
+                          setOfferForm((prev) => ({ ...prev, discount_value: e.target.value }))
+                        }
+                        className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900"
+                        placeholder="Contoh: 500"
+                      />
+                    </label>
+                  )}
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-slate-400">Total diskon</p>
+                  <p className="mt-1 font-semibold text-slate-900">
+                    {formatCurrency(transaction.discount_amount)}
+                  </p>
+                </div>
+                {canEditOffers && (
+                  <button
+                    type="button"
+                    disabled={offersSaving}
+                    onClick={handleSaveHeaderOffers}
+                    className="inline-flex h-10 items-center rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white disabled:opacity-60"
+                  >
+                    {offersSaving ? 'Menyimpan...' : 'Simpan promo & diskon'}
+                  </button>
+                )}
+              </div>
             </div>
             <div>
               <p className="text-xs uppercase tracking-wide text-slate-400">Mode Layanan</p>

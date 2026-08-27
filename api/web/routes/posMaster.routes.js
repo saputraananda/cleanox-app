@@ -10,6 +10,10 @@ import {
   getPromoDetail,
   createPromo,
   updatePromo,
+  listDiscounts,
+  getDiscountDetail,
+  createDiscount,
+  updateDiscount,
   listPaymentMethods,
 } from '../controllers/posMaster.controller.js';
 
@@ -46,5 +50,10 @@ router.get('/promos', listPromos);
 router.get('/promos/:id', getPromoDetail);
 router.post('/promos', createPromo);
 router.put('/promos/:id', updatePromo);
+
+router.get('/discounts', listDiscounts);
+router.get('/discounts/:id', getDiscountDetail);
+router.post('/discounts', createDiscount);
+router.put('/discounts/:id', updateDiscount);
 
 export default router;

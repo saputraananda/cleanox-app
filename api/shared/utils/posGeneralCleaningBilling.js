@@ -215,6 +215,13 @@ export async function finalizeGeneralCleaningPricingFromWindow(
     }).discountAmount;
   }
 
+  const diskonPart = computeTransactionPromoDiscount({
+    subtotal,
+    promoType: tx.discount_type_snapshot,
+    promoValue: tx.discount_value_snapshot,
+  }).discountAmount;
+  discount = toMoney(Math.min(subtotal, Math.max(0, discount) + Math.max(0, diskonPart)));
+
   const finalAmount = subtotal - discount;
 
   const [workerRows] = await connection.query(

@@ -190,8 +190,11 @@ export default function PosTransactionCreatePage() {
     service_mode: 'home_service',
     payment_method_id: '',
     promo_id: '',
+    discount_id: '',
+    discount_value: '',
   });
   const [paymentMethods, setPaymentMethods] = useState([]);
+  const [discountOptions, setDiscountOptions] = useState([]);
   const [paymentGroup, setPaymentGroup] = useState('');
   const [itemModalOpen, setItemModalOpen] = useState(false);
   const [editingItemIndex, setEditingItemIndex] = useState(null);
@@ -327,14 +330,16 @@ export default function PosTransactionCreatePage() {
     const loadData = async () => {
       setLoading(true);
       try {
-        const [serviceRes, paymentRes] = await Promise.all([
+        const [serviceRes, paymentRes, discountRes] = await Promise.all([
           api.get('/pos-transactions/services'),
           api.get('/pos-master/payment-methods', { params: { is_active: 1 } }),
+          api.get('/pos-master/discounts', { params: { status: 'Aktif' } }),
           loadCustomers({ search: '', page: 1, pageSize: PAGE_SIZE_OPTIONS[0] || 10 }),
         ]);
         setServices(serviceRes.data.services || []);
         setServiceCategoriesMaster(serviceRes.data.categories || []);
         setPaymentMethods(paymentRes.data.data || []);
+        setDiscountOptions(discountRes.data.discounts || []);
         const workerRes = await api.get('/pos-transactions/workers');
         setWorkers(workerRes.data.workers || []);
       } catch (err) {
@@ -426,14 +431,40 @@ export default function PosTransactionCreatePage() {
       })
       .find((row) => Number(row.id) === Number(form.promo_id));
 
-    const { discountAmount: discount } = computeTransactionPromoDiscount({
+    const { discountAmount: promoPart } = computeTransactionPromoDiscount({
       subtotal: acc.subtotal,
       promoType: selectedPromo?.promo_type || null,
       promoValue: selectedPromo?.promo_value ?? null,
     });
 
-    return { ...acc, discount };
-  }, [form.items, form.total_people, form.promo_id, services]);
+    const selectedDiscount = discountOptions.find(
+      (row) => Number(row.id) === Number(form.discount_id)
+    );
+    const discountValueForCalc =
+      selectedDiscount?.discount_type === 'additional'
+        ? form.discount_value
+        : selectedDiscount?.discount_value ?? null;
+    const { discountAmount: diskonPart } = computeTransactionPromoDiscount({
+      subtotal: acc.subtotal,
+      promoType: selectedDiscount?.discount_type || null,
+      promoValue: discountValueForCalc,
+    });
+
+    const discount = Math.min(
+      acc.subtotal,
+      Math.max(0, promoPart) + Math.max(0, diskonPart)
+    );
+
+    return { ...acc, discount, promoPart, diskonPart };
+  }, [
+    form.items,
+    form.total_people,
+    form.promo_id,
+    form.discount_id,
+    form.discount_value,
+    services,
+    discountOptions,
+  ]);
 
   const availablePromos = useMemo(() => {
     const map = new Map();
@@ -998,6 +1029,13 @@ export default function PosTransactionCreatePage() {
         service_mode: form.service_mode || 'home_service',
         payment_method_id: Number(form.payment_method_id),
         promo_id: form.promo_id ? Number(form.promo_id) : null,
+        discount_id: form.discount_id ? Number(form.discount_id) : null,
+        discount_value:
+          form.discount_id &&
+          discountOptions.find((row) => Number(row.id) === Number(form.discount_id))
+            ?.discount_type === 'additional'
+            ? Number(form.discount_value)
+            : undefined,
         worker_ids: form.worker_ids,
         items: form.items.map((item) => ({
           service_id: Number(item.service_id),
@@ -1713,6 +1751,56 @@ export default function PosTransactionCreatePage() {
                         ))}
                       </select>
                     </label>
+                    <label className="block max-w-md space-y-1.5">
+                      <span className="text-[9.5px] font-semibold uppercase tracking-[.14em] text-blue-200/80">
+                        Diskon (satu transaksi)
+                      </span>
+                      <select
+                        value={form.discount_id}
+                        onChange={(e) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            discount_id: e.target.value,
+                            discount_value: '',
+                          }))
+                        }
+                        className="w-full rounded-[12px] border border-white/20 bg-white/10 px-3 py-2.5 text-[13px] text-white focus:border-white/40 focus:outline-none"
+                      >
+                        <option value="" className="text-slate-800">
+                          Tanpa diskon
+                        </option>
+                        {discountOptions.map((discount) => (
+                          <option key={discount.id} value={discount.id} className="text-slate-800">
+                            {discount.discount_type === 'additional'
+                              ? `${discount.name} (Additional)`
+                              : `${discount.name} - ${
+                                  discount.discount_type === 'persen'
+                                    ? `${discount.discount_value}%`
+                                    : `Rp ${Number(discount.discount_value || 0).toLocaleString('id-ID')}`
+                                }`}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {discountOptions.find((row) => Number(row.id) === Number(form.discount_id))
+                      ?.discount_type === 'additional' && (
+                      <label className="block max-w-md space-y-1.5">
+                        <span className="text-[9.5px] font-semibold uppercase tracking-[.14em] text-blue-200/80">
+                          Nominal diskon tambahan
+                        </span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={form.discount_value}
+                          onChange={(e) =>
+                            setForm((prev) => ({ ...prev, discount_value: e.target.value }))
+                          }
+                          className="w-full rounded-[12px] border border-white/20 bg-white/10 px-3 py-2.5 text-[13px] text-white placeholder:text-blue-100/50 focus:border-white/40 focus:outline-none"
+                          placeholder="Contoh: 500"
+                        />
+                      </label>
+                    )}
                     <div>
                     <p className="text-[9.5px] font-semibold uppercase tracking-[.14em] text-blue-200/80">
                       Ringkasan biaya
@@ -1722,7 +1810,19 @@ export default function PosTransactionCreatePage() {
                       Rp {selectedTotals.subtotal.toLocaleString('id-ID')}
                     </p>
                     <p className="mt-2 text-[12.5px] text-blue-100">
-                      Diskon:{' '}
+                      Diskon promo:{' '}
+                      <span className="font-sans">
+                        Rp {Number(selectedTotals.promoPart || 0).toLocaleString('id-ID')}
+                      </span>
+                    </p>
+                    <p className="text-[12.5px] text-blue-100">
+                      Diskon tambahan:{' '}
+                      <span className="font-sans">
+                        Rp {Number(selectedTotals.diskonPart || 0).toLocaleString('id-ID')}
+                      </span>
+                    </p>
+                    <p className="mt-1 text-[12.5px] text-blue-100">
+                      Total diskon:{' '}
                       <span className="font-sans">
                         Rp {selectedTotals.discount.toLocaleString('id-ID')}
                       </span>

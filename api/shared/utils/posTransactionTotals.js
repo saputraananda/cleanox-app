@@ -44,7 +44,7 @@ export async function recalcPosTransactionMoney(connection, transactionId, { act
   const pricingFinalizedAt = transaction.pricing_finalized_at;
 
   let subtotal = 0;
-  let discount = 0;
+  let promoPart = 0;
 
   for (const row of items) {
     const isGc = isGeneralCleaningCategory(row.category_name);
@@ -74,18 +74,25 @@ export async function recalcPosTransactionMoney(connection, transactionId, { act
 
     subtotal += Number(row.base_price_snapshot || 0) * rowBillable;
     if (!hasHeaderPromo) {
-      discount += Number(row.promo_discount_amount || 0);
+      promoPart += Number(row.promo_discount_amount || 0);
     }
   }
 
   if (hasHeaderPromo) {
-    discount = computeTransactionPromoDiscount({
+    promoPart = computeTransactionPromoDiscount({
       subtotal,
       promoType: transaction.promo_type_snapshot,
       promoValue: transaction.promo_value_snapshot,
     }).discountAmount;
   }
 
+  const diskonPart = computeTransactionPromoDiscount({
+    subtotal,
+    promoType: transaction.discount_type_snapshot,
+    promoValue: transaction.discount_value_snapshot,
+  }).discountAmount;
+
+  const discount = toMoney(Math.min(subtotal, Math.max(0, promoPart) + Math.max(0, diskonPart)));
   const finalAmount = subtotal - discount;
   const hasGcPending =
     !pricingFinalizedAt && items.some((row) => isGeneralCleaningCategory(row.category_name));

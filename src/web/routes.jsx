@@ -13,6 +13,7 @@ import PosCustomersPage from '@web/pages/PosCustomersPage.jsx';
 import PosWaschenReferralPage from '@web/pages/PosWaschenReferralPage.jsx';
 import PosPricesPage from '@web/pages/PosPricesPage.jsx';
 import PosPromosPage from '@web/pages/PosPromosPage.jsx';
+import PosDiskonsPage from '@web/pages/PosDiskonsPage.jsx';
 
 const RedirectPosDetail = () => {
   const { id } = useParams();
@@ -126,6 +127,17 @@ const webRoutes = [
       <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>
         <Layout>
           <PosPromosPage />
+        </Layout>
+      </PrivateRoute>
+    }
+  />,
+  <Route
+    key="co-discounts"
+    path="/cleanox-only/discounts"
+    element={
+      <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>
+        <Layout>
+          <PosDiskonsPage />
         </Layout>
       </PrivateRoute>
     }

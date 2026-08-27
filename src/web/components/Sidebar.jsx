@@ -13,6 +13,7 @@ import {
   CalendarDays,
   Tag,
   BadgePercent,
+  CircleDollarSign,
   Handshake,
   X,
 } from 'lucide-react';
@@ -43,6 +44,7 @@ const NAV_TREE = [
       { label: 'Referral Waschen', icon: Handshake, to: '/cleanox-only/waschen-referral' },
       { label: 'Prices', icon: Tag, to: '/cleanox-only/prices' },
       { label: 'Promo', icon: BadgePercent, to: '/cleanox-only/promos' },
+      { label: 'Diskon', icon: CircleDollarSign, to: '/cleanox-only/discounts' },
     ],
   },
   {

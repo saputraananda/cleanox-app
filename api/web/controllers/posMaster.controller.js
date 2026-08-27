@@ -598,3 +598,176 @@ export const listPaymentMethods = async (req, res) => {
     return res.status(500).json({ message: 'Gagal mengambil metode pembayaran' });
   }
 };
+
+const DISCOUNT_TYPES = new Set(['persen', 'nominal', 'additional']);
+
+function parseDiscountBody(body) {
+  const name = String(body?.name || '').trim();
+  const discount_type = String(body?.discount_type || '').trim();
+  const description = String(body?.description || '').trim() || null;
+  const status = normalizeStatus(body?.status);
+
+  if (!name) return { error: 'Nama diskon wajib diisi' };
+  if (!DISCOUNT_TYPES.has(discount_type)) return { error: 'Tipe diskon tidak valid' };
+
+  if (discount_type === 'additional') {
+    return {
+      data: {
+        name,
+        discount_type,
+        discount_value: 0,
+        description,
+        status,
+      },
+    };
+  }
+
+  const discount_value = Number(body?.discount_value);
+  if (!Number.isFinite(discount_value) || discount_value <= 0) {
+    return { error: 'Nilai diskon harus lebih dari 0' };
+  }
+  if (discount_type === 'persen' && discount_value > 100) {
+    return { error: 'Diskon persen maksimal 100' };
+  }
+
+  return {
+    data: {
+      name,
+      discount_type,
+      discount_value: toMoney(discount_value),
+      description,
+      status,
+    },
+  };
+}
+
+export const listDiscounts = async (req, res) => {
+  const search = String(req.query.search || '').trim();
+  const status = String(req.query.status || '').trim();
+
+  try {
+    let sql = `
+      SELECT
+        id,
+        name,
+        discount_type,
+        discount_value,
+        description,
+        status,
+        created_at,
+        updated_at
+      FROM mst_discounts
+      WHERE 1 = 1`;
+    const params = [];
+
+    if (search) {
+      sql += ` AND name LIKE ?`;
+      params.push(`%${search}%`);
+    }
+    if (status && STATUS_VALUES.has(status)) {
+      sql += ` AND COALESCE(status, 'Aktif') = ?`;
+      params.push(status);
+    }
+
+    sql += ` ORDER BY name ASC`;
+
+    const [rows] = await cleanoxPool.query(sql, params);
+    return res.json({
+      discounts: rows.map((row) => ({
+        ...row,
+        discount_value: Number(row.discount_value || 0),
+      })),
+    });
+  } catch (error) {
+    console.error('[pos-master/listDiscounts]', error.message);
+    return res.status(500).json({ message: 'Gagal mengambil daftar diskon' });
+  }
+};
+
+export const getDiscountDetail = async (req, res) => {
+  const discountId = Number(req.params.id);
+  if (!discountId) return res.status(400).json({ message: 'ID diskon tidak valid' });
+
+  try {
+    const [[discount]] = await cleanoxPool.query(
+      `SELECT id, name, discount_type, discount_value, description, status, created_at, updated_at
+       FROM mst_discounts WHERE id = ? LIMIT 1`,
+      [discountId]
+    );
+    if (!discount) return res.status(404).json({ message: 'Diskon tidak ditemukan' });
+
+    return res.json({
+      discount: {
+        ...discount,
+        discount_value: Number(discount.discount_value || 0),
+      },
+    });
+  } catch (error) {
+    console.error('[pos-master/getDiscountDetail]', error.message);
+    return res.status(500).json({ message: 'Gagal mengambil detail diskon' });
+  }
+};
+
+export const createDiscount = async (req, res) => {
+  const parsed = parseDiscountBody(req.body);
+  if (parsed.error) return res.status(400).json({ message: parsed.error });
+
+  try {
+    const [result] = await cleanoxPool.query(
+      `INSERT INTO mst_discounts
+        (name, discount_type, discount_value, description, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP(0), CURRENT_TIMESTAMP(0))`,
+      [
+        parsed.data.name,
+        parsed.data.discount_type,
+        parsed.data.discount_value,
+        parsed.data.description,
+        parsed.data.status,
+      ]
+    );
+    return res.status(201).json({ message: 'Diskon berhasil dibuat', id: result.insertId });
+  } catch (error) {
+    console.error('[pos-master/createDiscount]', error.message);
+    return res.status(500).json({ message: 'Gagal membuat diskon' });
+  }
+};
+
+export const updateDiscount = async (req, res) => {
+  const discountId = Number(req.params.id);
+  if (!discountId) return res.status(400).json({ message: 'ID diskon tidak valid' });
+
+  const parsed = parseDiscountBody(req.body);
+  if (parsed.error) return res.status(400).json({ message: parsed.error });
+
+  try {
+    const [[existing]] = await cleanoxPool.query(
+      `SELECT id FROM mst_discounts WHERE id = ? LIMIT 1`,
+      [discountId]
+    );
+    if (!existing) return res.status(404).json({ message: 'Diskon tidak ditemukan' });
+
+    await cleanoxPool.query(
+      `UPDATE mst_discounts
+       SET name = ?,
+           discount_type = ?,
+           discount_value = ?,
+           description = ?,
+           status = ?,
+           updated_at = CURRENT_TIMESTAMP(0)
+       WHERE id = ?`,
+      [
+        parsed.data.name,
+        parsed.data.discount_type,
+        parsed.data.discount_value,
+        parsed.data.description,
+        parsed.data.status,
+        discountId,
+      ]
+    );
+
+    return res.json({ message: 'Diskon berhasil diperbarui' });
+  } catch (error) {
+    console.error('[pos-master/updateDiscount]', error.message);
+    return res.status(500).json({ message: 'Gagal memperbarui diskon' });
+  }
+};
