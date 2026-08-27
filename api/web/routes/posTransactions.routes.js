@@ -25,6 +25,8 @@ import {
   updatePosAssignments,
   updatePosTransactionStatus,
   updatePosTransactionItemMeter,
+  updatePosTransactionItem,
+  deletePosTransactionItem,
   addPosTransactionItem,
   reschedulePosTransaction,
   cancelPosTransaction,
@@ -104,6 +106,8 @@ router.post('/', createPosTransaction);
 router.patch('/:id/status', updatePosTransactionStatus);
 router.patch('/:id/payment', updatePosTransactionPayment);
 router.patch('/:id/items/:itemId/meter', updatePosTransactionItemMeter);
+router.patch('/:id/items/:itemId', updatePosTransactionItem);
+router.delete('/:id/items/:itemId', deletePosTransactionItem);
 router.post('/:id/items', addPosTransactionItem);
 router.patch('/:id/reschedule', reschedulePosTransaction);
 router.patch('/:id/cancel', cancelPosTransaction);

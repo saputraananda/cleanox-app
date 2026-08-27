@@ -313,6 +313,29 @@ function toMoney(value) {
   return Number(Number(value || 0).toFixed(2));
 }
 
+function assertTransactionItemsMutable(transaction) {
+  if (!transaction) {
+    const err = new Error('Transaksi POS tidak ditemukan');
+    err.statusCode = 404;
+    throw err;
+  }
+  if (Boolean(Number(transaction.is_history_entry || 0))) {
+    const err = new Error('Transaksi history tidak dapat mengubah layanan');
+    err.statusCode = 409;
+    throw err;
+  }
+  if (transaction.status === 'Cancelled') {
+    const err = new Error('Transaksi yang dibatalkan tidak dapat mengubah layanan');
+    err.statusCode = 409;
+    throw err;
+  }
+  if (transaction.status === 'Completed') {
+    const err = new Error('Transaksi selesai tidak dapat mengubah layanan');
+    err.statusCode = 409;
+    throw err;
+  }
+}
+
 function buildTransactionNo() {
   const now = new Date();
   const stamp = [
@@ -1671,9 +1694,11 @@ export const updatePosTransactionItemMeter = async (req, res) => {
       await connection.rollback();
       return res.status(404).json({ message: 'Transaksi POS tidak ditemukan' });
     }
-    if (transaction.status === 'Cancelled') {
+    try {
+      assertTransactionItemsMutable(transaction);
+    } catch (mutableErr) {
       await connection.rollback();
-      return res.status(409).json({ message: 'Transaksi yang dibatalkan tidak dapat diubah ukurannya' });
+      return res.status(mutableErr.statusCode || 409).json({ message: mutableErr.message });
     }
 
     const [[item]] = await connection.query(
@@ -1836,15 +1861,11 @@ export const addPosTransactionItem = async (req, res) => {
       await connection.rollback();
       return res.status(404).json({ message: 'Transaksi POS tidak ditemukan' });
     }
-    if (Boolean(Number(transaction.is_history_entry || 0))) {
+    try {
+      assertTransactionItemsMutable(transaction);
+    } catch (mutableErr) {
       await connection.rollback();
-      return res.status(409).json({ message: 'Transaksi history tidak dapat menambah layanan' });
-    }
-    if (transaction.status === 'Cancelled') {
-      await connection.rollback();
-      return res.status(409).json({
-        message: 'Transaksi yang dibatalkan tidak dapat menambah layanan',
-      });
+      return res.status(mutableErr.statusCode || 409).json({ message: mutableErr.message });
     }
 
     const [[service]] = await connection.query(
@@ -2040,6 +2061,370 @@ export const addPosTransactionItem = async (req, res) => {
     await connection.rollback();
     console.error('[pos/addPosTransactionItem]', error.message);
     return res.status(500).json({ message: error.message || 'Gagal menambah layanan' });
+  } finally {
+    connection.release();
+  }
+};
+
+export const updatePosTransactionItem = async (req, res) => {
+  const transactionId = Number(req.params.id);
+  const itemId = Number(req.params.itemId);
+  const serviceIdRaw = req.body?.service_id;
+  const qtyRaw = req.body?.qty;
+  const meterRaw = req.body?.meter;
+  const lengthRaw = req.body?.meter_length ?? req.body?.length;
+  const widthRaw = req.body?.meter_width ?? req.body?.width;
+
+  if (!transactionId || !itemId) {
+    return res.status(400).json({ message: 'ID transaksi/item tidak valid' });
+  }
+
+  const connection = await cleanoxPool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const [[transaction]] = await connection.query(
+      `SELECT * FROM tr_transactions WHERE id = ? FOR UPDATE`,
+      [transactionId]
+    );
+    if (!transaction) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Transaksi POS tidak ditemukan' });
+    }
+    try {
+      assertTransactionItemsMutable(transaction);
+    } catch (mutableErr) {
+      await connection.rollback();
+      return res.status(mutableErr.statusCode || 409).json({ message: mutableErr.message });
+    }
+
+    const [[existingItem]] = await connection.query(
+      `SELECT
+        i.*,
+        s.name AS service_name,
+        s.satuan_name,
+        c.name AS category_name
+       FROM tr_transaction_items i
+       INNER JOIN mst_services s ON s.id = i.service_id
+       LEFT JOIN mst_category c ON c.id = s.category_id
+       WHERE i.id = ? AND i.transaction_id = ?
+       LIMIT 1`,
+      [itemId, transactionId]
+    );
+    if (!existingItem) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Item transaksi tidak ditemukan' });
+    }
+
+    const nextServiceId =
+      serviceIdRaw != null && serviceIdRaw !== ''
+        ? Number(serviceIdRaw)
+        : Number(existingItem.service_id);
+
+    const [[service]] = await connection.query(
+      `SELECT s.id, s.name, s.satuan_name, sp.price, sp.coret_price, c.name AS category_name
+       FROM mst_services s
+       INNER JOIN mst_service_prices sp ON sp.service_id = s.id
+       LEFT JOIN mst_category c ON c.id = s.category_id
+       WHERE s.id = ?
+       LIMIT 1`,
+      [nextServiceId]
+    );
+    if (!service) {
+      await connection.rollback();
+      return res.status(400).json({ message: 'Service tidak ditemukan atau belum punya harga' });
+    }
+
+    const [siblingItems] = await connection.query(
+      `SELECT
+        i.*,
+        s.name AS service_name,
+        c.name AS category_name
+       FROM tr_transaction_items i
+       INNER JOIN mst_services s ON s.id = i.service_id
+       LEFT JOIN mst_category c ON c.id = s.category_id
+       WHERE i.transaction_id = ?
+         AND i.id <> ?`,
+      [transactionId, itemId]
+    );
+
+    const isGc = isGeneralCleaningCategory(service.category_name);
+    const gcCrewSizes = [];
+    for (const row of siblingItems) {
+      if (!isGeneralCleaningCategory(row.category_name)) continue;
+      const crew = parseGcCrewSizeFromServiceName(row.service_name);
+      if (crew == null) {
+        await connection.rollback();
+        return res.status(400).json({
+          message: `Nama service General Cleaning tidak valid: ${row.service_name}`,
+        });
+      }
+      gcCrewSizes.push(crew);
+    }
+    if (isGc) {
+      const crew = parseGcCrewSizeFromServiceName(service.name);
+      if (crew == null) {
+        await connection.rollback();
+        return res.status(400).json({
+          message: `Nama service General Cleaning tidak valid: ${service.name}`,
+        });
+      }
+      gcCrewSizes.push(crew);
+    }
+
+    if (gcCrewSizes.length > 0) {
+      const uniqueCrew = [...new Set(gcCrewSizes)];
+      if (uniqueCrew.length > 1) {
+        await connection.rollback();
+        return res.status(400).json({
+          message: 'Paket General Cleaning harus ukuran teknisi yang sama',
+        });
+      }
+      const gcCrewSize = uniqueCrew[0];
+      if (Number(transaction.total_people || 1) !== gcCrewSize) {
+        await connection.rollback();
+        return res.status(400).json({
+          message: `Jumlah orang harus ${gcCrewSize} sesuai paket General Cleaning`,
+        });
+      }
+    }
+
+    const qtySource =
+      qtyRaw != null && qtyRaw !== '' ? qtyRaw : existingItem.qty;
+    const qty = isGc ? 1 : Math.max(1, Number(qtySource || 1));
+    const needsMeter =
+      !isGc && isMeterPricedService({ satuanName: service.satuan_name });
+    let meter = null;
+    if (needsMeter) {
+      if (meterRaw != null && meterRaw !== '') {
+        meter = resolveMeterValue({ satuanName: service.satuan_name, meter: meterRaw });
+      } else if (
+        (lengthRaw != null && lengthRaw !== '') ||
+        (widthRaw != null && widthRaw !== '')
+      ) {
+        meter = resolveMeterFromDimensions({
+          satuanName: service.satuan_name,
+          length: lengthRaw,
+          width: widthRaw,
+        });
+      } else if (
+        Number(existingItem.service_id) === Number(service.id) &&
+        existingItem.meter != null
+      ) {
+        meter = resolveMeterValue({
+          satuanName: service.satuan_name,
+          meter: existingItem.meter,
+        });
+      }
+    }
+
+    const listPrice = Number(service.price || 0);
+    const coretPrice = service.coret_price == null ? null : Number(service.coret_price);
+    const basePrice = resolveEffectiveBasePrice({
+      price: listPrice,
+      coret_price: coretPrice,
+    });
+    const originalPriceSnapshot =
+      coretPrice != null && Number.isFinite(coretPrice) ? toMoney(listPrice) : null;
+    const finalPrice = basePrice;
+    const pricingFinalizedAt = transaction.pricing_finalized_at;
+    const billingHours =
+      transaction.billing_hours == null ? null : Number(transaction.billing_hours);
+
+    let nextQty = qty;
+    let nextMeter = meter;
+    let lineTotal = 0;
+    let unitLabel = service.satuan_name || null;
+
+    if (isGc) {
+      unitLabel = service.satuan_name || 'jam';
+      nextMeter = null;
+      if (pricingFinalizedAt && billingHours != null && billingHours > 0) {
+        nextQty = billingHours;
+        lineTotal = toMoney(basePrice * billingHours);
+      } else {
+        nextQty = 1;
+        lineTotal = toMoney(0);
+      }
+    } else if (needsMeter && meter == null) {
+      lineTotal = toMoney(0);
+    } else {
+      const billable = getBillableMultiplier({
+        satuanName: service.satuan_name,
+        qty,
+        meter,
+      });
+      lineTotal = toMoney(finalPrice * billable);
+    }
+
+    await connection.query(
+      `UPDATE tr_transaction_items
+       SET service_id = ?,
+           qty = ?,
+           meter = ?,
+           unit_label = ?,
+           base_price_snapshot = ?,
+           original_price_snapshot = ?,
+           promo_name_snapshot = NULL,
+           promo_type_snapshot = NULL,
+           promo_value_snapshot = NULL,
+           promo_discount_amount = 0,
+           final_price_snapshot = ?,
+           line_total = ?,
+           updated_at = CURRENT_TIMESTAMP(0)
+       WHERE id = ? AND transaction_id = ?`,
+      [
+        service.id,
+        nextQty,
+        nextMeter,
+        unitLabel,
+        toMoney(basePrice),
+        originalPriceSnapshot,
+        toMoney(finalPrice),
+        lineTotal,
+        itemId,
+        transactionId,
+      ]
+    );
+
+    const totals = await recalcPosTransactionMoney(connection, transactionId, {
+      actorId: req.user?.id || null,
+    });
+
+    await createPosTracking(
+      connection,
+      transactionId,
+      transaction.status || 'Draft',
+      'Item updated',
+      `Layanan diubah: ${service.name}`,
+      req.user?.id || null
+    );
+
+    await connection.commit();
+
+    const [[updatedItem]] = await cleanoxPool.query(
+      `SELECT
+        i.*,
+        s.name AS service_name,
+        s.satuan_name,
+        c.name AS category_name
+       FROM tr_transaction_items i
+       INNER JOIN mst_services s ON s.id = i.service_id
+       LEFT JOIN mst_category c ON c.id = s.category_id
+       WHERE i.id = ?
+       LIMIT 1`,
+      [itemId]
+    );
+
+    return res.json({
+      message: 'Layanan berhasil diubah',
+      item: {
+        ...updatedItem,
+        qty: Number(updatedItem.qty || 0),
+        meter: updatedItem.meter == null ? null : Number(updatedItem.meter),
+        base_price_snapshot: Number(updatedItem.base_price_snapshot || 0),
+        final_price_snapshot: Number(updatedItem.final_price_snapshot || 0),
+        promo_discount_amount: Number(updatedItem.promo_discount_amount || 0),
+        line_total: Number(updatedItem.line_total || 0),
+      },
+      transaction: {
+        id: transactionId,
+        subtotal_amount: totals.subtotal,
+        discount_amount: totals.discount,
+        final_amount: totals.finalAmount,
+      },
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[pos/updatePosTransactionItem]', error.message);
+    return res.status(500).json({ message: error.message || 'Gagal mengubah layanan' });
+  } finally {
+    connection.release();
+  }
+};
+
+export const deletePosTransactionItem = async (req, res) => {
+  const transactionId = Number(req.params.id);
+  const itemId = Number(req.params.itemId);
+
+  if (!transactionId || !itemId) {
+    return res.status(400).json({ message: 'ID transaksi/item tidak valid' });
+  }
+
+  const connection = await cleanoxPool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const [[transaction]] = await connection.query(
+      `SELECT * FROM tr_transactions WHERE id = ? FOR UPDATE`,
+      [transactionId]
+    );
+    if (!transaction) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Transaksi POS tidak ditemukan' });
+    }
+    try {
+      assertTransactionItemsMutable(transaction);
+    } catch (mutableErr) {
+      await connection.rollback();
+      return res.status(mutableErr.statusCode || 409).json({ message: mutableErr.message });
+    }
+
+    const [[item]] = await connection.query(
+      `SELECT i.id, s.name AS service_name
+       FROM tr_transaction_items i
+       INNER JOIN mst_services s ON s.id = i.service_id
+       WHERE i.id = ? AND i.transaction_id = ?
+       LIMIT 1`,
+      [itemId, transactionId]
+    );
+    if (!item) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Item transaksi tidak ditemukan' });
+    }
+
+    const [[countRow]] = await connection.query(
+      `SELECT COUNT(*) AS total FROM tr_transaction_items WHERE transaction_id = ?`,
+      [transactionId]
+    );
+    if (Number(countRow?.total || 0) <= 1) {
+      await connection.rollback();
+      return res.status(400).json({ message: 'Minimal satu layanan harus tersisa' });
+    }
+
+    await connection.query(
+      `DELETE FROM tr_transaction_items WHERE id = ? AND transaction_id = ?`,
+      [itemId, transactionId]
+    );
+
+    const totals = await recalcPosTransactionMoney(connection, transactionId, {
+      actorId: req.user?.id || null,
+    });
+
+    await createPosTracking(
+      connection,
+      transactionId,
+      transaction.status || 'Draft',
+      'Item removed',
+      `Layanan dihapus: ${item.service_name}`,
+      req.user?.id || null
+    );
+
+    await connection.commit();
+
+    return res.json({
+      message: 'Layanan berhasil dihapus',
+      transaction: {
+        id: transactionId,
+        subtotal_amount: totals.subtotal,
+        discount_amount: totals.discount,
+        final_amount: totals.finalAmount,
+      },
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[pos/deletePosTransactionItem]', error.message);
+    return res.status(500).json({ message: error.message || 'Gagal menghapus layanan' });
   } finally {
     connection.release();
   }

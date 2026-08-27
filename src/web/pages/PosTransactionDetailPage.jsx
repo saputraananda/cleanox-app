@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Download, FileSpreadsheet, FileText, ArrowLeft, Save, Copy, Send, ImagePlus, X, Plus, Minus } from 'lucide-react';
+import { Download, FileSpreadsheet, FileText, ArrowLeft, Save, Copy, Send, ImagePlus, X, Plus, Minus, Pencil, Trash2 } from 'lucide-react';
 import api from '@shared/utils/api.js';
 import BodyPortal from '@web/components/BodyPortal.jsx';
 import { buildCustomerOrderMessage } from '@web/utils/posCustomerOrderMessage.js';
@@ -154,9 +154,12 @@ export default function PosTransactionDetailPage() {
   const [meterSavingId, setMeterSavingId] = useState(null);
   const [services, setServices] = useState([]);
   const [addItemModalOpen, setAddItemModalOpen] = useState(false);
+  const [itemModalMode, setItemModalMode] = useState('add');
+  const [editingItemId, setEditingItemId] = useState(null);
   const [addItemDraft, setAddItemDraft] = useState(emptyAddItemDraft());
   const [addItemSaving, setAddItemSaving] = useState(false);
   const [addItemError, setAddItemError] = useState('');
+  const [deletingItemId, setDeletingItemId] = useState(null);
   const [serviceSearch, setServiceSearch] = useState('');
   const [scheduleDateInput, setScheduleDateInput] = useState('');
   const [cancelNote, setCancelNote] = useState('');
@@ -547,7 +550,10 @@ export default function PosTransactionDetailPage() {
   const { transaction, items, assignments, tracking, customer_photos: customerPhotos = [], payment_proofs: paymentProofs = [], takehome_progress: takehomeProgress } = detail;
   const isTakeHome = String(transaction.service_mode || 'home_service') === 'take_home';
   const isHistoryEntry = Boolean(transaction.is_history_entry);
-  const canAddItem = !isHistoryEntry && transaction.status !== 'Cancelled';
+  const canMutateItems =
+    !isHistoryEntry &&
+    transaction.status !== 'Cancelled' &&
+    transaction.status !== 'Completed';
   const historyStartedAt = (assignments || [])
     .map((row) => row.started_at)
     .filter(Boolean)
@@ -698,7 +704,23 @@ export default function PosTransactionDetailPage() {
   };
 
   const openAddItemModal = () => {
+    setItemModalMode('add');
+    setEditingItemId(null);
     setAddItemDraft(emptyAddItemDraft());
+    setAddItemError('');
+    setServiceSearch('');
+    setAddItemModalOpen(true);
+  };
+
+  const openEditItemModal = (item) => {
+    setItemModalMode('edit');
+    setEditingItemId(item.id);
+    setAddItemDraft({
+      service_id: String(item.service_id || ''),
+      qty: Math.max(1, Number(item.qty || 1)),
+      meter_length: '',
+      meter_width: '',
+    });
     setAddItemError('');
     setServiceSearch('');
     setAddItemModalOpen(true);
@@ -706,6 +728,8 @@ export default function PosTransactionDetailPage() {
 
   const closeAddItemModal = () => {
     setAddItemModalOpen(false);
+    setItemModalMode('add');
+    setEditingItemId(null);
     setAddItemDraft(emptyAddItemDraft());
     setAddItemError('');
     setServiceSearch('');
@@ -740,26 +764,57 @@ export default function PosTransactionDetailPage() {
       width: addItemDraft.meter_width,
     });
     const qtyValue = isGc ? 1 : Math.max(1, Number(addItemDraft.qty || 1));
+    const payload = {
+      service_id: Number(addItemDraft.service_id),
+      qty: qtyValue,
+      meter: needsMeter && !isGc ? meterValue : null,
+      meter_length:
+        needsMeter && !isGc && meterValue != null ? Number(addItemDraft.meter_length) : null,
+      meter_width:
+        needsMeter && !isGc && meterValue != null ? Number(addItemDraft.meter_width) : null,
+    };
 
     setAddItemSaving(true);
     setAddItemError('');
     setError('');
     try {
-      await api.post(`/pos-transactions/${id}/items`, {
-        service_id: Number(addItemDraft.service_id),
-        qty: qtyValue,
-        meter: needsMeter && !isGc ? meterValue : null,
-        meter_length:
-          needsMeter && !isGc && meterValue != null ? Number(addItemDraft.meter_length) : null,
-        meter_width:
-          needsMeter && !isGc && meterValue != null ? Number(addItemDraft.meter_width) : null,
-      });
+      if (itemModalMode === 'edit' && editingItemId) {
+        await api.patch(`/pos-transactions/${id}/items/${editingItemId}`, payload);
+      } else {
+        await api.post(`/pos-transactions/${id}/items`, payload);
+      }
       closeAddItemModal();
       await loadData();
     } catch (err) {
-      setAddItemError(err.response?.data?.message || 'Gagal menambah layanan');
+      setAddItemError(
+        err.response?.data?.message ||
+          (itemModalMode === 'edit' ? 'Gagal mengubah layanan' : 'Gagal menambah layanan')
+      );
     } finally {
       setAddItemSaving(false);
+    }
+  };
+
+  const handleDeleteItem = async (item) => {
+    if (deletingItemId || !item?.id) return;
+    if (items.length <= 1) {
+      setError('Minimal satu layanan harus tersisa');
+      return;
+    }
+    const confirmed = window.confirm(
+      `Hapus layanan "${item.service_name}" dari transaksi ini?`
+    );
+    if (!confirmed) return;
+
+    setDeletingItemId(item.id);
+    setError('');
+    try {
+      await api.delete(`/pos-transactions/${id}/items/${item.id}`);
+      await loadData();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Gagal menghapus layanan');
+    } finally {
+      setDeletingItemId(null);
     }
   };
 
@@ -1157,7 +1212,7 @@ export default function PosTransactionDetailPage() {
 
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h3 className="text-sm font-semibold text-slate-900">Item layanan</h3>
-            {canAddItem && (
+            {canMutateItems && (
               <button
                 type="button"
                 onClick={openAddItemModal}
@@ -1178,6 +1233,7 @@ export default function PosTransactionDetailPage() {
                   <th className="px-3 py-3">Promo</th>
                   <th className="px-3 py-3 text-right">Harga Final</th>
                   <th className="px-3 py-3 text-right">Line Total</th>
+                  {canMutateItems && <th className="px-3 py-3 text-right">Aksi</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -1190,7 +1246,7 @@ export default function PosTransactionDetailPage() {
                     meter: item.meter,
                   });
                   const draft = meterDrafts[item.id] || { length: '', width: '' };
-                  const canEditMeter = isMeter && transaction.status !== 'Cancelled';
+                  const canEditMeter = isMeter && canMutateItems;
                   return (
                   <tr key={item.id}>
                     <td className="px-3 py-3 font-medium text-slate-800">
@@ -1280,6 +1336,29 @@ export default function PosTransactionDetailPage() {
                           ? 'Pending meter'
                           : formatCurrency(item.line_total)}
                     </td>
+                    {canMutateItems && (
+                      <td className="px-3 py-3 text-right">
+                        <div className="inline-flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => openEditItemModal(item)}
+                            className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            disabled={deletingItemId === item.id || items.length <= 1}
+                            onClick={() => handleDeleteItem(item)}
+                            className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            {deletingItemId === item.id ? '...' : 'Hapus'}
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                   );
                 })}
@@ -1828,7 +1907,9 @@ export default function PosTransactionDetailPage() {
           <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center bg-slate-900/40 p-3">
             <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-[20px] border border-slate-200 bg-white shadow-xl">
               <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
-                <h3 className="text-[15px] font-bold text-slate-900">Tambah Layanan</h3>
+                <h3 className="text-[15px] font-bold text-slate-900">
+                  {itemModalMode === 'edit' ? 'Edit Layanan' : 'Tambah Layanan'}
+                </h3>
                 <button
                   type="button"
                   onClick={closeAddItemModal}
@@ -1996,7 +2077,11 @@ export default function PosTransactionDetailPage() {
                     disabled={addItemSaving || !addItemDraft.service_id}
                     className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
                   >
-                    {addItemSaving ? 'Menyimpan...' : 'Tambah Layanan'}
+                    {addItemSaving
+                      ? 'Menyimpan...'
+                      : itemModalMode === 'edit'
+                        ? 'Simpan Perubahan'
+                        : 'Tambah Layanan'}
                   </button>
                 </div>
               </form>
