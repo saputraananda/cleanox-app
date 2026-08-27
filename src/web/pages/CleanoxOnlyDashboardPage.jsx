@@ -10,8 +10,6 @@ import {
   BarChart2,
   FileText,
   Search,
-  ChevronLeft,
-  ChevronRight,
   PlusCircle,
   History,
   Users,
@@ -32,6 +30,11 @@ import {
   Cell,
 } from 'recharts';
 import api from '@shared/utils/api.js';
+import TablePagination, {
+  DEFAULT_PAGE_SIZE,
+  PAGE_SIZE_OPTIONS,
+  paginateList,
+} from '@web/components/TablePagination.jsx';
 
 const MONTHS_ID = [
   'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
@@ -122,7 +125,7 @@ export default function CleanoxOnlyDashboardPage() {
   const [dashboardData, setDashboardData] = useState(emptyDashboard);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   const yearsList = useMemo(() => {
     const list = Array.from(new Set(periods.map((p) => p.yr))).filter(Boolean).sort((a, b) => b - a);
@@ -261,9 +264,17 @@ export default function CleanoxOnlyDashboardPage() {
     );
   }, [dashboardData.details, searchTerm]);
 
-  const offset = (currentPage - 1) * itemsPerPage;
-  const paginatedDetails = filteredDetails.slice(offset, offset + itemsPerPage);
-  const totalPages = Math.ceil(filteredDetails.length / itemsPerPage);
+  const {
+    items: paginatedDetails,
+    totalItems,
+    totalPages,
+    page: safePage,
+  } = paginateList(filteredDetails, currentPage, pageSize);
+
+  const handlePageSizeChange = (size) => {
+    setPageSize(size);
+    setCurrentPage(1);
+  };
 
   const summary = dashboardData.summary || emptyDashboard.summary;
   const target = dashboardData.target || emptyDashboard.target;
@@ -721,30 +732,16 @@ export default function CleanoxOnlyDashboardPage() {
               </table>
             </div>
 
-            {totalPages > 1 && (
-              <div className="flex items-center justify-between pt-2">
-                <p className="text-[12px] text-slate-400 font-medium">
-                  Menampilkan {offset + 1}–{Math.min(offset + itemsPerPage, filteredDetails.length)} dari {filteredDetails.length}
-                </p>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                    disabled={currentPage === 1}
-                    className="p-1.5 rounded-lg border border-slate-200 disabled:opacity-40"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-                  <span className="text-sm font-semibold text-slate-600 px-2">{currentPage}/{totalPages}</span>
-                  <button
-                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                    disabled={currentPage === totalPages}
-                    className="p-1.5 rounded-lg border border-slate-200 disabled:opacity-40"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            )}
+            <TablePagination
+              totalItems={totalItems}
+              totalPages={totalPages}
+              page={safePage}
+              pageSize={pageSize}
+              pageSizeOptions={PAGE_SIZE_OPTIONS}
+              onPageChange={setCurrentPage}
+              onPageSizeChange={handlePageSizeChange}
+              itemLabel="transaksi"
+            />
           </div>
 
           <section className="space-y-3">
