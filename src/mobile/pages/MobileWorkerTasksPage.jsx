@@ -6,7 +6,7 @@ import MobileWorkerBottomNav from '@mobile/components/MobileWorkerBottomNav.jsx'
 import MobileConfirmDialog from '@mobile/components/MobileConfirmDialog.jsx';
 import MobileCameraCapture from '@mobile/components/MobileCameraCapture.jsx';
 
-const MAX_PHOTOS_PER_KIND = 10;
+const MAX_PHOTOS_PER_KIND = 50;
 
 const TABS = [
   { key: 'Assigned', label: 'Perlu Konfirmasi' },
@@ -88,13 +88,29 @@ const surveyStatusText = (evidence, { readyHint, blockedHint, isReady }) => {
   return 'Survei aplikasi';
 };
 
-const collectEvidencePhotos = (taskList = []) => {
+const collectEvidencePhotos = (taskList = [], detailsMap = {}) => {
   const map = new Map();
   for (const task of taskList) {
     const evidence = evidenceOf(task);
-    for (const photo of [...(evidence.before_photos || []), ...(evidence.after_photos || [])]) {
+    for (const photo of [
+      ...(evidence.general_before_photos || []),
+      ...(evidence.general_after_photos || []),
+      ...(evidence.before_photos || []),
+      ...(evidence.after_photos || []),
+    ]) {
       if (photo?.id && photo?.photo_path) {
         map.set(String(photo.id), photo.photo_path);
+      }
+    }
+    for (const itemEvidence of evidence.items_evidence || []) {
+      const itemEvidenceData = itemEvidence.evidence || itemEvidence;
+      for (const photo of [
+        ...(itemEvidenceData.before_photos || []),
+        ...(itemEvidenceData.after_photos || []),
+      ]) {
+        if (photo?.id && photo?.photo_path) {
+          map.set(String(photo.id), photo.photo_path);
+        }
       }
     }
     for (const stage of evidence.takehome?.stages || task.takehome?.stages || []) {
@@ -109,6 +125,19 @@ const collectEvidencePhotos = (taskList = []) => {
     }
     if (evidence.arrival_photo_path && task.assignment_id) {
       map.set(`arrival-${task.assignment_id}`, evidence.arrival_photo_path);
+    }
+  }
+  for (const detail of Object.values(detailsMap || {})) {
+    for (const item of detail?.items || []) {
+      const itemEvidence = item.evidence || {};
+      for (const photo of [
+        ...(itemEvidence.before_photos || []),
+        ...(itemEvidence.after_photos || []),
+      ]) {
+        if (photo?.id && photo?.photo_path) {
+          map.set(String(photo.id), photo.photo_path);
+        }
+      }
     }
   }
   return map;
@@ -155,10 +184,11 @@ export default function MobileWorkerTasksPage() {
   const [evidenceAlert, setEvidenceAlert] = useState(null);
   const [photoPreviewMap, setPhotoPreviewMap] = useState({});
   const [photoPreview, setPhotoPreview] = useState(null);
+  const [workNoteDrafts, setWorkNoteDrafts] = useState({});
   const photoPreviewMapRef = useRef({});
 
-  const refreshPhotoPreviews = async (taskList) => {
-    const needed = collectEvidencePhotos(taskList);
+  const refreshPhotoPreviews = async (taskList, detailsMap = detailMap) => {
+    const needed = collectEvidencePhotos(taskList, detailsMap);
     const next = {};
     await Promise.all(
       [...needed.entries()].map(async ([photoId, photoPath]) => {
@@ -228,10 +258,34 @@ export default function MobileWorkerTasksPage() {
           items: data.items || [],
         },
       }));
+      const drafts = {};
+      for (const item of data.items || []) {
+        drafts[item.id] = item.evidence?.work_note || '';
+      }
+      setWorkNoteDrafts((prev) => ({ ...prev, ...drafts }));
+      await refreshPhotoPreviews(tasks, {
+        ...detailMap,
+        [assignmentId]: {
+          task: data.task || null,
+          items: data.items || [],
+        },
+      });
     } catch (err) {
       setError(err.response?.data?.message || 'Gagal memuat detail task');
     }
   };
+
+  useEffect(() => {
+    tasks.forEach((task) => {
+      if (
+        task.assignment_status === 'On_Progress'
+        && !isTakeHomeTask(task)
+        && !detailMap[task.assignment_id]
+      ) {
+        loadDetail(task.assignment_id);
+      }
+    });
+  }, [tasks, tab]);
 
   const toggleExpand = async (assignmentId) => {
     const next = expandedId === assignmentId ? null : assignmentId;
@@ -258,7 +312,7 @@ export default function MobileWorkerTasksPage() {
       setEvidenceAlert(
         isTakeHomeTask(task)
           ? 'Lengkapi 5 stage take-home dan survey kepuasan sebelum menandai tugas selesai.'
-          : 'Lengkapi foto before, foto after, dan survey kepuasan sebelum menandai tugas selesai.'
+          : 'Lengkapi foto before & after untuk setiap layanan, lalu survey kepuasan sebelum menandai tugas selesai.'
       );
       return;
     }
@@ -415,6 +469,9 @@ export default function MobileWorkerTasksPage() {
       if (target.kind === 'before') {
         const formData = new FormData();
         formData.append('before_photo', file);
+        if (target.transactionItemId) {
+          formData.append('transaction_item_id', String(target.transactionItemId));
+        }
         await api.post(`/mobile-tasks/${target.assignmentId}/before-photo`, formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
         });
@@ -427,6 +484,9 @@ export default function MobileWorkerTasksPage() {
       if (target.kind === 'after') {
         const formData = new FormData();
         formData.append('after_photo', file);
+        if (target.transactionItemId) {
+          formData.append('transaction_item_id', String(target.transactionItemId));
+        }
         await api.post(`/mobile-tasks/${target.assignmentId}/after-photo`, formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
         });
@@ -461,8 +521,8 @@ export default function MobileWorkerTasksPage() {
         setEvidenceAlert('Lengkapi semua stage take-home terlebih dahulu sebelum mengisi survey.');
         return;
       }
-    } else if (!evidence?.has_after) {
-      setEvidenceAlert('Lengkapi foto after terlebih dahulu sebelum mengisi survey.');
+    } else if (!evidence?.all_items_complete) {
+      setEvidenceAlert('Lengkapi foto before & after untuk setiap layanan sebelum mengisi survey.');
       return;
     }
     navigate(`/mobile-worker/tasks/${assignmentId}/survey`);
@@ -476,8 +536,10 @@ export default function MobileWorkerTasksPage() {
         );
         return;
       }
-    } else if (!evidence?.has_after) {
-      setEvidenceAlert('Lengkapi foto after terlebih dahulu sebelum menandai survey eksternal.');
+    } else if (!evidence?.all_items_complete) {
+      setEvidenceAlert(
+        'Lengkapi foto before & after untuk setiap layanan sebelum menandai survey eksternal.'
+      );
       return;
     }
     setConfirmDialog({ type: 'survey_external', assignmentId });
@@ -546,6 +608,68 @@ export default function MobileWorkerTasksPage() {
       setError('Gagal memuat foto.');
     }
   };
+
+  const handleSaveWorkNote = async (assignmentId, itemId) => {
+    if (!assignmentId || !itemId || submitting) return;
+    setSubmitting(true);
+    setError('');
+    setSuccess('');
+    try {
+      await api.put(`/mobile-tasks/${assignmentId}/items/${itemId}/work-note`, {
+        work_note: workNoteDrafts[itemId] || '',
+      });
+      setSuccess('Catatan layanan tersimpan.');
+      await loadTasks(tab);
+      await loadDetail(assignmentId, true);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Gagal menyimpan catatan layanan');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const renderPhotoGrid = (photos, assignmentId, kind, titlePrefix) => (
+    <div className="grid grid-cols-2 gap-2">
+      {(photos || []).map((photo) => (
+        <div key={photo.id} className="relative">
+          <button
+            type="button"
+            disabled={submitting}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleDeletePhoto(assignmentId, photo.id);
+            }}
+            className="absolute right-1.5 top-1.5 z-[1] inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/65 text-white shadow-lg disabled:opacity-60"
+            aria-label={`Hapus foto ${kind}`}
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+          {photoPreviewMap[String(photo.id)] ? (
+            <button
+              type="button"
+              onClick={() =>
+                openPhotoPreviewFromMap(String(photo.id), `${titlePrefix}`, photo.photo_path)
+              }
+              className="block w-full text-left"
+            >
+              <img
+                src={photoPreviewMap[String(photo.id)]}
+                alt={titlePrefix}
+                className="h-28 w-full rounded-xl object-cover"
+              />
+            </button>
+          ) : (
+            <div className="h-28 w-full rounded-xl bg-slate-200 animate-pulse" />
+          )}
+          <LihatFotoButton
+            onClick={() =>
+              openPhotoPreviewFromMap(String(photo.id), titlePrefix, photo.photo_path)
+            }
+          />
+        </div>
+      ))}
+    </div>
+  );
 
   const confirmCopy = CONFIRM_COPY[confirmDialog?.type] || CONFIRM_COPY.accept;
 
@@ -938,180 +1062,190 @@ export default function MobileWorkerTasksPage() {
                         </div>
                       )}
 
-                      <div className="rounded-[14px] border border-slate-200 bg-[#FAFBFC] p-3 space-y-2">
-                        <div className="flex items-center justify-between gap-2">
+                      {((evidence.general_before_photos || []).length > 0
+                        || (evidence.general_after_photos || []).length > 0) && (
+                        <div className="rounded-[14px] border border-amber-200 bg-amber-50/40 p-3 space-y-3">
                           <div>
-                            <p className="text-[12px] font-extrabold text-slate-800">1. Foto Before</p>
+                            <p className="text-[12px] font-extrabold text-slate-800">Bukti Umum (Data Lama)</p>
                             <p className="text-[10.5px] text-slate-500">
-                              {(evidence.before_count || 0) > 0
-                                ? `${evidence.before_count} foto tersimpan`
-                                : 'Belum ada foto'}
-                              {isSharedCrewTask(task)
-                                ? ' · Bukti bersama untuk semua pekerja'
-                                : ''}
+                              Foto sebelum sistem per layanan — tidak dihitung untuk kelengkapan tugas.
                             </p>
                           </div>
-                          {evidence.has_before ? (
-                            <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                          ) : (
-                            <Camera className="w-5 h-5 text-slate-400" />
+                          {(evidence.general_before_photos || []).length > 0 && (
+                            <div className="space-y-2">
+                              <p className="text-[11px] font-bold text-slate-700">Before</p>
+                              {renderPhotoGrid(
+                                evidence.general_before_photos,
+                                task.assignment_id,
+                                'before',
+                                'Foto Before (Umum)'
+                              )}
+                            </div>
+                          )}
+                          {(evidence.general_after_photos || []).length > 0 && (
+                            <div className="space-y-2">
+                              <p className="text-[11px] font-bold text-slate-700">After</p>
+                              {renderPhotoGrid(
+                                evidence.general_after_photos,
+                                task.assignment_id,
+                                'after',
+                                'Foto After (Umum)'
+                              )}
+                            </div>
                           )}
                         </div>
-                        {(evidence.before_photos || []).length > 0 && (
-                          <div className="grid grid-cols-2 gap-2">
-                            {(evidence.before_photos || []).map((photo) => (
-                              <div key={photo.id} className="relative">
-                                <button
-                                  type="button"
-                                  disabled={submitting}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleDeletePhoto(task.assignment_id, photo.id);
-                                  }}
-                                  className="absolute right-1.5 top-1.5 z-[1] inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/65 text-white shadow-lg disabled:opacity-60"
-                                  aria-label="Hapus foto before"
-                                >
-                                  <X className="w-3.5 h-3.5" />
-                                </button>
-                                {photoPreviewMap[String(photo.id)] ? (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      openPhotoPreviewFromMap(String(photo.id), 'Foto Before', photo.photo_path)
-                                    }
-                                    className="block w-full text-left"
-                                  >
-                                    <img
-                                      src={photoPreviewMap[String(photo.id)]}
-                                      alt="Foto before"
-                                      className="h-28 w-full rounded-xl object-cover"
-                                    />
-                                  </button>
-                                ) : (
-                                  <div className="h-28 w-full rounded-xl bg-slate-200 animate-pulse" />
-                                )}
-                                <LihatFotoButton
-                                  onClick={() =>
-                                    openPhotoPreviewFromMap(String(photo.id), 'Foto Before', photo.photo_path)
-                                  }
-                                />
+                      )}
+
+                      {(detail?.items || []).map((item, itemIndex) => {
+                        const itemEvidence = item.evidence || {};
+                        const sharedHint = isSharedCrewTask(task)
+                          ? ' · Bukti bersama untuk semua pekerja'
+                          : '';
+                        return (
+                          <div
+                            key={item.id}
+                            className="rounded-[14px] border border-slate-200 bg-[#FAFBFC] p-3 space-y-3"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <p className="text-[12px] font-extrabold text-slate-800">
+                                  {itemIndex + 1}. {item.service_name}
+                                  {item.qty != null ? ` × ${item.qty}` : ''}
+                                  {item.unit_label ? ` ${item.unit_label}` : ''}
+                                </p>
+                                <p className="text-[10.5px] text-slate-500">
+                                  {itemEvidence.has_before && itemEvidence.has_after
+                                    ? 'Before & after lengkap'
+                                    : 'Lengkapi before & after untuk layanan ini'}
+                                  {sharedHint}
+                                </p>
                               </div>
-                            ))}
+                              {itemEvidence.has_before && itemEvidence.has_after ? (
+                                <CheckCircle2 className="w-5 h-5 text-emerald-500 flex-shrink-0" />
+                              ) : (
+                                <Camera className="w-5 h-5 text-slate-400 flex-shrink-0" />
+                              )}
+                            </div>
+
+                            <div className="space-y-2">
+                              <p className="text-[11px] font-bold text-slate-700">Foto Before</p>
+                              {(itemEvidence.before_photos || []).length > 0
+                                ? renderPhotoGrid(
+                                    itemEvidence.before_photos,
+                                    task.assignment_id,
+                                    'before',
+                                    `Before · ${item.service_name}`
+                                  )
+                                : (
+                                  <p className="text-[10.5px] text-slate-500">Belum ada foto before.</p>
+                                )}
+                              <button
+                                type="button"
+                                disabled={
+                                  submitting
+                                  || (itemEvidence.before_count || 0) >= MAX_PHOTOS_PER_KIND
+                                }
+                                onClick={() =>
+                                  setCameraTarget({
+                                    assignmentId: task.assignment_id,
+                                    transactionItemId: item.id,
+                                    kind: 'before',
+                                    label: `Before · ${item.service_name}`,
+                                    includeLocation: false,
+                                  })
+                                }
+                                className="w-full h-[38px] rounded-[12px] border-2 border-dashed border-slate-300 text-slate-600 text-[12px] font-bold flex items-center justify-center gap-1.5 disabled:opacity-60"
+                              >
+                                <Camera className="w-4 h-4" />
+                                Tambah Foto Before
+                              </button>
+                            </div>
+
+                            <div className="space-y-2">
+                              <p className="text-[11px] font-bold text-slate-700">Foto After</p>
+                              {(itemEvidence.after_photos || []).length > 0
+                                ? renderPhotoGrid(
+                                    itemEvidence.after_photos,
+                                    task.assignment_id,
+                                    'after',
+                                    `After · ${item.service_name}`
+                                  )
+                                : (
+                                  <p className="text-[10.5px] text-slate-500">
+                                    {itemEvidence.has_before
+                                      ? 'Belum ada foto after.'
+                                      : 'Isi foto before dulu.'}
+                                  </p>
+                                )}
+                              <button
+                                type="button"
+                                disabled={
+                                  submitting
+                                  || !itemEvidence.has_before
+                                  || (itemEvidence.after_count || 0) >= MAX_PHOTOS_PER_KIND
+                                }
+                                onClick={() =>
+                                  setCameraTarget({
+                                    assignmentId: task.assignment_id,
+                                    transactionItemId: item.id,
+                                    kind: 'after',
+                                    label: `After · ${item.service_name}`,
+                                    includeLocation: false,
+                                  })
+                                }
+                                className="w-full h-[38px] rounded-[12px] border-2 border-dashed border-slate-300 text-slate-600 text-[12px] font-bold flex items-center justify-center gap-1.5 disabled:opacity-60"
+                              >
+                                <Camera className="w-4 h-4" />
+                                Tambah Foto After
+                              </button>
+                            </div>
+
+                            <div className="space-y-2">
+                              <p className="text-[11px] font-bold text-slate-700">Catatan Layanan (Opsional)</p>
+                              <textarea
+                                rows={3}
+                                value={workNoteDrafts[item.id] ?? itemEvidence.work_note ?? ''}
+                                onChange={(e) =>
+                                  setWorkNoteDrafts((prev) => ({
+                                    ...prev,
+                                    [item.id]: e.target.value,
+                                  }))
+                                }
+                                placeholder="Catatan hasil pengerjaan layanan ini..."
+                                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12px] focus:outline-none focus:ring-2 focus:ring-[#163A22]"
+                              />
+                              <button
+                                type="button"
+                                disabled={submitting}
+                                onClick={() => handleSaveWorkNote(task.assignment_id, item.id)}
+                                className="w-full h-[36px] rounded-[12px] border border-slate-300 bg-white text-slate-700 text-[12px] font-bold disabled:opacity-60"
+                              >
+                                Simpan Catatan
+                              </button>
+                            </div>
                           </div>
-                        )}
-                        <button
-                          type="button"
-                          disabled={submitting || (evidence.before_count || 0) >= MAX_PHOTOS_PER_KIND}
-                          onClick={() =>
-                            setCameraTarget({
-                              assignmentId: task.assignment_id,
-                              kind: 'before',
-                              label: 'Foto Before',
-                              includeLocation: false,
-                            })
-                          }
-                          className="w-full h-[38px] rounded-[12px] border-2 border-dashed border-slate-300 text-slate-600 text-[12px] font-bold flex items-center justify-center gap-1.5 disabled:opacity-60"
-                        >
-                          <Camera className="w-4 h-4" />
-                          Tambah Foto Before
-                        </button>
-                      </div>
+                        );
+                      })}
+
+                      {(detail?.items || []).length === 0 && (
+                        <p className="text-[11px] text-slate-500 text-center py-2">
+                          Memuat daftar layanan...
+                        </p>
+                      )}
 
                       <div className="rounded-[14px] border border-slate-200 bg-[#FAFBFC] p-3 space-y-2">
                         <div className="flex items-center justify-between gap-2">
                           <div>
-                            <p className="text-[12px] font-extrabold text-slate-800">2. Foto After</p>
-                            <p className="text-[10.5px] text-slate-500">
-                              {(evidence.after_count || 0) > 0
-                                ? `${evidence.after_count} foto tersimpan`
-                                : evidence.has_before
-                                  ? 'Belum ada foto'
-                                  : 'Isi foto before dulu'}
-                              {isSharedCrewTask(task)
-                                ? ' · Bukti bersama untuk semua pekerja'
-                                : ''}
-                            </p>
-                          </div>
-                          {evidence.has_after ? (
-                            <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                          ) : (
-                            <Camera className="w-5 h-5 text-slate-400" />
-                          )}
-                        </div>
-                        {(evidence.after_photos || []).length > 0 && (
-                          <div className="grid grid-cols-2 gap-2">
-                            {(evidence.after_photos || []).map((photo) => (
-                              <div key={photo.id} className="relative">
-                                <button
-                                  type="button"
-                                  disabled={submitting}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleDeletePhoto(task.assignment_id, photo.id);
-                                  }}
-                                  className="absolute right-1.5 top-1.5 z-[1] inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/65 text-white shadow-lg disabled:opacity-60"
-                                  aria-label="Hapus foto after"
-                                >
-                                  <X className="w-3.5 h-3.5" />
-                                </button>
-                                {photoPreviewMap[String(photo.id)] ? (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      openPhotoPreviewFromMap(String(photo.id), 'Foto After', photo.photo_path)
-                                    }
-                                    className="block w-full text-left"
-                                  >
-                                    <img
-                                      src={photoPreviewMap[String(photo.id)]}
-                                      alt="Foto after"
-                                      className="h-28 w-full rounded-xl object-cover"
-                                    />
-                                  </button>
-                                ) : (
-                                  <div className="h-28 w-full rounded-xl bg-slate-200 animate-pulse" />
-                                )}
-                                <LihatFotoButton
-                                  onClick={() =>
-                                    openPhotoPreviewFromMap(String(photo.id), 'Foto After', photo.photo_path)
-                                  }
-                                />
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        <button
-                          type="button"
-                          disabled={
-                            submitting
-                            || !evidence.has_before
-                            || (evidence.after_count || 0) >= MAX_PHOTOS_PER_KIND
-                          }
-                          onClick={() =>
-                            setCameraTarget({
-                              assignmentId: task.assignment_id,
-                              kind: 'after',
-                              label: 'Foto After',
-                              includeLocation: false,
-                            })
-                          }
-                          className="w-full h-[38px] rounded-[12px] border-2 border-dashed border-slate-300 text-slate-600 text-[12px] font-bold flex items-center justify-center gap-1.5 disabled:opacity-60"
-                        >
-                          <Camera className="w-4 h-4" />
-                          Tambah Foto After
-                        </button>
-                      </div>
-
-                      <div className="rounded-[14px] border border-slate-200 bg-[#FAFBFC] p-3 space-y-2">
-                        <div className="flex items-center justify-between gap-2">
-                          <div>
-                            <p className="text-[12px] font-extrabold text-slate-800">3. Survei Kepuasan</p>
+                            <p className="text-[12px] font-extrabold text-slate-800">Survei Kepuasan</p>
                             <p className="text-[10.5px] text-slate-500">
                               {surveyStatusText(evidence, {
-                                isReady: evidence.has_after,
+                                isReady: evidence.all_items_complete,
                                 readyHint: 'Isi di aplikasi atau tandai survei eksternal',
-                                blockedHint: 'Lengkapi foto after dulu',
+                                blockedHint: 'Lengkapi before & after semua layanan dulu',
                               })}
+                              {evidence.items_completion
+                                ? ` · ${evidence.items_completion.completed_items}/${evidence.items_completion.total_items} layanan lengkap`
+                                : ''}
                             </p>
                           </div>
                           {evidence.has_survey ? (
@@ -1120,7 +1254,7 @@ export default function MobileWorkerTasksPage() {
                         </div>
                         <button
                           type="button"
-                          disabled={submitting || !evidence.has_after}
+                          disabled={submitting || !evidence.all_items_complete}
                           onClick={() => openSurveyPage(task.assignment_id, evidence, task)}
                           className="w-full h-[38px] rounded-[12px] bg-[#163A22] text-white text-[12px] font-extrabold disabled:opacity-60"
                         >
@@ -1132,7 +1266,7 @@ export default function MobileWorkerTasksPage() {
                         </button>
                         <button
                           type="button"
-                          disabled={submitting || !evidence.has_after}
+                          disabled={submitting || !evidence.all_items_complete}
                           onClick={() => requestSurveyExternal(task.assignment_id, evidence, task)}
                           className="w-full h-[38px] rounded-[12px] border border-slate-300 bg-white text-slate-700 text-[12px] font-extrabold disabled:opacity-60"
                         >
@@ -1153,7 +1287,7 @@ export default function MobileWorkerTasksPage() {
                       </button>
                       {!evidence.can_complete && (
                         <p className="text-[10.5px] text-slate-500 text-center">
-                          Selesai aktif setelah before, after, dan survey lengkap.
+                          Selesai aktif setelah semua layanan punya before & after, lalu survey lengkap.
                         </p>
                       )}
                     </div>

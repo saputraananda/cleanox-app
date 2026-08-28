@@ -16,13 +16,32 @@ import {
 export { CLEANOX_RECEIPT_COMPANY };
 export const loadImageAsDataUrl = loadImageAsDataUrlFromLayout;
 
+const E_RECEIPT_FOOTER_TEXT =
+  'Terima kasih atas kepercayaan Anda. Jadwalkan pembersihan rutin berikutnya dan nikmati rumah yang selalu bersih dan segar bersama Cleanox.';
+
+function normalizeLogoInput(logoDataUrl) {
+  if (!logoDataUrl) {
+    return { dataUrl: null, width: null, height: null };
+  }
+  if (typeof logoDataUrl === 'string') {
+    return { dataUrl: logoDataUrl, width: null, height: null };
+  }
+  return {
+    dataUrl: logoDataUrl.dataUrl ?? null,
+    width: logoDataUrl.width ?? null,
+    height: logoDataUrl.height ?? null,
+  };
+}
+
 /**
  * E-Receipt A4 landscape — same layout as internal invoice,
  * without jumlah teknisi and without assigned technicians list.
- * @param {{ transaction: object, items?: array, logoDataUrl?: string|null }} params
+ * @param {{ transaction: object, items?: array, logoDataUrl?: string|{ dataUrl: string, width?: number, height?: number }|null }} params
  */
 export async function downloadPosEReceiptPdf({ transaction, items = [], logoDataUrl = null }) {
   if (!transaction) throw new Error('Data transaksi tidak tersedia');
+
+  const logo = normalizeLogoInput(logoDataUrl);
 
   const doc = new jsPDF({
     orientation: 'landscape',
@@ -40,7 +59,9 @@ export async function downloadPosEReceiptPdf({ transaction, items = [], logoData
   const crew = Math.max(1, Number(transaction.total_people || 1));
 
   let y = drawA4LandscapeHeader(doc, {
-    logoDataUrl,
+    logoDataUrl: logo.dataUrl,
+    logoNaturalWidth: logo.width,
+    logoNaturalHeight: logo.height,
     title: 'E-RECEIPT',
   });
 
@@ -57,10 +78,11 @@ export async function downloadPosEReceiptPdf({ transaction, items = [], logoData
     margin,
     contentW,
     includeCrewCount: false,
+    includePaymentStatus: false,
   });
 
   y = Math.max(companyBottom, metaBottom) + 6;
-  y = drawCustomerBox(doc, { transaction, margin, contentW, y });
+  y = drawCustomerBox(doc, { transaction, margin, contentW, y, comfortableSpacing: true });
 
   y = drawItemsTable(doc, {
     items: itemRows,
@@ -84,13 +106,15 @@ export async function downloadPosEReceiptPdf({ transaction, items = [], logoData
     pageW,
     margin,
     y,
+    showPaymentBadge: true,
   });
 
   drawFooter(doc, {
     pageW,
     pageH,
     margin,
-    footerNote: CLEANOX_RECEIPT_COMPANY.footerThanks,
+    footerNote: E_RECEIPT_FOOTER_TEXT,
+    multiline: true,
   });
 
   const filename = `ereceipt-${transaction.transaction_no || transaction.id || 'pos'}.pdf`;

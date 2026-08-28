@@ -25,26 +25,54 @@ export const getWaschenReferralLeaderboard = async (req, res) => {
 
     const [rows] = await cleanoxPool.query(
       `SELECT
-        c.referral_employee_id AS employee_id,
-        COALESCE(MAX(c.referral_employee_name), CONCAT('Pegawai #', c.referral_employee_id)) AS employee_name,
-        COUNT(DISTINCT c.id) AS customer_count
-       FROM mst_customers c
-       INNER JOIN mst_referral_sources rs ON rs.id = c.referral_source_id
-       INNER JOIN tr_transactions t ON t.customer_id = c.id
-       WHERE rs.code = 'waschen'
-         AND c.referral_employee_id IS NOT NULL
-         AND t.status <> 'Cancelled'
-         AND ${periodSql}
-       GROUP BY c.referral_employee_id
-       HAVING customer_count > 0
-       ORDER BY customer_count DESC, employee_name ASC`,
+        grouped.group_key,
+        grouped.employee_id,
+        grouped.employee_name,
+        grouped.customer_count,
+        grouped.is_manual
+       FROM (
+         SELECT
+           CASE
+             WHEN c.referral_employee_id IS NOT NULL THEN CONCAT('id:', c.referral_employee_id)
+             ELSE CONCAT('name:', LOWER(TRIM(c.referral_employee_name)))
+           END AS group_key,
+           MAX(c.referral_employee_id) AS employee_id,
+           COALESCE(
+             MAX(CASE WHEN c.referral_employee_id IS NOT NULL THEN c.referral_employee_name END),
+             MAX(c.referral_employee_name)
+           ) AS employee_name,
+           COUNT(DISTINCT c.id) AS customer_count,
+           MAX(CASE WHEN c.referral_employee_id IS NULL THEN 1 ELSE 0 END) AS is_manual
+         FROM mst_customers c
+         INNER JOIN mst_referral_sources rs ON rs.id = c.referral_source_id
+         INNER JOIN tr_transactions t ON t.customer_id = c.id
+         WHERE rs.code = 'waschen'
+           AND (
+             c.referral_employee_id IS NOT NULL
+             OR (
+               c.referral_employee_name IS NOT NULL
+               AND TRIM(c.referral_employee_name) <> ''
+             )
+           )
+           AND t.status <> 'Cancelled'
+           AND ${periodSql}
+         GROUP BY
+           CASE
+             WHEN c.referral_employee_id IS NOT NULL THEN CONCAT('id:', c.referral_employee_id)
+             ELSE CONCAT('name:', LOWER(TRIM(c.referral_employee_name)))
+           END
+         HAVING customer_count > 0
+       ) grouped
+       ORDER BY grouped.customer_count DESC, grouped.employee_name ASC`,
       params
     );
 
     const mapped = rows.map((row) => ({
-      employee_id: Number(row.employee_id),
+      group_key: row.group_key,
+      employee_id: row.employee_id == null ? null : Number(row.employee_id),
       employee_name: row.employee_name,
       customer_count: Number(row.customer_count || 0),
+      is_manual: Boolean(Number(row.is_manual || 0)),
     }));
 
     return res.json({

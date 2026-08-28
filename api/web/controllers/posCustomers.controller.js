@@ -3,6 +3,7 @@ import {
   isBlankAddress,
   resolveLegacyAddress,
 } from '../../shared/utils/posCustomerAddress.js';
+import { assertValidWaschenReferralEmployeeName } from '../../shared/utils/waschenReferralEmployee.js';
 
 export function buildCustomerAddressText({
   street_detail,
@@ -95,7 +96,11 @@ function toNullableDate(value) {
   return text || null;
 }
 
-async function resolveWaschenReferralEmployee(referralSourceId, referralEmployeeId) {
+async function resolveWaschenReferralEmployee(
+  referralSourceId,
+  referralEmployeeId,
+  referralEmployeeNameRaw
+) {
   let referralSource = null;
   if (referralSourceId) {
     const [refRows] = await cleanoxPool.query(
@@ -121,31 +126,44 @@ async function resolveWaschenReferralEmployee(referralSourceId, referralEmployee
     };
   }
 
-  if (!referralEmployeeId) {
-    throw Object.assign(new Error('Pegawai Waschen wajib dipilih'), { status: 400 });
+  const manualNameRaw =
+    referralEmployeeNameRaw == null ? '' : String(referralEmployeeNameRaw).trim();
+  const hasManualName = manualNameRaw.length > 0;
+
+  if (referralEmployeeId) {
+    const [empRows] = await aloraPool.query(
+      `SELECT employee_id, full_name
+       FROM mst_employee
+       WHERE employee_id = ?
+         AND company_id = 5
+         AND exit_date IS NULL
+       LIMIT 1`,
+      [referralEmployeeId]
+    );
+
+    if (!empRows.length) {
+      throw Object.assign(new Error('Pegawai Waschen tidak valid atau sudah tidak aktif'), {
+        status: 400,
+      });
+    }
+
+    return {
+      referral_source_id: referralSourceId,
+      referral_employee_id: Number(empRows[0].employee_id),
+      referral_employee_name: empRows[0].full_name || null,
+    };
   }
 
-  const [empRows] = await aloraPool.query(
-    `SELECT employee_id, full_name
-     FROM mst_employee
-     WHERE employee_id = ?
-       AND company_id = 5
-       AND exit_date IS NULL
-     LIMIT 1`,
-    [referralEmployeeId]
-  );
-
-  if (!empRows.length) {
-    throw Object.assign(new Error('Pegawai Waschen tidak valid atau sudah tidak aktif'), {
-      status: 400,
-    });
+  if (hasManualName) {
+    const manualName = assertValidWaschenReferralEmployeeName(manualNameRaw);
+    return {
+      referral_source_id: referralSourceId,
+      referral_employee_id: null,
+      referral_employee_name: manualName,
+    };
   }
 
-  return {
-    referral_source_id: referralSourceId,
-    referral_employee_id: Number(empRows[0].employee_id),
-    referral_employee_name: empRows[0].full_name || null,
-  };
+  throw Object.assign(new Error('Pegawai Waschen wajib dipilih'), { status: 400 });
 }
 
 export async function normalizeCustomerPayload(body) {
@@ -170,6 +188,8 @@ export async function normalizeCustomerPayload(body) {
   const address_note = String(body.address_note || '').trim() || null;
   const referral_source_id = toNullableInt(body.referral_source_id);
   const referral_employee_id = toNullableInt(body.referral_employee_id);
+  const referral_employee_name_raw =
+    body.referral_employee_name == null ? null : String(body.referral_employee_name);
 
   const wilayah = await resolveWilayahNames({
     province_id,
@@ -180,7 +200,8 @@ export async function normalizeCustomerPayload(body) {
 
   const referral = await resolveWaschenReferralEmployee(
     referral_source_id,
-    referral_employee_id
+    referral_employee_id,
+    referral_employee_name_raw
   );
 
   const address = buildCustomerAddressText({

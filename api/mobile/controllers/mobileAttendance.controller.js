@@ -4,6 +4,7 @@ import multer from 'multer';
 import sharp from 'sharp';
 import { fileURLToPath } from 'url';
 import cleanoxPool from '../../shared/db/cleanox.js';
+import { isWorkerOffDay } from './mobileOffDay.controller.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -259,6 +260,10 @@ export const checkInAttendance = async (req, res) => {
 
   if (!files.check_in_photo?.[0]) {
     return res.status(400).json({ message: 'Foto In wajib diunggah' });
+  }
+
+  if (await isWorkerOffDay(workerId, today)) {
+    return res.status(403).json({ message: 'Hari ini libur — absensi tidak diperlukan' });
   }
 
   const connection = await cleanoxPool.getConnection();

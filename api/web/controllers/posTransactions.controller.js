@@ -42,6 +42,10 @@ import {
   stageColumns,
   stagesFromIndex,
 } from '../../shared/utils/posTakehomeStages.js';
+import {
+  loadSharedPhotosGrouped,
+  loadItemWorkNotesByTransactionId,
+} from '../../shared/utils/posSharedTaskEvidence.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -224,6 +228,17 @@ async function savePaymentProofFile(transactionId, file) {
   };
 }
 
+function mapAdminItemEvidencePhotos(photos = []) {
+  return (photos || []).map((photo) => ({
+    id: photo.id,
+    assignment_id: photo.assignment_id ?? null,
+    transaction_item_id: photo.transaction_item_id ?? null,
+    photo_file: photo.photo_file,
+    photo_path: toAdminEvidencePath(photo.photo_file) || photo.photo_path,
+    created_at: photo.created_at,
+  }));
+}
+
 function mapAssignmentEvidencePhotos(assignment, photos = []) {
   const before = [];
   const after = [];
@@ -357,8 +372,8 @@ function assertTransactionItemsMutable(transaction) {
     err.statusCode = 409;
     throw err;
   }
-  if (transaction.status === 'Completed') {
-    const err = new Error('Transaksi selesai tidak dapat mengubah layanan');
+  if (String(transaction.payment_status || 'belum_lunas') === 'lunas') {
+    const err = new Error('Transaksi sudah lunas tidak dapat mengubah layanan');
     err.statusCode = 409;
     throw err;
   }
@@ -742,7 +757,7 @@ export const getPosTransactionDetail = async (req, res) => {
       const photosByAssignment = new Map();
       if (assignmentIds.length > 0) {
         const [photoRows] = await cleanoxPool.query(
-          `SELECT id, assignment_id, kind, photo_file, photo_path, sort_order, created_at
+          `SELECT id, assignment_id, transaction_item_id, kind, photo_file, photo_path, sort_order, created_at
            FROM tr_worker_assignment_photos
            WHERE assignment_id IN (?)
            ORDER BY sort_order ASC, id ASC`,
@@ -809,6 +824,9 @@ export const getPosTransactionDetail = async (req, res) => {
     }));
 
     let takehome_progress = null;
+    let legacy_evidence = { before_photos: [], after_photos: [] };
+    let enrichedItems = items;
+
     if (String(transaction.service_mode || 'home_service') === 'take_home') {
       const [[progressRow]] = await cleanoxPool.query(
         `SELECT * FROM tr_takehome_progress WHERE transaction_id = ? LIMIT 1`,
@@ -816,6 +834,28 @@ export const getPosTransactionDetail = async (req, res) => {
       );
       takehome_progress = mapTakehomeProgressDto(progressRow || null, {
         photoPathBuilder: toAdminTakehomePhotoPath,
+      });
+    } else {
+      const grouped = await loadSharedPhotosGrouped(cleanoxPool, transactionId);
+      const workNotesMap = await loadItemWorkNotesByTransactionId(cleanoxPool, transactionId);
+      legacy_evidence = {
+        before_photos: mapAdminItemEvidencePhotos(grouped.general.before),
+        after_photos: mapAdminItemEvidencePhotos(grouped.general.after),
+      };
+      enrichedItems = items.map((item) => {
+        const bucket = grouped.byItem.get(Number(item.id)) || { before: [], after: [] };
+        const noteRow = workNotesMap.get(Number(item.id)) || null;
+        return {
+          ...item,
+          evidence: {
+            before_photos: mapAdminItemEvidencePhotos(bucket.before),
+            after_photos: mapAdminItemEvidencePhotos(bucket.after),
+            before_count: bucket.before.length,
+            after_count: bucket.after.length,
+            work_note: noteRow?.work_note || null,
+            work_note_updated_at: noteRow?.updated_at || null,
+          },
+        };
       });
     }
 
@@ -848,7 +888,7 @@ export const getPosTransactionDetail = async (req, res) => {
         billing_hours:
           transaction.billing_hours == null ? null : Number(transaction.billing_hours),
       },
-      items: items.map((item) => ({
+      items: enrichedItems.map((item) => ({
         ...item,
         qty: Number(item.qty || 0),
         meter: item.meter == null ? null : Number(item.meter),
@@ -864,6 +904,7 @@ export const getPosTransactionDetail = async (req, res) => {
       customer_photos,
       payment_proofs,
       takehome_progress,
+      legacy_evidence,
       tracking,
       notifications,
     });

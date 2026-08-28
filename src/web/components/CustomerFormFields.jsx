@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import api from '@shared/utils/api.js';
 
+export const WASCHEN_EMPLOYEE_OTHER_VALUE = '__other__';
+
 export const emptyCustomerForm = {
   name: '',
   phone: '',
@@ -14,6 +16,7 @@ export const emptyCustomerForm = {
   address_note: '',
   referral_source_id: '',
   referral_employee_id: '',
+  referral_employee_name: '',
   tier: '',
   status: 'Aktif',
 };
@@ -22,6 +25,10 @@ export const inputClass =
   'w-full rounded-[12px] border border-slate-200 bg-slate-50 px-3 py-2.5 text-[13px] text-slate-800 transition duration-150 focus:bg-white focus:border-blue-400 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,.12)]';
 
 export function customerToForm(row = {}) {
+  const isWaschenReferral = String(row.referral_source_code || '').toLowerCase() === 'waschen';
+  const hasManualEmployee =
+    isWaschenReferral && !row.referral_employee_id && Boolean(String(row.referral_employee_name || '').trim());
+
   return {
     name: row.name || '',
     phone: row.phone || '',
@@ -34,13 +41,20 @@ export function customerToForm(row = {}) {
     street_detail: row.street_detail || '',
     address_note: row.address_note || '',
     referral_source_id: row.referral_source_id ? String(row.referral_source_id) : '',
-    referral_employee_id: row.referral_employee_id ? String(row.referral_employee_id) : '',
+    referral_employee_id: hasManualEmployee
+      ? WASCHEN_EMPLOYEE_OTHER_VALUE
+      : row.referral_employee_id
+        ? String(row.referral_employee_id)
+        : '',
+    referral_employee_name: hasManualEmployee ? String(row.referral_employee_name || '') : '',
     tier: row.tier || '',
     status: row.status || 'Aktif',
   };
 }
 
 export function formToPayload(form) {
+  const isOtherEmployee = form.referral_employee_id === WASCHEN_EMPLOYEE_OTHER_VALUE;
+
   return {
     name: form.name.trim(),
     phone: form.phone.trim() || null,
@@ -53,7 +67,12 @@ export function formToPayload(form) {
     street_detail: form.street_detail.trim() || null,
     address_note: form.address_note.trim() || null,
     referral_source_id: form.referral_source_id ? Number(form.referral_source_id) : null,
-    referral_employee_id: form.referral_employee_id ? Number(form.referral_employee_id) : null,
+    referral_employee_id: isOtherEmployee
+      ? null
+      : form.referral_employee_id
+        ? Number(form.referral_employee_id)
+        : null,
+    referral_employee_name: isOtherEmployee ? form.referral_employee_name.trim() : null,
     tier: form.tier.trim() || null,
     status: form.status || 'Aktif',
   };
@@ -182,7 +201,15 @@ export default function CustomerFormFields({
       if (key === 'referral_source_id') {
         const source = referralSources.find((row) => Number(row.id) === Number(value));
         const waschen = String(source?.code || '').toLowerCase() === 'waschen';
-        if (!waschen) next.referral_employee_id = '';
+        if (!waschen) {
+          next.referral_employee_id = '';
+          next.referral_employee_name = '';
+        }
+      }
+      if (key === 'referral_employee_id') {
+        if (value !== WASCHEN_EMPLOYEE_OTHER_VALUE) {
+          next.referral_employee_name = '';
+        }
       }
       return next;
     });
@@ -317,22 +344,39 @@ export default function CustomerFormFields({
           </select>
         </label>
         {isWaschenReferral && (
-          <label className="block space-y-1.5 text-[12.5px] text-slate-600">
-            <span className="font-medium">Pegawai Waschen</span>
-            <select
-              required
-              value={form.referral_employee_id}
-              onChange={(e) => updateField('referral_employee_id', e.target.value)}
-              className={inputClass}
-            >
-              <option value="">Pilih pegawai</option>
-              {waschenEmployees.map((row) => (
-                <option key={row.employee_id} value={row.employee_id}>
-                  {row.full_name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <>
+            <label className="block space-y-1.5 text-[12.5px] text-slate-600">
+              <span className="font-medium">Pegawai Waschen</span>
+              <select
+                required
+                value={form.referral_employee_id}
+                onChange={(e) => updateField('referral_employee_id', e.target.value)}
+                className={inputClass}
+              >
+                <option value="">Pilih pegawai</option>
+                {waschenEmployees.map((row) => (
+                  <option key={row.employee_id} value={row.employee_id}>
+                    {row.full_name}
+                  </option>
+                ))}
+                <option value={WASCHEN_EMPLOYEE_OTHER_VALUE}>Lainnya</option>
+              </select>
+            </label>
+            {form.referral_employee_id === WASCHEN_EMPLOYEE_OTHER_VALUE && (
+              <label className="block space-y-1.5 text-[12.5px] text-slate-600">
+                <span className="font-medium">Nama Pegawai</span>
+                <input
+                  required
+                  value={form.referral_employee_name}
+                  onChange={(e) => updateField('referral_employee_name', e.target.value)}
+                  className={inputClass}
+                  placeholder="Contoh: Joseph"
+                  pattern="[^\d]*"
+                  title="Nama pegawai hanya boleh huruf (tanpa angka)"
+                />
+              </label>
+            )}
+          </>
         )}
         <label className="block space-y-1.5 text-[12.5px] text-slate-600 md:col-span-2">
           <span className="font-medium">Detail Lengkap (Nama Jalan)</span>

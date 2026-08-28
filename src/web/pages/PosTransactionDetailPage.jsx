@@ -206,9 +206,13 @@ export default function PosTransactionDetailPage() {
     });
   };
 
-  const refreshEvidencePreviews = async (assignmentList = []) => {
+  const refreshEvidencePreviews = async ({
+    assignments = [],
+    items = [],
+    legacy_evidence: legacyEvidence = null,
+  } = {}) => {
     const needed = new Map();
-    for (const assignment of assignmentList) {
+    for (const assignment of assignments) {
       const assignmentId = assignment.id;
       (assignment.before_photos || []).forEach((photo, index) => {
         if (!photo?.photo_path) return;
@@ -217,6 +221,24 @@ export default function PosTransactionDetailPage() {
       (assignment.after_photos || []).forEach((photo, index) => {
         if (!photo?.photo_path) return;
         needed.set(evidencePreviewKey(assignmentId, 'after', photo, index), photo.photo_path);
+      });
+    }
+    (legacyEvidence?.before_photos || []).forEach((photo, index) => {
+      if (!photo?.photo_path) return;
+      needed.set(`legacy-before-${photo?.id ?? index}`, photo.photo_path);
+    });
+    (legacyEvidence?.after_photos || []).forEach((photo, index) => {
+      if (!photo?.photo_path) return;
+      needed.set(`legacy-after-${photo?.id ?? index}`, photo.photo_path);
+    });
+    for (const item of items || []) {
+      (item.evidence?.before_photos || []).forEach((photo, index) => {
+        if (!photo?.photo_path) return;
+        needed.set(`item-${item.id}-before-${photo?.id ?? index}`, photo.photo_path);
+      });
+      (item.evidence?.after_photos || []).forEach((photo, index) => {
+        if (!photo?.photo_path) return;
+        needed.set(`item-${item.id}-after-${photo?.id ?? index}`, photo.photo_path);
       });
     }
     await refreshBlobPreviews(needed, setEvidencePreviewMap);
@@ -325,7 +347,11 @@ export default function PosTransactionDetailPage() {
             : '',
       });
       await Promise.all([
-        refreshEvidencePreviews(nextDetail.assignments || []),
+        refreshEvidencePreviews({
+          assignments: nextDetail.assignments || [],
+          items: nextDetail.items || [],
+          legacy_evidence: nextDetail.legacy_evidence || null,
+        }),
         refreshCustomerPreviews(nextDetail.customer_photos || []),
         refreshPaymentPreviews(nextDetail.payment_proofs || []),
         refreshTakehomePreviews(nextDetail.takehome_progress),
@@ -495,16 +521,16 @@ export default function PosTransactionDetailPage() {
     setReceiptLoading(true);
     setError('');
     try {
-      let logoDataUrl = null;
+      let logo = null;
       try {
-        logoDataUrl = await loadImageAsDataUrl(cleanoxLogo);
+        logo = await loadImageAsDataUrl(cleanoxLogo);
       } catch {
-        logoDataUrl = null;
+        logo = null;
       }
       await downloadPosEReceiptPdf({
         transaction: detail.transaction,
         items: detail.items || [],
-        logoDataUrl,
+        logoDataUrl: logo,
       });
     } catch (err) {
       setError(err.message || 'Gagal membuat e-receipt PDF');
@@ -518,17 +544,17 @@ export default function PosTransactionDetailPage() {
     setInvoiceLoading(true);
     setError('');
     try {
-      let logoDataUrl = null;
+      let logo = null;
       try {
-        logoDataUrl = await loadImageAsDataUrl(cleanoxLogo);
+        logo = await loadImageAsDataUrl(cleanoxLogo);
       } catch {
-        logoDataUrl = null;
+        logo = null;
       }
       await downloadPosInternalInvoicePdf({
         transaction: detail.transaction,
         items: detail.items || [],
         assignments: detail.assignments || [],
-        logoDataUrl,
+        logoDataUrl: logo?.dataUrl ?? logo,
       });
     } catch (err) {
       setError(err.message || 'Gagal membuat invoice internal PDF');
@@ -542,16 +568,16 @@ export default function PosTransactionDetailPage() {
     setOrderFormLoading(true);
     setError('');
     try {
-      let logoDataUrl = null;
+      let logo = null;
       try {
-        logoDataUrl = await loadImageAsDataUrl(cleanoxLogo);
+        logo = await loadImageAsDataUrl(cleanoxLogo);
       } catch {
-        logoDataUrl = null;
+        logo = null;
       }
       await downloadPosOrderFormPdf({
         transaction: detail.transaction,
         items: detail.items || [],
-        logoDataUrl,
+        logoDataUrl: logo,
       });
     } catch (err) {
       setError(err.message || 'Gagal membuat Cleanox Order Form PDF');
@@ -604,7 +630,16 @@ export default function PosTransactionDetailPage() {
     return <div className="max-w-7xl mx-auto p-6 text-sm text-rose-600">Detail transaksi tidak ditemukan.</div>;
   }
 
-  const { transaction, items, assignments, tracking, customer_photos: customerPhotos = [], payment_proofs: paymentProofs = [], takehome_progress: takehomeProgress } = detail;
+  const {
+    transaction,
+    items,
+    assignments,
+    tracking,
+    customer_photos: customerPhotos = [],
+    payment_proofs: paymentProofs = [],
+    takehome_progress: takehomeProgress,
+    legacy_evidence: legacyEvidence = null,
+  } = detail;
   const isTakeHome = String(transaction.service_mode || 'home_service') === 'take_home';
   const isHistoryEntry = Boolean(transaction.is_history_entry);
   const canEditOffers = transaction.status !== 'Cancelled';
@@ -621,7 +656,7 @@ export default function PosTransactionDetailPage() {
   const canMutateItems =
     !isHistoryEntry &&
     transaction.status !== 'Cancelled' &&
-    transaction.status !== 'Completed';
+    transaction.payment_status !== 'lunas';
   const historyStartedAt = (assignments || [])
     .map((row) => row.started_at)
     .filter(Boolean)
@@ -1919,110 +1954,117 @@ export default function PosTransactionDetailPage() {
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="text-lg font-semibold text-slate-900">Bukti Pengerjaan</h2>
           <p className="mt-1 text-sm text-slate-500">
-            Gabungan foto before/after dari semua pekerja pada transaksi ini.
+            Bukti per layanan (shared antar pekerja). Data lama tetap di section umum.
           </p>
           <div className="mt-4 space-y-4">
-            {(assignments || []).length === 0 ? (
-              <p className="text-sm text-slate-500">Belum ada assignment pekerja.</p>
-            ) : (
-              (() => {
-                const assignmentById = new Map(
-                  (assignments || []).map((row) => [Number(row.id), row])
-                );
-                const mergePhotos = (kind) => {
-                  const seen = new Set();
-                  const merged = [];
-                  for (const assignment of assignments || []) {
-                    const list =
-                      kind === 'before'
-                        ? assignment.before_photos || []
-                        : assignment.after_photos || [];
-                    for (const photo of list) {
-                      const dedupeKey = photo?.id ?? `${assignment.id}-${photo?.photo_path}`;
-                      if (seen.has(dedupeKey)) continue;
-                      seen.add(dedupeKey);
-                      merged.push({
-                        ...photo,
-                        assignment_id: photo.assignment_id ?? assignment.id,
-                        employee_name:
-                          assignmentById.get(Number(photo.assignment_id ?? assignment.id))
-                            ?.employee_name || assignment.employee_name,
-                      });
-                    }
-                  }
-                  return merged;
-                };
-                const beforePhotos = mergePhotos('before');
-                const afterPhotos = mergePhotos('after');
-
-                const renderPhotoGrid = (kind, photos) => {
-                  if (photos.length === 0) {
-                    return (
-                      <p className="text-sm text-slate-500">
-                        Belum ada foto {kind === 'before' ? 'before' : 'after'}
-                      </p>
-                    );
-                  }
+            {((legacyEvidence?.before_photos || []).length > 0
+              || (legacyEvidence?.after_photos || []).length > 0) && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-4 space-y-4">
+                <p className="text-sm font-semibold text-slate-800">Bukti umum (data lama)</p>
+                {['before', 'after'].map((kind) => {
+                  const photos =
+                    kind === 'before'
+                      ? legacyEvidence?.before_photos || []
+                      : legacyEvidence?.after_photos || [];
+                  if (photos.length === 0) return null;
                   return (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                      {photos.map((photo, index) => {
-                        const assignmentId = Number(photo.assignment_id);
-                        const key = evidencePreviewKey(assignmentId, kind, photo, index);
-                        const preview = evidencePreviewMap[key];
-                        return preview ? (
-                          <div key={key} className="relative">
+                    <div key={`legacy-${kind}`} className="space-y-2">
+                      <p className="text-sm font-semibold text-slate-800 capitalize">{kind}</p>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                        {photos.map((photo, index) => {
+                          const key = `legacy-${kind}-${photo?.id ?? index}`;
+                          const preview = evidencePreviewMap[key];
+                          return preview ? (
                             <img
+                              key={key}
                               src={preview}
-                              alt={`${kind} ${photo.employee_name || ''}`}
+                              alt={`Legacy ${kind}`}
                               className="h-28 w-full rounded-xl object-cover border border-slate-200"
                             />
-                            {photo.employee_name ? (
-                              <p className="mt-1 truncate text-[11px] text-slate-500">
-                                {photo.employee_name}
-                              </p>
-                            ) : null}
-                            <button
-                              type="button"
-                              aria-label={`Unduh foto ${kind}`}
-                              onClick={() =>
-                                downloadEvidencePhoto({
-                                  blobUrl: preview,
-                                  photoPath: photo?.photo_path,
-                                  fileName: buildEvidenceDownloadName({
-                                    transactionNo: transaction.transaction_no,
-                                    employeeName: photo.employee_name,
-                                    kind,
-                                    index,
-                                    photo,
-                                  }),
-                                })
-                              }
-                              className="absolute right-1.5 top-1.5 z-[1] inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/65 text-white shadow-lg"
-                            >
-                              <Download className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                        ) : (
-                          <div key={key} className="h-28 w-full rounded-xl bg-slate-200 animate-pulse" />
-                        );
-                      })}
+                          ) : (
+                            <div key={key} className="h-28 w-full rounded-xl bg-slate-200 animate-pulse" />
+                          );
+                        })}
+                      </div>
                     </div>
                   );
-                };
+                })}
+              </div>
+            )}
 
-                return (
-                  <div className="rounded-xl border border-slate-200 p-4 space-y-4">
-                    <div className="space-y-2">
-                      <p className="text-sm font-semibold text-slate-800">Before</p>
-                      {renderPhotoGrid('before', beforePhotos)}
-                    </div>
-                    <div className="space-y-2">
-                      <p className="text-sm font-semibold text-slate-800">After</p>
-                      {renderPhotoGrid('after', afterPhotos)}
-                    </div>
+            {(items || []).length === 0 ? (
+              <p className="text-sm text-slate-500">Belum ada item layanan.</p>
+            ) : (
+              (items || []).map((item) => (
+                <div key={item.id} className="rounded-xl border border-slate-200 p-4 space-y-4">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">
+                      {item.service_name}
+                      {item.qty != null ? ` × ${item.qty}` : ''}
+                      {item.unit_label ? ` ${item.unit_label}` : ''}
+                    </p>
+                    {item.evidence?.work_note ? (
+                      <p className="mt-2 text-sm text-slate-600 whitespace-pre-wrap">
+                        Catatan: {item.evidence.work_note}
+                      </p>
+                    ) : null}
                   </div>
-                );
-              })()
+                  {['before', 'after'].map((kind) => {
+                    const photos =
+                      kind === 'before'
+                        ? item.evidence?.before_photos || []
+                        : item.evidence?.after_photos || [];
+                    return (
+                      <div key={`${item.id}-${kind}`} className="space-y-2">
+                        <p className="text-sm font-semibold text-slate-800 capitalize">{kind}</p>
+                        {photos.length === 0 ? (
+                          <p className="text-sm text-slate-500">
+                            Belum ada foto {kind === 'before' ? 'before' : 'after'}
+                          </p>
+                        ) : (
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                            {photos.map((photo, index) => {
+                              const key = `item-${item.id}-${kind}-${photo?.id ?? index}`;
+                              const preview = evidencePreviewMap[key];
+                              return preview ? (
+                                <div key={key} className="relative">
+                                  <img
+                                    src={preview}
+                                    alt={`${item.service_name} ${kind}`}
+                                    className="h-28 w-full rounded-xl object-cover border border-slate-200"
+                                  />
+                                  <button
+                                    type="button"
+                                    aria-label={`Unduh foto ${kind}`}
+                                    onClick={() =>
+                                      downloadEvidencePhoto({
+                                        blobUrl: preview,
+                                        photoPath: photo?.photo_path,
+                                        fileName: buildEvidenceDownloadName({
+                                          transactionNo: transaction.transaction_no,
+                                          employeeName: item.service_name,
+                                          kind,
+                                          index,
+                                          photo,
+                                        }),
+                                      })
+                                    }
+                                    className="absolute right-1.5 top-1.5 z-[1] inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/65 text-white shadow-lg"
+                                  >
+                                    <Download className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <div key={key} className="h-28 w-full rounded-xl bg-slate-200 animate-pulse" />
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ))
             )}
           </div>
         </section>

@@ -216,7 +216,7 @@ export default function PosWaschenReferralPage() {
                 ) : (
                   rows.map((row, index) => (
                     <tr
-                      key={row.employee_id}
+                      key={row.group_key || row.employee_id || `manual-${row.employee_name}`}
                       className="border-b border-gray-50 hover:bg-slate-50/40 transition-colors even:bg-slate-50/20"
                     >
                       <td className="px-4 py-3 text-slate-500">{index + 1}</td>

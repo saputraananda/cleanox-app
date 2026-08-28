@@ -19,9 +19,9 @@ import mobileTasksRoutes from './api/mobile/routes/mobileTasks.routes.js';
 import mobileKebersihanRoutes from './api/mobile/routes/mobileKebersihan.routes.js';
 import mobileRiwayatRoutes from './api/mobile/routes/mobileRiwayat.routes.js';
 import mobileLeaveRoutes from './api/mobile/routes/mobileLeave.routes.js';
+import mobileOffDayRoutes from './api/mobile/routes/mobileOffDay.routes.js';
 import mobileKasbonRoutes from './api/mobile/routes/mobileKasbon.routes.js';
 import mobileOvertimeRoutes from './api/mobile/routes/mobileOvertime.routes.js';
-import mobileMealRoutes from './api/mobile/routes/mobileMeal.routes.js';
 
 
 dotenv.config();
@@ -56,9 +56,9 @@ app.use('/api/mobile-tasks', mobileTasksRoutes);
 app.use('/api/mobile-kebersihan', mobileKebersihanRoutes);
 app.use('/api/mobile-riwayat', mobileRiwayatRoutes);
 app.use('/api/mobile-leave', mobileLeaveRoutes);
+app.use('/api/mobile-off-day', mobileOffDayRoutes);
 app.use('/api/mobile-kasbon', mobileKasbonRoutes);
 app.use('/api/mobile-overtime', mobileOvertimeRoutes);
-app.use('/api/mobile-meal', mobileMealRoutes);
 
 /* ── Serve built React app in production ─────────────── */
 if (process.env.NODE_ENV === 'production') {

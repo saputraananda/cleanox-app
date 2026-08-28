@@ -66,8 +66,8 @@ export default function MobileWorkerTaskSurveyPage() {
             setBlockMessage('Lengkapi semua stage take-home terlebih dahulu sebelum mengisi survey.');
             return;
           }
-        } else if (!nextTask.evidence?.has_after) {
-          setBlockMessage('Lengkapi foto after terlebih dahulu sebelum mengisi survey.');
+        } else if (!nextTask.evidence?.all_items_complete) {
+          setBlockMessage('Lengkapi foto before & after untuk setiap layanan sebelum mengisi survey.');
           return;
         }
 

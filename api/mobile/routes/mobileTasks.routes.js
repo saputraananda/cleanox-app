@@ -22,6 +22,7 @@ import {
   takehomeStageUploadMiddleware,
   uploadAfterPhoto,
   uploadBeforePhoto,
+  upsertItemWorkNote,
 } from '../controllers/mobileTasks.controller.js';
 
 const router = Router();
@@ -81,6 +82,7 @@ router.post(
   advanceTakehomeStage
 );
 router.delete('/:assignmentId/photos/:photoId', deleteAssignmentPhoto);
+router.put('/:assignmentId/items/:itemId/work-note', upsertItemWorkNote);
 router.post('/:assignmentId/survey', submitSurvey);
 router.post('/:assignmentId/survey-external', submitSurveyExternal);
 router.post('/:assignmentId/complete', completeTask);

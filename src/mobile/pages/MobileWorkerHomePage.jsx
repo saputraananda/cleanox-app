@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Camera, ClipboardList, Sparkles, ArrowRight, Clock3, XCircle, CalendarDays, FileText, UserRound, Lock, Banknote, UtensilsCrossed } from 'lucide-react';
+import { Camera, ClipboardList, Sparkles, ArrowRight, Clock3, XCircle, CalendarDays, FileText, UserRound, Lock, Banknote } from 'lucide-react';
 import { getUser } from '@shared/utils/auth.js';
 import api from '@shared/utils/api.js';
 import MobileWorkerBottomNav from '@mobile/components/MobileWorkerBottomNav.jsx';
@@ -65,13 +65,6 @@ const MENU_ITEMS = [
     description: 'Ajukan kasbon & pinjaman',
     icon: Banknote,
     to: '/mobile-worker/kasbon',
-    requiresMorningUnlock: false,
-  },
-  {
-    title: 'Makan Siang',
-    description: 'Pengajuan half / full day',
-    icon: UtensilsCrossed,
-    to: '/mobile-worker/meal',
     requiresMorningUnlock: false,
   },
 ];
@@ -283,6 +276,7 @@ export default function MobileWorkerHomePage() {
   const [dismissingNoticeId, setDismissingNoticeId] = useState(null);
   const [morningUnlocked, setMorningUnlocked] = useState(false);
   const [requireKebersihanForUnlock, setRequireKebersihanForUnlock] = useState(true);
+  const [todayOffDay, setTodayOffDay] = useState(null);
 
   const handleNoticeOpen = async (item) => {
     if (!item?.noticeId || !item?.to) return;
@@ -303,6 +297,18 @@ export default function MobileWorkerHomePage() {
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.get('/mobile-off-day/today')
+      .then((res) => {
+        if (!cancelled) setTodayOffDay(res.data?.off_day || null);
+      })
+      .catch(() => {
+        if (!cancelled) setTodayOffDay(null);
+      });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -513,6 +519,15 @@ export default function MobileWorkerHomePage() {
               <img src={cleanoxLogo} alt="Cleanox" className="h-16 object-contain drop-shadow-[0_4px_10px_rgba(0,0,0,.18)]" />
             </div>
           </section>
+
+          {todayOffDay && (
+            <div className="rounded-[18px] border border-slate-200 bg-slate-100 px-4 py-3 text-[12px] text-slate-700">
+              <span className="font-bold">Hari ini libur</span> — tidak perlu absensi.
+              {todayOffDay.note ? (
+                <span className="mt-1 block text-[11px] text-slate-500">{todayOffDay.note}</span>
+              ) : null}
+            </div>
+          )}
 
           <section className="rounded-[24px] bg-white border border-slate-100 shadow-[0_10px_28px_rgba(15,23,42,.06)] px-4 pt-5 pb-4">
             <div className="grid grid-cols-2 gap-y-4 gap-x-2">

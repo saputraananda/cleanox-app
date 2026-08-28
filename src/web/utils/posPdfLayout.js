@@ -38,12 +38,18 @@ export function loadImageAsDataUrl(src) {
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       try {
+        const width = img.naturalWidth || img.width;
+        const height = img.naturalHeight || img.height;
         const canvas = document.createElement('canvas');
-        canvas.width = img.naturalWidth || img.width;
-        canvas.height = img.naturalHeight || img.height;
+        canvas.width = width;
+        canvas.height = height;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0);
-        resolve(canvas.toDataURL('image/png'));
+        resolve({
+          dataUrl: canvas.toDataURL('image/png'),
+          width,
+          height,
+        });
       } catch (err) {
         reject(err);
       }
@@ -53,17 +59,49 @@ export function loadImageAsDataUrl(src) {
   });
 }
 
+export function fitLogoDimensionsMm(naturalWidth, naturalHeight, maxWidth, maxHeight) {
+  if (!naturalWidth || !naturalHeight) {
+    return { width: maxWidth, height: maxHeight };
+  }
+  const aspect = naturalWidth / naturalHeight;
+  let width = maxWidth;
+  let height = width / aspect;
+  if (height > maxHeight) {
+    height = maxHeight;
+    width = height * aspect;
+  }
+  return { width, height };
+}
+
 /** @returns {number} y after header (content start) */
-export function drawA4LandscapeHeader(doc, { logoDataUrl = null, title = '' } = {}) {
+export function drawA4LandscapeHeader(
+  doc,
+  {
+    logoDataUrl = null,
+    logoNaturalWidth = null,
+    logoNaturalHeight = null,
+    logoMaxWidth = 28,
+    logoMaxHeight = 16,
+    title = '',
+  } = {}
+) {
   const pageW = doc.internal.pageSize.getWidth();
   const margin = 14;
+  const headerH = 28;
 
   doc.setFillColor(...PDF_HEADER_RGB);
-  doc.rect(0, 0, pageW, 28, 'F');
+  doc.rect(0, 0, pageW, headerH, 'F');
 
   if (logoDataUrl) {
     try {
-      doc.addImage(logoDataUrl, 'PNG', margin, 6, 28, 12);
+      const { width, height } = fitLogoDimensionsMm(
+        logoNaturalWidth,
+        logoNaturalHeight,
+        logoMaxWidth,
+        logoMaxHeight
+      );
+      const logoY = (headerH - height) / 2;
+      doc.addImage(logoDataUrl, 'PNG', margin, logoY, width, height);
     } catch {
       // skip logo
     }
@@ -108,6 +146,7 @@ export function drawTransactionMeta(
     margin = 14,
     contentW,
     includeCrewCount = false,
+    includePaymentStatus = true,
   } = {}
 ) {
   const colW = contentW / 2 - 4;
@@ -132,10 +171,12 @@ export function drawTransactionMeta(
   if (includeCrewCount) {
     metaLines.push(['Jumlah Teknisi', String(transaction.total_people ?? '-')]);
   }
-  metaLines.push([
-    'Pembayaran',
-    String(transaction.payment_status || '') === 'lunas' ? 'LUNAS' : 'BELUM LUNAS',
-  ]);
+  if (includePaymentStatus) {
+    metaLines.push([
+      'Pembayaran',
+      String(transaction.payment_status || '') === 'lunas' ? 'LUNAS' : 'BELUM LUNAS',
+    ]);
+  }
   metaLines.push([
     'Metode',
     String(
@@ -157,9 +198,35 @@ export function drawTransactionMeta(
   return metaY;
 }
 
-export function drawCustomerBox(doc, { transaction, margin = 14, contentW, y }) {
+export function drawCustomerBox(
+  doc,
+  { transaction, margin = 14, contentW, y, comfortableSpacing = false } = {}
+) {
   doc.setDrawColor(203, 213, 225);
   doc.setFillColor(248, 250, 252);
+
+  if (comfortableSpacing) {
+    const addrLines = wrap(doc, transaction.customer_address || '-', contentW - 10, 8.5).slice(0, 3);
+    const lineHeight = 4;
+    const addrStart = 27;
+    const bottomPadding = 6;
+    const boxHeight = Math.max(34, addrStart + addrLines.length * lineHeight + bottomPadding);
+
+    doc.roundedRect(margin, y, contentW, boxHeight, 2, 2, 'FD');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(71, 85, 105);
+    doc.text('CUSTOMER', margin + 4, y + 6);
+    doc.setTextColor(15, 23, 42);
+    doc.setFontSize(11);
+    doc.text(String(transaction.customer_name || '-'), margin + 4, y + 13);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.text(String(transaction.customer_phone || '-'), margin + 4, y + 20);
+    doc.text(addrLines, margin + 4, y + addrStart);
+    return y + boxHeight + 6;
+  }
+
   doc.roundedRect(margin, y, contentW, 28, 2, 2, 'FD');
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
@@ -316,13 +383,22 @@ export function drawItemsTable(
 /** @returns {number} y after totals box */
 export function drawTotalsBox(
   doc,
-  { transaction, pendingGc = false, pendingMeter = false, pageW, margin = 14, y }
+  {
+    transaction,
+    pendingGc = false,
+    pendingMeter = false,
+    pageW,
+    margin = 14,
+    y,
+    showPaymentBadge = false,
+  } = {}
 ) {
   const boxW = 78;
   const boxX = pageW - margin - boxW;
   const boxY = y + 4;
   const pending = pendingGc || pendingMeter;
-  const boxH = pending ? 28 : 36;
+  const badgeExtraH = showPaymentBadge && !pending ? 10 : 0;
+  const boxH = pending ? 28 : 36 + badgeExtraH;
   const pendingText =
     pendingGc && pendingMeter
       ? PENDING_PRICE_TOTAL_TEXT
@@ -356,16 +432,52 @@ export function drawTotalsBox(
       doc.text(value, boxX + boxW - 4, ty, { align: 'right' });
       ty += isTotal ? 8 : 7;
     }
+
+    if (showPaymentBadge) {
+      const isPaid = String(transaction.payment_status || '').toLowerCase() === 'lunas';
+      const badgeLabel = isPaid ? 'LUNAS' : 'BELUM LUNAS';
+      const badgeY = ty + 1;
+      const badgeH = 7;
+      const badgePad = 2;
+
+      if (isPaid) {
+        doc.setFillColor(220, 252, 231);
+        doc.setDrawColor(134, 239, 172);
+        doc.setTextColor(21, 128, 61);
+      } else {
+        doc.setFillColor(254, 226, 226);
+        doc.setDrawColor(252, 165, 165);
+        doc.setTextColor(185, 28, 28);
+      }
+
+      doc.roundedRect(boxX + badgePad, badgeY, boxW - badgePad * 2, badgeH, 1.5, 1.5, 'FD');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.5);
+      doc.text(badgeLabel, boxX + boxW / 2, badgeY + 4.8, { align: 'center' });
+    }
   }
 
   return boxY + boxH;
 }
 
-export function drawFooter(doc, { pageW, pageH, margin = 14, footerNote = '' }) {
+export function drawFooter(
+  doc,
+  { pageW, pageH, margin = 14, footerNote = '', multiline = false, maxWidth } = {}
+) {
+  const footerMaxW = maxWidth ?? pageW - margin * 2 - 80;
   doc.setTextColor(100, 116, 139);
   doc.setFont('helvetica', 'italic');
   doc.setFontSize(8);
-  doc.text(String(footerNote || ''), margin, pageH - 10);
+
+  let footerY = pageH - 10;
+  if (multiline && footerNote) {
+    const lines = wrap(doc, String(footerNote), footerMaxW, 8);
+    footerY = pageH - 10 - (lines.length - 1) * 4;
+    doc.text(lines, margin, footerY);
+  } else {
+    doc.text(String(footerNote || ''), margin, footerY);
+  }
+
   doc.setFont('helvetica', 'normal');
   doc.text(
     `Dicetak: ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })}`,

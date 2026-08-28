@@ -92,6 +92,7 @@ export default function MobileWorkerAttendancePage() {
   const [savedCheckOutPhotoUrl, setSavedCheckOutPhotoUrl] = useState('');
   const [photoPreview, setPhotoPreview] = useState(null);
   const [activeLeave, setActiveLeave] = useState(null);
+  const [activeOffDay, setActiveOffDay] = useState(null);
   const [absenOffice, setAbsenOffice] = useState(null);
   const checkInPreviewUrlRef = useRef('');
   const checkoutProofPreviewUrlRef = useRef('');
@@ -103,6 +104,9 @@ export default function MobileWorkerAttendancePage() {
     && activeLeave.duration_type === 'full_day'
     && ['pengajuan', 'disetujui'].includes(activeLeave.status)
   );
+
+  const offDayLocksAttendance = Boolean(activeOffDay);
+  const blocksCheckIn = leaveLocksAttendance || offDayLocksAttendance;
 
   const resolveLocationLabel = useCallback(
     (lat, lng) => {
@@ -121,14 +125,16 @@ export default function MobileWorkerAttendancePage() {
   const loadStatus = async () => {
     setLoading(true);
     try {
-      const [{ data: attendanceData }, leaveRes, absenLocRes] = await Promise.all([
+      const [{ data: attendanceData }, leaveRes, offDayRes, absenLocRes] = await Promise.all([
         api.get('/mobile-attendance/today-status'),
         api.get('/mobile-leave/today').catch(() => ({ data: { leave: null } })),
+        api.get('/mobile-off-day/today').catch(() => ({ data: { off_day: null } })),
         api.get('/mobile-attendance/absen-location').catch(() => ({ data: null })),
       ]);
       const row = attendanceData.attendance || null;
       setAttendance(row);
       setActiveLeave(leaveRes.data?.leave || null);
+      setActiveOffDay(offDayRes.data?.off_day || null);
 
       const office = absenLocRes?.data;
       if (
@@ -361,6 +367,15 @@ export default function MobileWorkerAttendancePage() {
           {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</div>}
           {success && <div className="rounded-2xl border border-[#163A22] bg-[#163A22] p-3 text-sm text-white">{success}</div>}
 
+          {offDayLocksAttendance && (
+            <div className="rounded-2xl border border-slate-200 bg-slate-100 p-3 text-sm text-slate-700">
+              Hari ini <b>libur</b> — tidak perlu absensi.
+              {activeOffDay?.note ? (
+                <span className="block mt-1 text-xs text-slate-500">{activeOffDay.note}</span>
+              ) : null}
+            </div>
+          )}
+
           {leaveLocksAttendance && (
             <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
               Absensi terkunci karena ada izin <b>seharian penuh</b> ({activeLeave.leave_type}, status{' '}
@@ -402,7 +417,7 @@ export default function MobileWorkerAttendancePage() {
             )}
           </section>
 
-          {!attendance?.check_in_at && !leaveLocksAttendance && (
+          {!attendance?.check_in_at && !blocksCheckIn && (
             <form onSubmit={handleCheckIn} className="rounded-[18px] bg-white p-4 shadow-[0_1px_4px_rgba(0,0,0,.04)] border border-slate-200 space-y-4">
               <div>
                 <p className="text-[14px] font-extrabold text-slate-900">Foto In</p>

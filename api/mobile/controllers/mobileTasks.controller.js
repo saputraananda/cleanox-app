@@ -32,8 +32,12 @@ import { upsertCleanoxSatisfactionByNota } from '../../shared/utils/upsertCleano
 import {
   loadSharedBeforeAfterPhotos,
   loadSharedEvidenceByTransactionIds,
+  loadSharedPhotosGrouped,
+  loadItemWorkNotesByTransactionId,
   loadSharedSurvey,
   resolveSurveyState,
+  evaluateItemEvidenceCompletion,
+  MAX_PHOTOS_PER_KIND_PER_ITEM,
 } from '../../shared/utils/posSharedTaskEvidence.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -78,7 +82,6 @@ const takehomePhotoUpload = multer({
 export const takehomeStageUploadMiddleware = takehomePhotoUpload.single('photo');
 
 const VALID_LIST_STATUSES = ['Assigned', 'In_Schedule', 'On_Progress', 'Done', 'Rejected'];
-const MAX_PHOTOS_PER_KIND = 10;
 
 function sanitizeName(value) {
   return String(value || '')
@@ -96,11 +99,18 @@ async function compressToJpg(buffer) {
     .toBuffer();
 }
 
-async function saveTaskEvidencePhoto(employeeId, assignmentId, kind, file, uniqueSuffix = Date.now()) {
+async function saveTaskEvidencePhoto(
+  employeeId,
+  assignmentId,
+  kind,
+  file,
+  { transactionItemId = null, uniqueSuffix = Date.now() } = {}
+) {
   const employeeSlug = sanitizeName(employeeId);
   const assignmentSlug = sanitizeName(assignmentId);
+  const itemSlug = transactionItemId ? `item_${sanitizeName(transactionItemId)}` : 'general';
   const kindSlug = sanitizeName(kind);
-  const fileName = `${employeeSlug}_${assignmentSlug}_${kindSlug}_${uniqueSuffix}.jpg`;
+  const fileName = `${employeeSlug}_${assignmentSlug}_${itemSlug}_${kindSlug}_${uniqueSuffix}.jpg`;
   const filePath = path.join(TASK_EVIDENCE_BASE, fileName);
   const buffer = await compressToJpg(file.buffer);
   fs.writeFileSync(filePath, buffer);
@@ -115,7 +125,7 @@ async function listAssignmentPhotos(assignmentIds) {
   if (ids.length === 0) return new Map();
 
   const [rows] = await cleanoxPool.query(
-    `SELECT id, assignment_id, kind, photo_file, photo_path, sort_order, created_at
+    `SELECT id, assignment_id, transaction_item_id, kind, photo_file, photo_path, sort_order, created_at
      FROM tr_worker_assignment_photos
      WHERE assignment_id IN (?)
      ORDER BY sort_order ASC, id ASC`,
@@ -164,11 +174,120 @@ function splitPhotosByKind(photos = []) {
       id: photo.id,
       photo_path: photo.photo_path,
       created_at: photo.created_at,
+      transaction_item_id: photo.transaction_item_id ?? null,
+      assignment_id: photo.assignment_id ?? null,
     };
     if (photo.kind === 'before') before.push(item);
     if (photo.kind === 'after') after.push(item);
   }
   return { before, after };
+}
+
+function mapPhotoDto(photo, { mobilePath = true } = {}) {
+  const path = mobilePath ? photo.photo_path : photo.photo_path;
+  return {
+    id: photo.id,
+    assignment_id: photo.assignment_id ?? null,
+    transaction_item_id: photo.transaction_item_id ?? null,
+    photo_path: path,
+    created_at: photo.created_at,
+  };
+}
+
+function mapGroupedPhotosToMobile(grouped) {
+  const generalBefore = (grouped?.general?.before || []).map((photo) => mapPhotoDto(photo));
+  const generalAfter = (grouped?.general?.after || []).map((photo) => mapPhotoDto(photo));
+  return { generalBefore, generalAfter };
+}
+
+function mapItemEvidenceDto(item, grouped, workNotesMap = new Map()) {
+  const itemId = Number(item.id);
+  const bucket = grouped?.byItem?.get(itemId) || { before: [], after: [] };
+  const before = bucket.before.map((photo) => mapPhotoDto(photo));
+  const after = bucket.after.map((photo) => mapPhotoDto(photo));
+  const noteRow = workNotesMap.get(itemId) || null;
+  return {
+    before_photos: before,
+    after_photos: after,
+    before_count: before.length,
+    after_count: after.length,
+    has_before: before.length >= 1,
+    has_after: after.length >= 1,
+    work_note: noteRow?.work_note || null,
+    work_note_updated_at: noteRow?.updated_at || null,
+    work_note_updated_by_employee_id: noteRow?.updated_by_employee_id ?? null,
+  };
+}
+
+async function assertTransactionItemOwned(transactionId, transactionItemId, connection = cleanoxPool) {
+  const itemId = Number(transactionItemId);
+  const txId = Number(transactionId);
+  if (!itemId) return null;
+  const [[row]] = await connection.query(
+    `SELECT id, transaction_id FROM tr_transaction_items WHERE id = ? AND transaction_id = ? LIMIT 1`,
+    [itemId, txId]
+  );
+  return row || null;
+}
+
+async function countItemPhotos(connection, transactionId, transactionItemId, kind) {
+  const grouped = await loadSharedPhotosGrouped(connection, transactionId);
+  const bucket = grouped.byItem.get(Number(transactionItemId)) || { before: [], after: [] };
+  if (kind === 'before') return bucket.before.length;
+  if (kind === 'after') return bucket.after.length;
+  return 0;
+}
+
+async function buildItemEvidenceContext(connection, transactionId, items = []) {
+  const grouped = await loadSharedPhotosGrouped(connection, transactionId);
+  const workNotesMap = await loadItemWorkNotesByTransactionId(connection, transactionId);
+  const itemCompletion = evaluateItemEvidenceCompletion(items, grouped.byItem);
+  const { generalBefore, generalAfter } = mapGroupedPhotosToMobile(grouped);
+  const itemsEvidence = (items || []).map((item) => ({
+    transaction_item_id: Number(item.id),
+    service_name: item.service_name || null,
+    qty: item.qty,
+    unit_label: item.unit_label || null,
+    category_name: item.category_name || null,
+    evidence: mapItemEvidenceDto(item, grouped, workNotesMap),
+  }));
+
+  return {
+    grouped,
+    workNotesMap,
+    itemCompletion,
+    generalBefore,
+    generalAfter,
+    itemsEvidence,
+  };
+}
+
+function enrichItemsWithEvidence(items = [], itemEvidenceContext = null) {
+  if (!itemEvidenceContext) {
+    return (items || []).map((item) => ({
+      ...item,
+      evidence: {
+        before_photos: [],
+        after_photos: [],
+        before_count: 0,
+        after_count: 0,
+        has_before: false,
+        has_after: false,
+        work_note: null,
+        work_note_updated_at: null,
+        work_note_updated_by_employee_id: null,
+      },
+    }));
+  }
+
+  const evidenceByItemId = new Map(
+    (itemEvidenceContext.itemsEvidence || []).map((row) => [Number(row.transaction_item_id), row.evidence])
+  );
+
+  return (items || []).map((item) => ({
+    ...item,
+    evidence: evidenceByItemId.get(Number(item.id)) || mapItemEvidenceDto(item, itemEvidenceContext.grouped, itemEvidenceContext.workNotesMap),
+  }));
 }
 
 function todayDateStringJakarta() {
@@ -248,23 +367,21 @@ function parseSurveyAnswers(value) {
   }
 }
 
-function mapEvidence(row, photos = [], takehomeProgress = null, shared = null) {
+function mapEvidence(row, photos = [], takehomeProgress = null, shared = null, itemEvidenceContext = null) {
   const serviceMode = String(row.service_mode || 'home_service');
   const isHome = serviceMode !== 'take_home';
   const ownSplit = splitPhotosByKind(photos);
 
-  const sharedBefore = (shared?.before || []).map((photo) => ({
-    id: photo.id,
-    assignment_id: photo.assignment_id ?? null,
-    photo_path: photo.photo_path,
-    created_at: photo.created_at,
-  }));
-  const sharedAfter = (shared?.after || []).map((photo) => ({
-    id: photo.id,
-    assignment_id: photo.assignment_id ?? null,
-    photo_path: photo.photo_path,
-    created_at: photo.created_at,
-  }));
+  const sharedBefore = (shared?.before || []).map((photo) => mapPhotoDto(photo));
+  const sharedAfter = (shared?.after || []).map((photo) => mapPhotoDto(photo));
+
+  const generalBefore = itemEvidenceContext?.generalBefore || shared?.grouped?.general?.before?.map((p) => mapPhotoDto(p)) || [];
+  const generalAfter = itemEvidenceContext?.generalAfter || shared?.grouped?.general?.after?.map((p) => mapPhotoDto(p)) || [];
+  const itemsEvidence = itemEvidenceContext?.itemsEvidence || [];
+  const itemCompletion =
+    itemEvidenceContext?.itemCompletion ||
+    shared?.itemCompletion ||
+    evaluateItemEvidenceCompletion(shared?.items || [], shared?.grouped?.byItem || new Map());
 
   const before = isHome ? sharedBefore : ownSplit.before;
   const after = isHome ? sharedAfter : ownSplit.after;
@@ -272,8 +389,12 @@ function mapEvidence(row, photos = [], takehomeProgress = null, shared = null) {
   const hasArrival = Boolean(
     row.arrival_photo_path && row.arrival_latitude != null && row.arrival_longitude != null
   );
-  const hasBefore = before.length >= 1 || (!isHome && Boolean(row.before_photo_path));
-  const hasAfter = after.length >= 1 || (!isHome && Boolean(row.after_photo_path));
+  const hasBefore = isHome
+    ? itemCompletion.all_items_complete
+    : before.length >= 1 || Boolean(row.before_photo_path);
+  const hasAfter = isHome
+    ? itemCompletion.all_items_complete
+    : after.length >= 1 || Boolean(row.after_photo_path);
 
   const ownSurvey = resolveSurveyState({
     survey_rating: row.survey_rating,
@@ -296,7 +417,7 @@ function mapEvidence(row, photos = [], takehomeProgress = null, shared = null) {
   const canComplete =
     serviceMode === 'take_home'
       ? hasTakehomeComplete && hasSurvey
-      : hasArrival && hasBefore && hasAfter && hasSurvey;
+      : hasArrival && itemCompletion.all_items_complete && hasSurvey;
 
   return {
     arrival_photo_path: row.arrival_photo_path || null,
@@ -306,6 +427,16 @@ function mapEvidence(row, photos = [], takehomeProgress = null, shared = null) {
     arrival_at: row.arrival_at || null,
     before_photos: before,
     after_photos: after,
+    general_before_photos: isHome ? generalBefore : [],
+    general_after_photos: isHome ? generalAfter : [],
+    items_evidence: isHome ? itemsEvidence : [],
+    all_items_complete: isHome ? itemCompletion.all_items_complete : false,
+    items_completion: isHome
+      ? {
+          total_items: itemCompletion.total_items,
+          completed_items: itemCompletion.completed_items,
+        }
+      : null,
     before_photo_path: before[0]?.photo_path || row.before_photo_path || null,
     before_photo_at: before[0]?.created_at || row.before_photo_at || null,
     after_photo_path: after[0]?.photo_path || row.after_photo_path || null,
@@ -334,9 +465,10 @@ function mapTaskRow(
   customerPhotos = [],
   takehomeProgress = null,
   serviceLabel = null,
-  shared = null
+  shared = null,
+  itemEvidenceContext = null
 ) {
-  const evidence = mapEvidence(row, photos, takehomeProgress, shared);
+  const evidence = mapEvidence(row, photos, takehomeProgress, shared, itemEvidenceContext);
   return {
     assignment_id: row.id,
     assignment_status: row.assignment_status,
@@ -534,16 +666,37 @@ export const listMyTasks = async (req, res) => {
     }
 
     return res.json({
-      tasks: rows.map((row) =>
-        mapTaskRow(
+      tasks: rows.map((row) => {
+        const txId = Number(row.transaction_id);
+        const shared = sharedMap.get(txId) || null;
+        const itemEvidenceContext =
+          String(row.service_mode) !== 'take_home' && shared
+            ? {
+                grouped: shared.grouped,
+                workNotesMap: new Map(),
+                itemCompletion: shared.itemCompletion,
+                generalBefore: (shared.grouped?.general?.before || []).map((p) => mapPhotoDto(p)),
+                generalAfter: (shared.grouped?.general?.after || []).map((p) => mapPhotoDto(p)),
+                itemsEvidence: (shared.items || []).map((item) => ({
+                  transaction_item_id: Number(item.id),
+                  service_name: item.service_name || null,
+                  qty: item.qty,
+                  unit_label: item.unit_label || null,
+                  category_name: item.category_name || null,
+                  evidence: mapItemEvidenceDto(item, shared.grouped, new Map()),
+                })),
+              }
+            : null;
+        return mapTaskRow(
           row,
           photosMap.get(Number(row.id)) || [],
           customerPhotosMap.get(Number(row.transaction_id)) || [],
           takehomeMap.get(Number(row.transaction_id)) || null,
           serviceLabelMap.get(Number(row.transaction_id)) || null,
-          sharedMap.get(Number(row.transaction_id)) || null
-        )
-      ),
+          shared,
+          itemEvidenceContext
+        );
+      }),
     });
   } catch (error) {
     console.error('[mobileTasks/listMyTasks]', error.message);
@@ -584,6 +737,10 @@ export const getMyTaskDetail = async (req, res) => {
     const customerPhotosMap = await listCustomerPhotosByTransactionIds([row.transaction_id]);
     const serviceLabelMap = await buildServiceLabelMap([row.transaction_id]);
     const shared = await buildSharedContextForRow(row);
+    const itemEvidenceContext =
+      String(row.service_mode) !== 'take_home'
+        ? await buildItemEvidenceContext(cleanoxPool, row.transaction_id, items)
+        : null;
     const takehomeProgress =
       String(row.service_mode) === 'take_home'
         ? await getTakehomeProgressByTransactionId(row.transaction_id)
@@ -595,9 +752,10 @@ export const getMyTaskDetail = async (req, res) => {
         customerPhotosMap.get(Number(row.transaction_id)) || [],
         takehomeProgress,
         serviceLabelMap.get(Number(row.transaction_id)) || null,
-        shared
+        shared,
+        itemEvidenceContext
       ),
-      items,
+      items: enrichItemsWithEvidence(items, itemEvidenceContext),
     });
   } catch (error) {
     console.error('[mobileTasks/getMyTaskDetail]', error.message);
@@ -959,6 +1117,7 @@ export const uploadBeforePhoto = async (req, res) => {
   const employeeId = req.user?.id;
   const assignmentId = Number(req.params.assignmentId);
   const files = req.files || {};
+  const transactionItemId = Number(req.body.transaction_item_id);
 
   if (!assignmentId) {
     return res.status(400).json({ message: 'ID assignment tidak valid' });
@@ -976,18 +1135,54 @@ export const uploadBeforePhoto = async (req, res) => {
       return res.status(409).json({ message: 'Foto before hanya untuk task On Progress' });
     }
 
-    const sharedPhotos = await loadSharedBeforeAfterPhotos(cleanoxPool, row.transaction_id);
-    if (sharedPhotos.before.length >= MAX_PHOTOS_PER_KIND) {
-      return res.status(400).json({ message: `Maksimal ${MAX_PHOTOS_PER_KIND} foto before` });
+    const isHome = String(row.service_mode) !== 'take_home';
+    if (isHome) {
+      if (!transactionItemId) {
+        return res.status(400).json({ message: 'transaction_item_id wajib untuk foto per layanan' });
+      }
+      const ownedItem = await assertTransactionItemOwned(row.transaction_id, transactionItemId);
+      if (!ownedItem) {
+        return res.status(400).json({ message: 'Item layanan tidak valid untuk transaksi ini' });
+      }
+      const currentCount = await countItemPhotos(cleanoxPool, row.transaction_id, transactionItemId, 'before');
+      if (currentCount >= MAX_PHOTOS_PER_KIND_PER_ITEM) {
+        return res.status(400).json({
+          message: `Maksimal ${MAX_PHOTOS_PER_KIND_PER_ITEM} foto before per layanan`,
+        });
+      }
+    } else {
+      const sharedPhotos = await loadSharedBeforeAfterPhotos(cleanoxPool, row.transaction_id);
+      if (sharedPhotos.before.length >= MAX_PHOTOS_PER_KIND_PER_ITEM) {
+        return res.status(400).json({
+          message: `Maksimal ${MAX_PHOTOS_PER_KIND_PER_ITEM} foto before`,
+        });
+      }
     }
 
-    const photo = await saveTaskEvidencePhoto(employeeId, assignmentId, 'before', files.before_photo[0]);
-    const sortOrder = sharedPhotos.before.length;
+    const photo = await saveTaskEvidencePhoto(
+      employeeId,
+      assignmentId,
+      'before',
+      files.before_photo[0],
+      { transactionItemId: isHome ? transactionItemId : null }
+    );
+    const grouped = isHome
+      ? await loadSharedPhotosGrouped(cleanoxPool, row.transaction_id)
+      : null;
+    const sortOrder = isHome
+      ? (grouped?.byItem?.get(transactionItemId)?.before?.length || 0)
+      : (await loadSharedBeforeAfterPhotos(cleanoxPool, row.transaction_id)).before.length;
     const [insertResult] = await cleanoxPool.query(
       `INSERT INTO tr_worker_assignment_photos
-        (assignment_id, kind, photo_file, photo_path, sort_order, created_at)
-       VALUES (?, 'before', ?, ?, ?, NOW())`,
-      [assignmentId, photo.file, photo.path, sortOrder]
+        (assignment_id, transaction_item_id, kind, photo_file, photo_path, sort_order, created_at)
+       VALUES (?, ?, 'before', ?, ?, ?, NOW())`,
+      [
+        assignmentId,
+        isHome ? transactionItemId : null,
+        photo.file,
+        photo.path,
+        sortOrder,
+      ]
     );
 
     await cleanoxPool.query(
@@ -1002,12 +1197,25 @@ export const uploadBeforePhoto = async (req, res) => {
 
     const photosMap = await listAssignmentPhotos([assignmentId]);
     const shared = await buildSharedContextForRow(row);
-    const evidence = mapEvidence(row, photosMap.get(assignmentId) || [], null, shared);
+    const [items] = await cleanoxPool.query(
+      `SELECT i.id, i.qty, i.unit_label, s.name AS service_name, c.name AS category_name
+       FROM tr_transaction_items i
+       INNER JOIN mst_services s ON s.id = i.service_id
+       LEFT JOIN mst_category c ON c.id = s.category_id
+       WHERE i.transaction_id = ?
+       ORDER BY i.id`,
+      [row.transaction_id]
+    );
+    const itemEvidenceContext = isHome
+      ? await buildItemEvidenceContext(cleanoxPool, row.transaction_id, items)
+      : null;
+    const evidence = mapEvidence(row, photosMap.get(assignmentId) || [], null, shared, itemEvidenceContext);
     return res.json({
       message: 'Foto before tersimpan',
       photo: {
         id: insertResult.insertId,
         photo_path: photo.path,
+        transaction_item_id: isHome ? transactionItemId : null,
       },
       evidence,
     });
@@ -1021,6 +1229,7 @@ export const uploadAfterPhoto = async (req, res) => {
   const employeeId = req.user?.id;
   const assignmentId = Number(req.params.assignmentId);
   const files = req.files || {};
+  const transactionItemId = Number(req.body.transaction_item_id);
 
   if (!assignmentId) {
     return res.status(400).json({ message: 'ID assignment tidak valid' });
@@ -1034,7 +1243,7 @@ export const uploadAfterPhoto = async (req, res) => {
     await connection.beginTransaction();
 
     const [[row]] = await connection.query(
-      `SELECT a.*, t.customer_name
+      `SELECT a.*, t.customer_name, t.service_mode
        FROM tr_worker_assignments a
        INNER JOIN tr_transactions t ON t.id = a.transaction_id
        WHERE a.id = ? AND a.employee_id = ?
@@ -1058,29 +1267,72 @@ export const uploadAfterPhoto = async (req, res) => {
       });
     }
 
-    const sharedPhotos = await loadSharedBeforeAfterPhotos(connection, row.transaction_id);
-    const sharedSurvey = await loadSharedSurvey(connection, row.transaction_id);
-    const shared = {
-      before: sharedPhotos.before,
-      after: sharedPhotos.after,
-      survey: sharedSurvey,
-    };
-    const existingEvidence = mapEvidence(row, [], null, shared);
-    if (!existingEvidence.has_before) {
-      await connection.rollback();
-      return res.status(400).json({ message: 'Ambil foto before terlebih dahulu' });
-    }
-    if (sharedPhotos.after.length >= MAX_PHOTOS_PER_KIND) {
-      await connection.rollback();
-      return res.status(400).json({ message: `Maksimal ${MAX_PHOTOS_PER_KIND} foto after` });
+    const isHome = String(row.service_mode) !== 'take_home';
+    const grouped = await loadSharedPhotosGrouped(connection, row.transaction_id);
+
+    if (isHome) {
+      if (!transactionItemId) {
+        await connection.rollback();
+        return res.status(400).json({ message: 'transaction_item_id wajib untuk foto per layanan' });
+      }
+      const ownedItem = await assertTransactionItemOwned(row.transaction_id, transactionItemId, connection);
+      if (!ownedItem) {
+        await connection.rollback();
+        return res.status(400).json({ message: 'Item layanan tidak valid untuk transaksi ini' });
+      }
+      const itemBucket = grouped.byItem.get(transactionItemId) || { before: [], after: [] };
+      if (itemBucket.before.length < 1) {
+        await connection.rollback();
+        return res.status(400).json({ message: 'Ambil foto before untuk layanan ini terlebih dahulu' });
+      }
+      if (itemBucket.after.length >= MAX_PHOTOS_PER_KIND_PER_ITEM) {
+        await connection.rollback();
+        return res.status(400).json({
+          message: `Maksimal ${MAX_PHOTOS_PER_KIND_PER_ITEM} foto after per layanan`,
+        });
+      }
+    } else {
+      const sharedPhotos = await loadSharedBeforeAfterPhotos(connection, row.transaction_id);
+      const sharedSurvey = await loadSharedSurvey(connection, row.transaction_id);
+      const shared = {
+        before: sharedPhotos.before,
+        after: sharedPhotos.after,
+        survey: sharedSurvey,
+      };
+      const existingEvidence = mapEvidence(row, [], null, shared);
+      if (!existingEvidence.has_before) {
+        await connection.rollback();
+        return res.status(400).json({ message: 'Ambil foto before terlebih dahulu' });
+      }
+      if (sharedPhotos.after.length >= MAX_PHOTOS_PER_KIND_PER_ITEM) {
+        await connection.rollback();
+        return res.status(400).json({
+          message: `Maksimal ${MAX_PHOTOS_PER_KIND_PER_ITEM} foto after`,
+        });
+      }
     }
 
-    const photo = await saveTaskEvidencePhoto(employeeId, assignmentId, 'after', files.after_photo[0]);
+    const photo = await saveTaskEvidencePhoto(
+      employeeId,
+      assignmentId,
+      'after',
+      files.after_photo[0],
+      { transactionItemId: isHome ? transactionItemId : null }
+    );
+    const sortOrder = isHome
+      ? (grouped.byItem.get(transactionItemId)?.after?.length || 0)
+      : (await loadSharedBeforeAfterPhotos(connection, row.transaction_id)).after.length;
     const [insertResult] = await connection.query(
       `INSERT INTO tr_worker_assignment_photos
-        (assignment_id, kind, photo_file, photo_path, sort_order, created_at)
-       VALUES (?, 'after', ?, ?, ?, NOW())`,
-      [assignmentId, photo.file, photo.path, sharedPhotos.after.length]
+        (assignment_id, transaction_item_id, kind, photo_file, photo_path, sort_order, created_at)
+       VALUES (?, ?, 'after', ?, ?, ?, NOW())`,
+      [
+        assignmentId,
+        isHome ? transactionItemId : null,
+        photo.file,
+        photo.path,
+        sortOrder,
+      ]
     );
 
     await connection.query(
@@ -1111,17 +1363,31 @@ export const uploadAfterPhoto = async (req, res) => {
       after_photo_file: photo.file,
       after_photo_path: photo.path,
     });
+    const [items] = await cleanoxPool.query(
+      `SELECT i.id, i.qty, i.unit_label, s.name AS service_name, c.name AS category_name
+       FROM tr_transaction_items i
+       INNER JOIN mst_services s ON s.id = i.service_id
+       LEFT JOIN mst_category c ON c.id = s.category_id
+       WHERE i.transaction_id = ?
+       ORDER BY i.id`,
+      [row.transaction_id]
+    );
+    const itemEvidenceContext = isHome
+      ? await buildItemEvidenceContext(cleanoxPool, row.transaction_id, items)
+      : null;
     const evidence = mapEvidence(
       { ...row, after_photo_file: photo.file, after_photo_path: photo.path },
       photosMap.get(assignmentId) || [],
       null,
-      sharedAfterUpload
+      sharedAfterUpload,
+      itemEvidenceContext
     );
     return res.json({
       message: 'Foto after tersimpan',
       photo: {
         id: insertResult.insertId,
         photo_path: photo.path,
+        transaction_item_id: isHome ? transactionItemId : null,
       },
       evidence,
     });
@@ -1136,6 +1402,79 @@ export const uploadAfterPhoto = async (req, res) => {
     });
   } finally {
     connection.release();
+  }
+};
+
+export const upsertItemWorkNote = async (req, res) => {
+  const employeeId = req.user?.id;
+  const assignmentId = Number(req.params.assignmentId);
+  const itemId = Number(req.params.itemId);
+  const workNoteRaw = req.body?.work_note;
+  const workNote =
+    workNoteRaw == null || String(workNoteRaw).trim() === ''
+      ? null
+      : String(workNoteRaw).trim();
+
+  if (!assignmentId || !itemId) {
+    return res.status(400).json({ message: 'ID assignment/item tidak valid' });
+  }
+
+  try {
+    const row = await getAssignmentOwnedByUser(assignmentId, employeeId);
+    if (!row) {
+      return res.status(404).json({ message: 'Task tidak ditemukan' });
+    }
+    if (String(row.service_mode) === 'take_home') {
+      return res.status(400).json({ message: 'Catatan per layanan hanya untuk home service' });
+    }
+    if (row.assignment_status !== 'On_Progress') {
+      return res.status(409).json({ message: 'Catatan hanya untuk task On Progress' });
+    }
+
+    const ownedItem = await assertTransactionItemOwned(row.transaction_id, itemId);
+    if (!ownedItem) {
+      return res.status(400).json({ message: 'Item layanan tidak valid untuk transaksi ini' });
+    }
+
+    await cleanoxPool.query(
+      `INSERT INTO tr_transaction_item_work_notes
+        (transaction_id, transaction_item_id, work_note, updated_by_employee_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, NOW(), NOW())
+       ON DUPLICATE KEY UPDATE
+         work_note = VALUES(work_note),
+         updated_by_employee_id = VALUES(updated_by_employee_id),
+         updated_at = NOW()`,
+      [row.transaction_id, itemId, workNote, employeeId]
+    );
+
+    const [items] = await cleanoxPool.query(
+      `SELECT i.id, i.qty, i.unit_label, s.name AS service_name, c.name AS category_name
+       FROM tr_transaction_items i
+       INNER JOIN mst_services s ON s.id = i.service_id
+       LEFT JOIN mst_category c ON c.id = s.category_id
+       WHERE i.transaction_id = ?
+       ORDER BY i.id`,
+      [row.transaction_id]
+    );
+    const itemEvidenceContext = await buildItemEvidenceContext(cleanoxPool, row.transaction_id, items);
+    const itemRow = enrichItemsWithEvidence(items, itemEvidenceContext).find(
+      (item) => Number(item.id) === itemId
+    );
+
+    return res.json({
+      message: 'Catatan layanan tersimpan',
+      item: itemRow || null,
+      evidence: mapEvidence(
+        row,
+        [],
+        null,
+        await buildSharedContextForRow(row),
+        itemEvidenceContext
+      ),
+    });
+  } catch (error) {
+    console.error('[mobileTasks/upsertItemWorkNote]', error.message);
+    return res.status(500).json({ message: 'Gagal menyimpan catatan layanan' });
   }
 };
 
@@ -1282,8 +1621,10 @@ export const submitSurvey = async (req, res) => {
           message: 'Lengkapi semua stage take-home (sampai Pengantaran) sebelum mengisi survey',
         });
       }
-    } else if (!evidence.has_after) {
-      return res.status(400).json({ message: 'Lengkapi foto after terlebih dahulu sebelum mengisi survey' });
+    } else if (!evidence.all_items_complete) {
+      return res.status(400).json({
+        message: 'Lengkapi foto before & after untuk setiap layanan sebelum mengisi survey',
+      });
     }
 
     const surveyAnswers = {
@@ -1379,9 +1720,9 @@ export const submitSurveyExternal = async (req, res) => {
           message: 'Lengkapi semua stage take-home (sampai Pengantaran) sebelum menandai survey eksternal',
         });
       }
-    } else if (!evidence.has_after) {
+    } else if (!evidence.all_items_complete) {
       return res.status(400).json({
-        message: 'Lengkapi foto after terlebih dahulu sebelum menandai survey eksternal',
+        message: 'Lengkapi foto before & after untuk setiap layanan sebelum menandai survey eksternal',
       });
     }
 
@@ -1461,8 +1802,7 @@ export const completeTask = async (req, res) => {
         if (!evidence.has_survey) missing.push('survey kepuasan');
       } else {
         if (!evidence.has_arrival) missing.push('bukti kedatangan');
-        if (!evidence.has_before) missing.push('foto before');
-        if (!evidence.has_after) missing.push('foto after');
+        if (!evidence.all_items_complete) missing.push('foto before & after per layanan');
         if (!evidence.has_survey) missing.push('survey kepuasan');
       }
       return res.status(400).json({
