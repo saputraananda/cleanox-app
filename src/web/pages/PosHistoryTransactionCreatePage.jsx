@@ -104,6 +104,7 @@ export default function PosHistoryTransactionCreatePage() {
     promo_id: '',
     discount_id: '',
     discount_value: '',
+    transport_fee: '',
   });
   const [paymentMethods, setPaymentMethods] = useState([]);
   const [discountOptions, setDiscountOptions] = useState([]);
@@ -197,6 +198,8 @@ export default function PosHistoryTransactionCreatePage() {
       promoValue: discountValueForCalc,
     });
     const discount = Math.min(subtotal, Math.max(0, promoPart) + Math.max(0, diskonPart));
+    const transportFee =
+      form.service_mode === 'home_service' ? Math.max(0, Number(form.transport_fee || 0) || 0) : 0;
 
     return {
       hours,
@@ -207,7 +210,8 @@ export default function PosHistoryTransactionCreatePage() {
       discount,
       promoPart,
       diskonPart,
-      finalAmount: subtotal - discount,
+      transportFee,
+      finalAmount: subtotal - discount + transportFee,
       needsHours: hasGc,
     };
   }, [
@@ -215,6 +219,8 @@ export default function PosHistoryTransactionCreatePage() {
     form.promo_id,
     form.discount_id,
     form.discount_value,
+    form.service_mode,
+    form.transport_fee,
     form.total_people,
     jobEndedAt,
     jobStartedAt,
@@ -586,6 +592,8 @@ export default function PosHistoryTransactionCreatePage() {
             ?.discount_type === 'additional'
             ? Number(form.discount_value)
             : undefined,
+        transport_fee:
+          form.service_mode === 'home_service' ? Number(form.transport_fee || 0) || 0 : 0,
         worker_ids: form.worker_ids,
         items: form.items.map((item) => ({
           service_id: Number(item.service_id),
@@ -706,7 +714,13 @@ export default function PosHistoryTransactionCreatePage() {
                 <button
                   key={option.value}
                   type="button"
-                  onClick={() => setForm((prev) => ({ ...prev, service_mode: option.value }))}
+                  onClick={() =>
+                    setForm((prev) => ({
+                      ...prev,
+                      service_mode: option.value,
+                      transport_fee: option.value === 'home_service' ? prev.transport_fee : '',
+                    }))
+                  }
                   className={`rounded-[12px] border px-3 py-2 text-[12.5px] font-semibold ${
                     active
                       ? 'border-blue-300 bg-blue-50 text-blue-800'
@@ -1097,6 +1111,24 @@ export default function PosHistoryTransactionCreatePage() {
                 />
               </label>
             )}
+            {form.service_mode === 'home_service' && (
+              <label className="block space-y-1.5">
+                <span className="text-[12px] font-semibold text-slate-600">
+                  Biaya Transport (opsional)
+                </span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  className={inputClass}
+                  value={form.transport_fee}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, transport_fee: e.target.value }))
+                  }
+                  placeholder="Contoh: 25000"
+                />
+              </label>
+            )}
             <div className="space-y-1">
             <p className="text-[12px] font-semibold uppercase tracking-wide text-slate-400">
               Estimasi total
@@ -1116,6 +1148,9 @@ export default function PosHistoryTransactionCreatePage() {
               Diskon promo {formatCurrency(pricingPreview.promoPart || 0)} · Diskon tambahan{' '}
               {formatCurrency(pricingPreview.diskonPart || 0)} · Total{' '}
               {formatCurrency(pricingPreview.discount)}
+              {form.service_mode === 'home_service'
+                ? ` · Transport ${formatCurrency(pricingPreview.transportFee || 0)}`
+                : ''}
               {pricingPreview.hasGc && pricingPreview.hoursOk
                 ? ` · GC ${pricingPreview.hours} jam`
                 : ''}

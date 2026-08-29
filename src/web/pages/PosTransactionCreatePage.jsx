@@ -192,6 +192,7 @@ export default function PosTransactionCreatePage() {
     promo_id: '',
     discount_id: '',
     discount_value: '',
+    transport_fee: '',
   });
   const [paymentMethods, setPaymentMethods] = useState([]);
   const [discountOptions, setDiscountOptions] = useState([]);
@@ -454,14 +455,18 @@ export default function PosTransactionCreatePage() {
       acc.subtotal,
       Math.max(0, promoPart) + Math.max(0, diskonPart)
     );
+    const transportFee =
+      form.service_mode === 'home_service' ? Math.max(0, Number(form.transport_fee || 0) || 0) : 0;
 
-    return { ...acc, discount, promoPart, diskonPart };
+    return { ...acc, discount, promoPart, diskonPart, transportFee };
   }, [
     form.items,
     form.total_people,
     form.promo_id,
     form.discount_id,
     form.discount_value,
+    form.service_mode,
+    form.transport_fee,
     services,
     discountOptions,
   ]);
@@ -1036,6 +1041,8 @@ export default function PosTransactionCreatePage() {
             ?.discount_type === 'additional'
             ? Number(form.discount_value)
             : undefined,
+        transport_fee:
+          form.service_mode === 'home_service' ? Number(form.transport_fee || 0) || 0 : 0,
         worker_ids: form.worker_ids,
         items: form.items.map((item) => ({
           service_id: Number(item.service_id),
@@ -1064,7 +1071,8 @@ export default function PosTransactionCreatePage() {
     );
   }
 
-  const finalTotal = selectedTotals.subtotal - selectedTotals.discount;
+  const finalTotal =
+    selectedTotals.subtotal - selectedTotals.discount + Number(selectedTotals.transportFee || 0);
   const stepOrder = STEPS.map((s) => s.key);
   const activeIndex = stepOrder.indexOf(activeStepKey);
   const selectedPaymentMethod = paymentMethods.find(
@@ -1260,7 +1268,13 @@ export default function PosTransactionCreatePage() {
                     <button
                       key={option.value}
                       type="button"
-                      onClick={() => setForm((prev) => ({ ...prev, service_mode: option.value }))}
+                      onClick={() =>
+                        setForm((prev) => ({
+                          ...prev,
+                          service_mode: option.value,
+                          transport_fee: option.value === 'home_service' ? prev.transport_fee : '',
+                        }))
+                      }
                       className={`rounded-[14px] border px-3.5 py-3 text-left transition ${
                         active
                           ? 'border-blue-400 bg-blue-50 shadow-[0_0_0_1px_rgba(59,130,246,.25)]'
@@ -1801,6 +1815,22 @@ export default function PosTransactionCreatePage() {
                         />
                       </label>
                     )}
+                    {form.service_mode === 'home_service' && (
+                      <label className="mt-3 block space-y-1.5 text-[12.5px] text-blue-100">
+                        <span className="font-medium">Biaya Transport (opsional)</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={form.transport_fee}
+                          onChange={(e) =>
+                            setForm((prev) => ({ ...prev, transport_fee: e.target.value }))
+                          }
+                          className="w-full rounded-[12px] border border-white/20 bg-white/10 px-3 py-2.5 text-[13px] text-white placeholder:text-blue-100/50 focus:border-white/40 focus:outline-none"
+                          placeholder="Contoh: 25000"
+                        />
+                      </label>
+                    )}
                     <div>
                     <p className="text-[9.5px] font-semibold uppercase tracking-[.14em] text-blue-200/80">
                       Ringkasan biaya
@@ -1827,6 +1857,14 @@ export default function PosTransactionCreatePage() {
                         Rp {selectedTotals.discount.toLocaleString('id-ID')}
                       </span>
                     </p>
+                    {form.service_mode === 'home_service' && (
+                      <p className="mt-1 text-[12.5px] text-blue-100">
+                        Biaya transport:{' '}
+                        <span className="font-sans">
+                          Rp {Number(selectedTotals.transportFee || 0).toLocaleString('id-ID')}
+                        </span>
+                      </p>
+                    )}
                     {selectedTotals.hasGc && (
                       <div className="mt-2 space-y-1 text-[12px] text-blue-100">
                         {selectedTotals.gcRates.map((row, idx) => (

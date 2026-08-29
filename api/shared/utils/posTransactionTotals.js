@@ -93,7 +93,9 @@ export async function recalcPosTransactionMoney(connection, transactionId, { act
   }).discountAmount;
 
   const discount = toMoney(Math.min(subtotal, Math.max(0, promoPart) + Math.max(0, diskonPart)));
-  const finalAmount = subtotal - discount;
+  const isHomeService = String(transaction.service_mode || '') === 'home_service';
+  const transportFee = toMoney(isHomeService ? Number(transaction.transport_fee || 0) : 0);
+  const finalAmount = toMoney(subtotal - discount + transportFee);
   const hasGcPending =
     !pricingFinalizedAt && items.some((row) => isGeneralCleaningCategory(row.category_name));
   const hasMeterPending = transactionHasMeterPending(items);
@@ -152,6 +154,7 @@ export async function recalcPosTransactionMoney(connection, transactionId, { act
     `UPDATE tr_transactions
      SET subtotal_amount = ?,
          discount_amount = ?,
+         transport_fee = ?,
          final_amount = ?,
          group_message_template = ?,
          customer_message_template = ?,
@@ -161,6 +164,7 @@ export async function recalcPosTransactionMoney(connection, transactionId, { act
     [
       toMoney(subtotal),
       toMoney(discount),
+      transportFee,
       toMoney(finalAmount),
       groupMessageTemplate,
       customerMessageTemplate,
@@ -172,6 +176,7 @@ export async function recalcPosTransactionMoney(connection, transactionId, { act
   return {
     subtotal: toMoney(subtotal),
     discount: toMoney(discount),
+    transportFee,
     finalAmount: toMoney(finalAmount),
     items,
     transaction,

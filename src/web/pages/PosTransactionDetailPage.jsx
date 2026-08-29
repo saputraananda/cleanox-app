@@ -174,6 +174,8 @@ export default function PosTransactionDetailPage() {
     discount_value: '',
   });
   const [offersSaving, setOffersSaving] = useState(false);
+  const [transportFeeInput, setTransportFeeInput] = useState('');
+  const [transportSaving, setTransportSaving] = useState(false);
 
   const openPhotoPreview = (src, title) => {
     if (!src) return;
@@ -346,6 +348,11 @@ export default function PosTransactionDetailPage() {
             ? String(tx.discount_value_snapshot)
             : '',
       });
+      setTransportFeeInput(
+        tx.transport_fee == null || tx.transport_fee === ''
+          ? ''
+          : String(Number(tx.transport_fee))
+      );
       await Promise.all([
         refreshEvidencePreviews({
           assignments: nextDetail.assignments || [],
@@ -619,6 +626,22 @@ export default function PosTransactionDetailPage() {
       setError(err.response?.data?.message || 'Gagal menyimpan promo & diskon');
     } finally {
       setOffersSaving(false);
+    }
+  };
+
+  const handleSaveTransportFee = async () => {
+    if (transportSaving) return;
+    setTransportSaving(true);
+    setError('');
+    try {
+      await api.patch(`/pos-transactions/${id}/transport-fee`, {
+        transport_fee: transportFeeInput === '' ? 0 : Number(transportFeeInput),
+      });
+      await loadData();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Gagal menyimpan biaya transport');
+    } finally {
+      setTransportSaving(false);
     }
   };
 
@@ -1224,6 +1247,41 @@ export default function PosTransactionDetailPage() {
                   >
                     {offersSaving ? 'Menyimpan...' : 'Simpan promo & diskon'}
                   </button>
+                )}
+              </div>
+              <div className="rounded-xl border border-slate-100 bg-slate-50/80 p-3 space-y-2">
+                <p className="text-xs uppercase tracking-wide text-slate-400">Biaya Transport</p>
+                {String(transaction.service_mode || '') === 'home_service' ? (
+                  canEditOffers ? (
+                    <div className="flex flex-wrap items-end gap-2">
+                      <label className="block min-w-[180px] flex-1 space-y-1">
+                        <span className="text-xs text-slate-500">Nominal (opsional)</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={transportFeeInput}
+                          onChange={(e) => setTransportFeeInput(e.target.value)}
+                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900"
+                          placeholder="Contoh: 25000"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        disabled={transportSaving}
+                        onClick={handleSaveTransportFee}
+                        className="inline-flex h-10 items-center rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white disabled:opacity-60"
+                      >
+                        {transportSaving ? 'Menyimpan...' : 'Simpan biaya transport'}
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="font-semibold text-slate-900">
+                      {formatCurrency(transaction.transport_fee || 0)}
+                    </p>
+                  )
+                ) : (
+                  <p className="text-sm text-slate-500">Tidak berlaku (Take Home)</p>
                 )}
               </div>
             </div>

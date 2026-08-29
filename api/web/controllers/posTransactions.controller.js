@@ -870,6 +870,7 @@ export const getPosTransactionDetail = async (req, res) => {
         payment_method,
         subtotal_amount: Number(transaction.subtotal_amount || 0),
         discount_amount: Number(transaction.discount_amount || 0),
+        transport_fee: Number(transaction.transport_fee || 0),
         promo_id: transaction.promo_id == null ? null : Number(transaction.promo_id),
         promo_name_snapshot: transaction.promo_name_snapshot || null,
         promo_type_snapshot: transaction.promo_type_snapshot || null,
@@ -1291,6 +1292,79 @@ export const updatePosTransactionHeaderOffers = async (req, res) => {
   }
 };
 
+export const updatePosTransactionTransportFee = async (req, res) => {
+  const transactionId = Number(req.params.id);
+  if (!transactionId) {
+    return res.status(400).json({ message: 'ID transaksi tidak valid' });
+  }
+
+  const connection = await cleanoxPool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const [[transaction]] = await connection.query(
+      `SELECT *
+       FROM tr_transactions
+       WHERE id = ?
+       LIMIT 1
+       FOR UPDATE`,
+      [transactionId]
+    );
+    if (!transaction) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Transaksi POS tidak ditemukan' });
+    }
+    if (transaction.status === 'Cancelled') {
+      await connection.rollback();
+      return res.status(409).json({ message: 'Transaksi yang dibatalkan tidak dapat diubah' });
+    }
+    if (String(transaction.service_mode || '') !== 'home_service') {
+      await connection.rollback();
+      return res.status(400).json({ message: 'Biaya transport hanya untuk Home Service' });
+    }
+
+    const raw = req.body?.transport_fee;
+    let transportFee = 0;
+    if (raw != null && raw !== '') {
+      const parsed = Number(raw);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        await connection.rollback();
+        return res.status(400).json({ message: 'Biaya transport tidak boleh negatif' });
+      }
+      transportFee = toMoney(parsed);
+    }
+
+    await connection.query(
+      `UPDATE tr_transactions
+       SET transport_fee = ?,
+           updated_by = ?,
+           updated_at = NOW()
+       WHERE id = ?`,
+      [transportFee, req.user?.id || null, transactionId]
+    );
+
+    const totals = await recalcPosTransactionMoney(connection, transactionId, {
+      actorId: req.user?.id || null,
+    });
+
+    await connection.commit();
+
+    return res.json({
+      message: 'Biaya transport diperbarui',
+      transport_fee: totals.transportFee,
+      subtotal_amount: totals.subtotal,
+      discount_amount: totals.discount,
+      final_amount: totals.finalAmount,
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[pos/updatePosTransactionTransportFee]', error.message);
+    return res.status(500).json({ message: 'Gagal memperbarui biaya transport' });
+  } finally {
+    connection.release();
+  }
+};
+
 export const uploadPosPaymentProof = async (req, res) => {
   const transactionId = Number(req.params.id);
   if (!transactionId) {
@@ -1423,6 +1497,7 @@ export const createPosTransaction = async (req, res) => {
     promo_id: promoIdRaw,
     discount_id: discountIdRaw,
     discount_value: discountValueRaw,
+    transport_fee: transportFeeRaw,
   } = req.body;
 
   const isHistoryEntry = parseTruthyFlag(req.body?.is_history_entry);
@@ -1714,7 +1789,18 @@ export const createPosTransaction = async (req, res) => {
       promoValue: headerDiscount?.discount_value ?? null,
     });
     const discount = toMoney(Math.min(subtotal, Math.max(0, promoPart) + Math.max(0, diskonPart)));
-    const finalAmount = subtotal - discount;
+    let transportFee = 0;
+    if (service_mode === 'home_service') {
+      if (transportFeeRaw != null && transportFeeRaw !== '') {
+        const parsedTransport = Number(transportFeeRaw);
+        if (!Number.isFinite(parsedTransport) || parsedTransport < 0) {
+          await connection.rollback();
+          return res.status(400).json({ message: 'Biaya transport tidak boleh negatif' });
+        }
+        transportFee = toMoney(parsedTransport);
+      }
+    }
+    const finalAmount = toMoney(subtotal - discount + transportFee);
     const transactionNo = buildTransactionNo();
     const resolvedServiceDate = isHistoryEntry ? historyStarted.mysql : service_date;
 
@@ -1810,12 +1896,12 @@ export const createPosTransaction = async (req, res) => {
     const [result] = await connection.query(
       `INSERT INTO tr_transactions
         (transaction_no, customer_id, customer_name, customer_phone, customer_address, service_date, total_people,
-         subtotal_amount, discount_amount, promo_id, promo_name_snapshot, promo_type_snapshot, promo_value_snapshot,
+         subtotal_amount, discount_amount, transport_fee, promo_id, promo_name_snapshot, promo_type_snapshot, promo_value_snapshot,
          discount_id, discount_name_snapshot, discount_type_snapshot, discount_value_snapshot,
          final_amount, billing_hours, pricing_finalized_at, notes,
          group_message_template, customer_message_template, service_mode, is_history_entry,
          payment_method_id, payment_status, status, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, 'belum_lunas', ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, 'belum_lunas', ?, ?, ?)`,
       [
         transactionNo,
         customer.id,
@@ -1826,6 +1912,7 @@ export const createPosTransaction = async (req, res) => {
         totalPeopleCount,
         toMoney(subtotal),
         toMoney(discount),
+        transportFee,
         headerPromo ? Number(headerPromo.id) : null,
         headerPromo?.name || null,
         headerPromo?.promo_type || null,

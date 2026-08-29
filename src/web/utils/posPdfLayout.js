@@ -398,7 +398,8 @@ export function drawTotalsBox(
   const boxY = y + 4;
   const pending = pendingGc || pendingMeter;
   const badgeExtraH = showPaymentBadge && !pending ? 10 : 0;
-  const boxH = pending ? 28 : 36 + badgeExtraH;
+  const transportFee = Number(transaction.transport_fee || 0);
+  const boxH = pending ? 36 : 43 + badgeExtraH;
   const pendingText =
     pendingGc && pendingMeter
       ? PENDING_PRICE_TOTAL_TEXT
@@ -411,15 +412,23 @@ export function drawTotalsBox(
   doc.roundedRect(boxX, boxY, boxW, boxH, 2, 2, 'FD');
 
   if (pending) {
+    let ty = boxY + 7;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(51, 65, 85);
+    doc.text('Biaya Transport', boxX + 4, ty);
+    doc.text(formatMoney(transportFee), boxX + boxW - 4, ty, { align: 'right' });
+    ty += 8;
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
     doc.setTextColor(...PDF_HEADER_RGB);
     const pendingLines = wrap(doc, pendingText, boxW - 8, 9);
-    doc.text(pendingLines, boxX + 4, boxY + 12);
+    doc.text(pendingLines, boxX + 4, ty);
   } else {
     const totals = [
       ['Subtotal', formatMoney(transaction.subtotal_amount)],
       ['Diskon', formatMoney(transaction.discount_amount)],
+      ['Biaya Transport', formatMoney(transportFee)],
       ['TOTAL', formatMoney(transaction.final_amount)],
     ];
     let ty = boxY + 8;

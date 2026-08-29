@@ -336,6 +336,12 @@ export async function downloadPosOrderFormPdf({ transaction, items = [], logoDat
   doc.setTextColor(51, 65, 85);
 
   if (pendingGc) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(51, 65, 85);
+    doc.text('Biaya Transport', summaryLabelX, y, { align: 'right' });
+    doc.text(formatMoney(transaction.transport_fee || 0), summaryValueX, y, { align: 'right' });
+    y += 6;
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(...PDF_HEADER_RGB);
     const pendingLines = wrap(doc, PENDING_TOTAL_TEXT, 48, 9);
@@ -345,6 +351,7 @@ export async function downloadPosOrderFormPdf({ transaction, items = [], logoDat
     const rows = [
       ['Subtotal', formatMoney(transaction.subtotal_amount)],
       ['Diskon', formatMoney(transaction.discount_amount)],
+      ['Biaya Transport', formatMoney(transaction.transport_fee || 0)],
       ['TOTAL', formatMoney(transaction.final_amount)],
     ];
     for (const [label, value] of rows) {
