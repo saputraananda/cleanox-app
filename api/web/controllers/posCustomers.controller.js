@@ -4,6 +4,12 @@ import {
   resolveLegacyAddress,
 } from '../../shared/utils/posCustomerAddress.js';
 import { assertValidWaschenReferralEmployeeName } from '../../shared/utils/waschenReferralEmployee.js';
+import {
+  assertValidWaschenReferralBranch,
+  getWaschenReferralBranchEmployeeIds,
+  isEmployeeInWaschenReferralBranch,
+  listWaschenReferralBranches,
+} from '../../shared/config/waschenReferralBranches.js';
 
 export function buildCustomerAddressText({
   street_detail,
@@ -98,6 +104,7 @@ function toNullableDate(value) {
 
 async function resolveWaschenReferralEmployee(
   referralSourceId,
+  referralWaschenBranchRaw,
   referralEmployeeId,
   referralEmployeeNameRaw
 ) {
@@ -123,14 +130,22 @@ async function resolveWaschenReferralEmployee(
       referral_source_id: referralSourceId,
       referral_employee_id: null,
       referral_employee_name: null,
+      referral_waschen_branch: null,
     };
   }
 
+  const branch = assertValidWaschenReferralBranch(referralWaschenBranchRaw);
   const manualNameRaw =
     referralEmployeeNameRaw == null ? '' : String(referralEmployeeNameRaw).trim();
   const hasManualName = manualNameRaw.length > 0;
 
   if (referralEmployeeId) {
+    if (!isEmployeeInWaschenReferralBranch(referralEmployeeId, branch.code)) {
+      throw Object.assign(new Error('Pegawai Waschen tidak terdaftar di cabang terpilih'), {
+        status: 400,
+      });
+    }
+
     const [empRows] = await aloraPool.query(
       `SELECT employee_id, full_name
        FROM mst_employee
@@ -151,6 +166,7 @@ async function resolveWaschenReferralEmployee(
       referral_source_id: referralSourceId,
       referral_employee_id: Number(empRows[0].employee_id),
       referral_employee_name: empRows[0].full_name || null,
+      referral_waschen_branch: branch.code,
     };
   }
 
@@ -160,6 +176,7 @@ async function resolveWaschenReferralEmployee(
       referral_source_id: referralSourceId,
       referral_employee_id: null,
       referral_employee_name: manualName,
+      referral_waschen_branch: branch.code,
     };
   }
 
@@ -190,6 +207,8 @@ export async function normalizeCustomerPayload(body) {
   const referral_employee_id = toNullableInt(body.referral_employee_id);
   const referral_employee_name_raw =
     body.referral_employee_name == null ? null : String(body.referral_employee_name);
+  const referral_waschen_branch_raw =
+    body.referral_waschen_branch == null ? null : String(body.referral_waschen_branch);
 
   const wilayah = await resolveWilayahNames({
     province_id,
@@ -200,6 +219,7 @@ export async function normalizeCustomerPayload(body) {
 
   const referral = await resolveWaschenReferralEmployee(
     referral_source_id,
+    referral_waschen_branch_raw,
     referral_employee_id,
     referral_employee_name_raw
   );
@@ -226,6 +246,7 @@ export async function normalizeCustomerPayload(body) {
     referral_source_id: referral.referral_source_id,
     referral_employee_id: referral.referral_employee_id,
     referral_employee_name: referral.referral_employee_name,
+    referral_waschen_branch: referral.referral_waschen_branch,
     tier,
     status,
   };
@@ -247,6 +268,7 @@ const CUSTOMER_SELECT = `
   c.referral_source_id,
   c.referral_employee_id,
   c.referral_employee_name,
+  c.referral_waschen_branch,
   c.tier,
   c.status,
   c.created_at,
@@ -273,7 +295,7 @@ const CUSTOMER_JOINS = `
 const CUSTOMER_GROUP = `
   c.id, c.name, c.phone, c.address, c.birth_date, c.province_id, c.regency_id, c.district_id,
   c.village_id, c.house_number, c.street_detail, c.address_note, c.referral_source_id,
-  c.referral_employee_id, c.referral_employee_name, c.tier,
+  c.referral_employee_id, c.referral_employee_name, c.referral_waschen_branch, c.tier,
   c.status, c.created_at, c.updated_at, p.name, r.name, d.name, v.name, rs.code, rs.name
 `;
 
@@ -395,16 +417,42 @@ function mapCustomerRow(row) {
   };
 }
 
-export const getWaschenEmployees = async (_req, res) => {
+export const getWaschenReferralBranches = async (_req, res) => {
   try {
+    return res.json({ branches: listWaschenReferralBranches() });
+  } catch (error) {
+    console.error('[posCustomers/getWaschenReferralBranches]', error.message);
+    return res.status(500).json({ message: 'Gagal memuat cabang Waschen' });
+  }
+};
+
+export const getWaschenEmployees = async (req, res) => {
+  try {
+    const branch = String(req.query.branch || '').trim();
+    if (!branch) {
+      return res.status(400).json({ message: 'Cabang Waschen wajib dipilih' });
+    }
+
+    const branchConfig = assertValidWaschenReferralBranch(branch);
+    const employeeIds = getWaschenReferralBranchEmployeeIds(branch);
+
+    if (!employeeIds.length) {
+      return res.json({ branch: branchConfig.code, employees: [] });
+    }
+
+    const placeholders = employeeIds.map(() => '?').join(', ');
     const [rows] = await aloraPool.query(
       `SELECT employee_id, full_name
        FROM mst_employee
        WHERE company_id = 5
          AND exit_date IS NULL
-       ORDER BY full_name ASC`
+         AND employee_id IN (${placeholders})
+       ORDER BY full_name ASC`,
+      employeeIds
     );
+
     return res.json({
+      branch: branchConfig.code,
       employees: rows.map((row) => ({
         employee_id: Number(row.employee_id),
         full_name: row.full_name,
@@ -412,7 +460,9 @@ export const getWaschenEmployees = async (_req, res) => {
     });
   } catch (error) {
     console.error('[posCustomers/getWaschenEmployees]', error.message);
-    return res.status(500).json({ message: 'Gagal memuat pegawai Waschen' });
+    return res.status(error.status || 500).json({
+      message: error.message || 'Gagal memuat pegawai Waschen',
+    });
   }
 };
 
@@ -662,8 +712,8 @@ export const createPosCustomer = async (req, res) => {
       `INSERT INTO mst_customers
         (name, phone, address, birth_date, province_id, regency_id, district_id, village_id,
          house_number, street_detail, address_note, referral_source_id, referral_employee_id,
-         referral_employee_name, tier, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         referral_employee_name, referral_waschen_branch, tier, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         payload.name,
         payload.phone,
@@ -679,6 +729,7 @@ export const createPosCustomer = async (req, res) => {
         payload.referral_source_id,
         payload.referral_employee_id,
         payload.referral_employee_name,
+        payload.referral_waschen_branch,
         payload.tier,
         payload.status,
       ]
@@ -722,7 +773,7 @@ export const updatePosCustomer = async (req, res) => {
        SET name = ?, phone = ?, address = ?, birth_date = ?, province_id = ?, regency_id = ?,
            district_id = ?, village_id = ?, house_number = ?, street_detail = ?, address_note = ?,
            referral_source_id = ?, referral_employee_id = ?, referral_employee_name = ?,
-           tier = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+           referral_waschen_branch = ?, tier = ?, status = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [
         payload.name,
@@ -739,6 +790,7 @@ export const updatePosCustomer = async (req, res) => {
         payload.referral_source_id,
         payload.referral_employee_id,
         payload.referral_employee_name,
+        payload.referral_waschen_branch,
         payload.tier,
         payload.status,
         id,

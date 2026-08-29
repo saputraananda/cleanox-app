@@ -15,6 +15,7 @@ export const emptyCustomerForm = {
   street_detail: '',
   address_note: '',
   referral_source_id: '',
+  referral_waschen_branch: '',
   referral_employee_id: '',
   referral_employee_name: '',
   tier: '',
@@ -41,6 +42,7 @@ export function customerToForm(row = {}) {
     street_detail: row.street_detail || '',
     address_note: row.address_note || '',
     referral_source_id: row.referral_source_id ? String(row.referral_source_id) : '',
+    referral_waschen_branch: row.referral_waschen_branch ? String(row.referral_waschen_branch) : '',
     referral_employee_id: hasManualEmployee
       ? WASCHEN_EMPLOYEE_OTHER_VALUE
       : row.referral_employee_id
@@ -67,6 +69,7 @@ export function formToPayload(form) {
     street_detail: form.street_detail.trim() || null,
     address_note: form.address_note.trim() || null,
     referral_source_id: form.referral_source_id ? Number(form.referral_source_id) : null,
+    referral_waschen_branch: form.referral_waschen_branch ? String(form.referral_waschen_branch) : null,
     referral_employee_id: isOtherEmployee
       ? null
       : form.referral_employee_id
@@ -89,8 +92,10 @@ export default function CustomerFormFields({
   const [districts, setDistricts] = useState([]);
   const [villages, setVillages] = useState([]);
   const [referralSources, setReferralSources] = useState([]);
+  const [waschenBranches, setWaschenBranches] = useState([]);
   const [waschenEmployees, setWaschenEmployees] = useState([]);
   const [loadingWilayah, setLoadingWilayah] = useState(false);
+  const [loadingWaschenEmployees, setLoadingWaschenEmployees] = useState(false);
 
   const selectedReferral = referralSources.find(
     (row) => Number(row.id) === Number(form.referral_source_id)
@@ -114,17 +119,42 @@ export default function CustomerFormFields({
   }, []);
 
   useEffect(() => {
-    if (!isWaschenReferral) return;
-    const loadEmployees = async () => {
+    if (!isWaschenReferral) {
+      setWaschenBranches([]);
+      return;
+    }
+    const loadBranches = async () => {
       try {
-        const { data } = await api.get('/pos-customers/waschen-employees');
+        const { data } = await api.get('/pos-customers/waschen-referral-branches');
+        setWaschenBranches(data.branches || []);
+      } catch (err) {
+        console.error('[CustomerFormFields/waschenBranches]', err.message);
+      }
+    };
+    loadBranches();
+  }, [isWaschenReferral]);
+
+  useEffect(() => {
+    if (!isWaschenReferral || !form.referral_waschen_branch) {
+      setWaschenEmployees([]);
+      return;
+    }
+    const loadEmployees = async () => {
+      setLoadingWaschenEmployees(true);
+      try {
+        const { data } = await api.get('/pos-customers/waschen-employees', {
+          params: { branch: form.referral_waschen_branch },
+        });
         setWaschenEmployees(data.employees || []);
       } catch (err) {
         console.error('[CustomerFormFields/waschenEmployees]', err.message);
+        setWaschenEmployees([]);
+      } finally {
+        setLoadingWaschenEmployees(false);
       }
     };
     loadEmployees();
-  }, [isWaschenReferral]);
+  }, [isWaschenReferral, form.referral_waschen_branch]);
 
   useEffect(() => {
     const loadRegencies = async () => {
@@ -202,9 +232,14 @@ export default function CustomerFormFields({
         const source = referralSources.find((row) => Number(row.id) === Number(value));
         const waschen = String(source?.code || '').toLowerCase() === 'waschen';
         if (!waschen) {
+          next.referral_waschen_branch = '';
           next.referral_employee_id = '';
           next.referral_employee_name = '';
         }
+      }
+      if (key === 'referral_waschen_branch') {
+        next.referral_employee_id = '';
+        next.referral_employee_name = '';
       }
       if (key === 'referral_employee_id') {
         if (value !== WASCHEN_EMPLOYEE_OTHER_VALUE) {
@@ -346,14 +381,33 @@ export default function CustomerFormFields({
         {isWaschenReferral && (
           <>
             <label className="block space-y-1.5 text-[12.5px] text-slate-600">
+              <span className="font-medium">Cabang Waschen</span>
+              <select
+                required
+                value={form.referral_waschen_branch}
+                onChange={(e) => updateField('referral_waschen_branch', e.target.value)}
+                className={inputClass}
+              >
+                <option value="">Pilih cabang</option>
+                {waschenBranches.map((row) => (
+                  <option key={row.code} value={row.code}>
+                    {row.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block space-y-1.5 text-[12.5px] text-slate-600">
               <span className="font-medium">Pegawai Waschen</span>
               <select
                 required
                 value={form.referral_employee_id}
                 onChange={(e) => updateField('referral_employee_id', e.target.value)}
+                disabled={!form.referral_waschen_branch}
                 className={inputClass}
               >
-                <option value="">Pilih pegawai</option>
+                <option value="">
+                  {form.referral_waschen_branch ? 'Pilih pegawai' : 'Pilih cabang terlebih dahulu'}
+                </option>
                 {waschenEmployees.map((row) => (
                   <option key={row.employee_id} value={row.employee_id}>
                     {row.full_name}
@@ -362,6 +416,9 @@ export default function CustomerFormFields({
                 <option value={WASCHEN_EMPLOYEE_OTHER_VALUE}>Lainnya</option>
               </select>
             </label>
+            {loadingWaschenEmployees && (
+              <p className="text-[11.5px] text-slate-400 md:col-span-2">Memuat pegawai cabang...</p>
+            )}
             {form.referral_employee_id === WASCHEN_EMPLOYEE_OTHER_VALUE && (
               <label className="block space-y-1.5 text-[12.5px] text-slate-600">
                 <span className="font-medium">Nama Pegawai</span>

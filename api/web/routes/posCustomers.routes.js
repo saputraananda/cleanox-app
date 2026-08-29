@@ -6,6 +6,7 @@ import {
   getPosCustomerDetail,
   getPosCustomers,
   getWaschenEmployees,
+  getWaschenReferralBranches,
   patchPosCustomerAddress,
   updatePosCustomer,
 } from '../controllers/posCustomers.controller.js';
@@ -31,6 +32,7 @@ const authorizePosAccess = (req, res, next) => {
 router.use(authenticate);
 router.use(authorizePosAccess);
 
+router.get('/waschen-referral-branches', getWaschenReferralBranches);
 router.get('/waschen-employees', getWaschenEmployees);
 router.post('/ensure-legacy', ensureLegacyCustomer);
 router.get('/', getPosCustomers);
