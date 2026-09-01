@@ -1345,16 +1345,6 @@ export const uploadAfterPhoto = async (req, res) => {
       [photo.file, photo.path, assignmentId]
     );
 
-    const [[updatedAssignment]] = await connection.query(
-      `SELECT after_photo_at FROM tr_worker_assignments WHERE id = ?`,
-      [assignmentId]
-    );
-
-    await finalizeGeneralCleaningPricing(connection, row.transaction_id, {
-      actorId: employeeId,
-      endAfterPhotoAt: updatedAssignment?.after_photo_at || new Date(),
-    });
-
     await connection.commit();
 
     const photosMap = await listAssignmentPhotos([assignmentId]);
@@ -1830,9 +1820,21 @@ export const completeTask = async (req, res) => {
 
     await syncTransactionStatusFromAssignments(connection, row.transaction_id);
 
-    await finalizeGeneralCleaningPricing(connection, row.transaction_id, {
-      actorId: employeeId,
-    });
+    const [activeAssignments] = await connection.query(
+      `SELECT assignment_status
+       FROM tr_worker_assignments
+       WHERE transaction_id = ?
+         AND assignment_status NOT IN ('Cancelled', 'Rejected', 'Replaced')`,
+      [row.transaction_id]
+    );
+    const allActiveDone =
+      activeAssignments.length > 0 &&
+      activeAssignments.every((assignment) => assignment.assignment_status === 'Done');
+    if (allActiveDone) {
+      await finalizeGeneralCleaningPricing(connection, row.transaction_id, {
+        actorId: employeeId,
+      });
+    }
 
     await connection.commit();
     return res.json({ message: 'Pengerjaan selesai — Done' });

@@ -53,27 +53,6 @@ export function resolveGcJobWindow(assignments = []) {
   return { startedAt, completedAt };
 }
 
-/**
- * Job window for finalize-on-first-after:
- * start = earliest started_at (klik Mulai), end = after_photo_at pemicu.
- */
-export function resolveGcJobWindowFromAfter(assignments = [], { endAfterPhotoAt } = {}) {
-  let startedAt = null;
-
-  for (const row of assignments || []) {
-    const start = toDate(row.started_at);
-    if (!start) continue;
-    if (!startedAt || start < startedAt) startedAt = start;
-  }
-
-  const completedAt = toDate(endAfterPhotoAt);
-  if (!startedAt || !completedAt) {
-    throw new Error('Durasi pengerjaan tidak valid');
-  }
-
-  return { startedAt, completedAt };
-}
-
 export function calculateGcBillingHours({ startedAt, completedAt }) {
   const start = toDate(startedAt);
   const end = toDate(completedAt);
@@ -222,7 +201,9 @@ export async function finalizeGeneralCleaningPricingFromWindow(
   }).discountAmount;
   discount = toMoney(Math.min(subtotal, Math.max(0, discount) + Math.max(0, diskonPart)));
 
-  const finalAmount = subtotal - discount;
+  const isHomeService = String(tx.service_mode || '') === 'home_service';
+  const transportFee = toMoney(isHomeService ? Number(tx.transport_fee || 0) : 0);
+  const finalAmount = toMoney(subtotal - discount + transportFee);
 
   const [workerRows] = await connection.query(
     `SELECT employee_id, employee_name
@@ -309,15 +290,14 @@ export async function finalizeGeneralCleaningPricingFromWindow(
 }
 
 /**
- * Finalize GC pricing (once).
- * - With endAfterPhotoAt: window = earliest started_at → after time (first after path).
- * - Without: fallback Done window (completeTask path).
+ * Finalize GC pricing (once) from Done assignment window:
+ * earliest started_at → latest completed_at among Done workers.
  * Must run inside an open DB transaction; throws on invalid duration (caller should rollback).
  */
 export async function finalizeGeneralCleaningPricing(
   connection,
   transactionId,
-  { actorId = null, endAfterPhotoAt = null } = {}
+  { actorId = null } = {}
 ) {
   if (!transactionId) return { finalized: false };
 
@@ -344,15 +324,13 @@ export async function finalizeGeneralCleaningPricing(
   }
 
   const [assignments] = await connection.query(
-    `SELECT id, employee_id, employee_name, assignment_status, started_at, completed_at, after_photo_at
+    `SELECT id, employee_id, employee_name, assignment_status, started_at, completed_at
      FROM tr_worker_assignments
      WHERE transaction_id = ?`,
     [transactionId]
   );
 
-  const window = endAfterPhotoAt
-    ? resolveGcJobWindowFromAfter(assignments, { endAfterPhotoAt })
-    : resolveGcJobWindow(assignments);
+  const window = resolveGcJobWindow(assignments);
 
   return finalizeGeneralCleaningPricingFromWindow(connection, transactionId, {
     startedAt: window.startedAt,
