@@ -36,10 +36,10 @@ const NAV_TREE = [
     roles: ['admin', 'management'],
     children: [
       { label: 'Dashboard', icon: LayoutDashboard, to: '/cleanox-only/dashboard' },
+      { label: 'Calendar', icon: CalendarDays, to: '/cleanox-only/calendar' },
       { label: 'Tambah Transaksi', icon: PlusCircle, to: '/cleanox-only/transactions/new' },
       { label: 'Input Transaksi History', icon: ClipboardPen, to: '/cleanox-only/transactions/history/new' },
       { label: 'Riwayat Transaksi', icon: History, to: '/cleanox-only/transactions' },
-      { label: 'Calendar', icon: CalendarDays, to: '/cleanox-only/calendar' },
       { label: 'Customer', icon: Users, to: '/cleanox-only/customers' },
       { label: 'Referral Waschen', icon: Handshake, to: '/cleanox-only/waschen-referral' },
       { label: 'Prices', icon: Tag, to: '/cleanox-only/prices' },

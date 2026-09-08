@@ -7,10 +7,12 @@ import cleanoxPool, { aloraPool } from '../../shared/db/cleanox.js';
 import { buildCustomerOrderMessage } from '../../shared/utils/posCustomerOrderMessage.js';
 import { buildGroupOrderMessage } from '../../shared/utils/posGroupOrderMessage.js';
 import {
+  applyAdminGcBillingHours,
   calculateGcBillingHours,
   finalizeGeneralCleaningPricingFromWindow,
   isGeneralCleaningCategory,
   parseGcCrewSizeFromServiceName,
+  transactionHasGeneralCleaning,
 } from '../../shared/utils/posGeneralCleaningBilling.js';
 import { createPosTracking } from '../../shared/utils/posTracking.js';
 import {
@@ -568,8 +570,8 @@ export const getPosSummary = async (_req, res) => {
     const [summaryRows] = await cleanoxPool.query(
       `SELECT
         COUNT(*) AS total_transactions,
-        SUM(CASE WHEN status IN ('Draft', 'Waiting_Confirmation', 'Belum Lunas') THEN 1 ELSE 0 END) AS incoming_transactions,
-        SUM(CASE WHEN status IN ('Assigned', 'Scheduled', 'In_Progress') THEN 1 ELSE 0 END) AS active_transactions,
+        SUM(CASE WHEN status = 'Scheduled' THEN 1 ELSE 0 END) AS incoming_transactions,
+        SUM(CASE WHEN status = 'In_Progress' THEN 1 ELSE 0 END) AS active_transactions,
         SUM(CASE WHEN status IN ('Completed', 'Lunas') THEN 1 ELSE 0 END) AS completed_transactions,
         COALESCE(SUM(final_amount), 0) AS total_revenue
       FROM v_transactions_unified`
@@ -598,9 +600,22 @@ export const getPosSummary = async (_req, res) => {
 export const getPosTransactions = async (req, res) => {
   const search = String(req.query.search || '').trim();
   const status = String(req.query.status || '').trim();
+  const dateFrom = String(req.query.date_from || '').trim();
+  const dateTo = String(req.query.date_to || '').trim();
   const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
   const pageSize = Math.min(50, Math.max(1, Number.parseInt(req.query.page_size, 10) || 10));
   const offset = (page - 1) * pageSize;
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+
+  if (dateFrom && !datePattern.test(dateFrom)) {
+    return res.status(400).json({ message: 'Format tanggal layanan tidak valid (YYYY-MM-DD)' });
+  }
+  if (dateTo && !datePattern.test(dateTo)) {
+    return res.status(400).json({ message: 'Format tanggal layanan tidak valid (YYYY-MM-DD)' });
+  }
+  if (dateFrom && dateTo && dateFrom > dateTo) {
+    return res.status(400).json({ message: 'Tanggal mulai tidak boleh setelah tanggal akhir' });
+  }
 
   try {
     let fromSql = `
@@ -620,6 +635,16 @@ export const getPosTransactions = async (req, res) => {
     if (status) {
       fromSql += ` AND v.status = ?`;
       filterParams.push(status);
+    }
+
+    if (dateFrom) {
+      fromSql += ` AND DATE(v.service_date) >= ?`;
+      filterParams.push(dateFrom);
+    }
+
+    if (dateTo) {
+      fromSql += ` AND DATE(v.service_date) <= ?`;
+      filterParams.push(dateTo);
     }
 
     let sql = `
@@ -1020,34 +1045,45 @@ export const updatePosTransactionPayment = async (req, res) => {
     return res.status(400).json({ message: 'payment_method_id atau payment_status wajib diisi' });
   }
 
+  const connection = await cleanoxPool.getConnection();
   try {
-    const [[transaction]] = await cleanoxPool.query(
+    await connection.beginTransaction();
+
+    const [[transaction]] = await connection.query(
       `SELECT id, status, payment_method_id, payment_status
        FROM tr_transactions
        WHERE id = ?
-       LIMIT 1`,
+       LIMIT 1
+       FOR UPDATE`,
       [transactionId]
     );
     if (!transaction) {
+      await connection.rollback();
       return res.status(404).json({ message: 'Transaksi POS tidak ditemukan' });
     }
     if (transaction.status === 'Cancelled') {
-      return res.status(409).json({ message: 'Transaksi yang dibatalkan tidak dapat diubah pembayarannya' });
+      await connection.rollback();
+      return res.status(409).json({
+        message: 'Transaksi yang dibatalkan tidak dapat diubah pembayarannya',
+      });
     }
 
-    let nextMethodId = transaction.payment_method_id == null ? null : Number(transaction.payment_method_id);
-    let nextStatus = String(transaction.payment_status || 'belum_lunas');
+    let nextMethodId =
+      transaction.payment_method_id == null ? null : Number(transaction.payment_method_id);
+    let nextPaymentStatus = String(transaction.payment_status || 'belum_lunas');
 
     if (hasMethod) {
       const methodId = Number(req.body.payment_method_id);
       if (!methodId) {
+        await connection.rollback();
         return res.status(400).json({ message: 'Metode pembayaran tidak valid' });
       }
-      const [[methodRow]] = await cleanoxPool.query(
+      const [[methodRow]] = await connection.query(
         `SELECT id FROM mst_payment_method WHERE id = ? AND is_active = 1 LIMIT 1`,
         [methodId]
       );
       if (!methodRow) {
+        await connection.rollback();
         return res.status(400).json({ message: 'Metode pembayaran tidak valid atau nonaktif' });
       }
       nextMethodId = methodId;
@@ -1056,47 +1092,66 @@ export const updatePosTransactionPayment = async (req, res) => {
     if (hasStatus) {
       const status = String(req.body.payment_status || '').trim();
       if (!PAYMENT_STATUSES.has(status)) {
-        return res.status(400).json({ message: 'Status pembayaran wajib belum_lunas atau lunas' });
+        await connection.rollback();
+        return res.status(400).json({
+          message: 'Status pembayaran wajib belum_lunas atau lunas',
+        });
       }
-      nextStatus = status;
+      nextPaymentStatus = status;
     }
 
-    if (nextStatus === 'lunas') {
-      const [[countRow]] = await cleanoxPool.query(
+    if (nextPaymentStatus === 'lunas') {
+      const [[countRow]] = await connection.query(
         `SELECT COUNT(*) AS total FROM tr_transaction_payment_proofs WHERE transaction_id = ?`,
         [transactionId]
       );
       if (Number(countRow?.total || 0) < 1) {
+        await connection.rollback();
         return res.status(400).json({
           message: 'Unggah bukti pembayaran terlebih dahulu sebelum menandai lunas',
         });
       }
     }
 
-    await cleanoxPool.query(
+    await connection.query(
       `UPDATE tr_transactions
        SET payment_method_id = ?, payment_status = ?, updated_by = ?, updated_at = NOW()
        WHERE id = ?`,
-      [nextMethodId, nextStatus, req.user?.id || null, transactionId]
+      [nextMethodId, nextPaymentStatus, req.user?.id || null, transactionId]
     );
 
-    const [[method]] = await cleanoxPool.query(
-      `SELECT id, \`group\` AS method_group, code, name, label
-       FROM mst_payment_method
-       WHERE id = ?
-       LIMIT 1`,
-      [nextMethodId]
+    await syncTransactionStatusFromAssignments(connection, transactionId);
+
+    const [[method]] = nextMethodId
+      ? await connection.query(
+          `SELECT id, \`group\` AS method_group, code, name, label
+           FROM mst_payment_method
+           WHERE id = ?
+           LIMIT 1`,
+          [nextMethodId]
+        )
+      : [[]];
+
+    const [[freshTx]] = await connection.query(
+      `SELECT status, payment_status FROM tr_transactions WHERE id = ? LIMIT 1`,
+      [transactionId]
     );
+
+    await connection.commit();
 
     return res.json({
       message: 'Pembayaran transaksi diperbarui',
       payment_method_id: nextMethodId,
-      payment_status: nextStatus,
+      payment_status: nextPaymentStatus,
       payment_method: method || null,
+      status: freshTx?.status || transaction.status,
     });
   } catch (error) {
+    await connection.rollback();
     console.error('[pos/updatePosTransactionPayment]', error.message);
     return res.status(500).json({ message: 'Gagal memperbarui pembayaran transaksi' });
+  } finally {
+    connection.release();
   }
 };
 
@@ -1502,7 +1557,14 @@ export const createPosTransaction = async (req, res) => {
 
   const isHistoryEntry = parseTruthyFlag(req.body?.is_history_entry);
   const service_mode = String(serviceModeRaw || 'home_service').trim();
-  const paymentMethodId = Number(paymentMethodIdRaw);
+  const paymentMethodIdParsed = Number(paymentMethodIdRaw);
+  const paymentMethodId =
+    paymentMethodIdRaw == null ||
+    paymentMethodIdRaw === '' ||
+    !Number.isFinite(paymentMethodIdParsed) ||
+    paymentMethodIdParsed <= 0
+      ? null
+      : paymentMethodIdParsed;
   const rootPromoId = promoIdRaw == null || promoIdRaw === '' ? null : Number(promoIdRaw);
   const rootDiscountId =
     discountIdRaw == null || discountIdRaw === '' ? null : Number(discountIdRaw);
@@ -1512,9 +1574,6 @@ export const createPosTransaction = async (req, res) => {
   }
   if (!isValidServiceMode(service_mode)) {
     return res.status(400).json({ message: 'service_mode wajib home_service atau take_home' });
-  }
-  if (!paymentMethodId) {
-    return res.status(400).json({ message: 'Metode pembayaran wajib dipilih' });
   }
 
   let historyStarted = null;
@@ -1539,13 +1598,15 @@ export const createPosTransaction = async (req, res) => {
   try {
     await connection.beginTransaction();
 
-    const [[paymentMethod]] = await connection.query(
-      `SELECT id FROM mst_payment_method WHERE id = ? AND is_active = 1 LIMIT 1`,
-      [paymentMethodId]
-    );
-    if (!paymentMethod) {
-      await connection.rollback();
-      return res.status(400).json({ message: 'Metode pembayaran tidak valid atau nonaktif' });
+    if (paymentMethodId != null) {
+      const [[paymentMethod]] = await connection.query(
+        `SELECT id FROM mst_payment_method WHERE id = ? AND is_active = 1 LIMIT 1`,
+        [paymentMethodId]
+      );
+      if (!paymentMethod) {
+        await connection.rollback();
+        return res.status(400).json({ message: 'Metode pembayaran tidak valid atau nonaktif' });
+      }
     }
 
     const [customerRows] = await connection.query(
@@ -1891,7 +1952,7 @@ export const createPosTransaction = async (req, res) => {
       pricingFinalized: false,
     });
 
-    const initialStatus = isHistoryEntry ? 'Completed' : 'Draft';
+    const initialStatus = isHistoryEntry ? 'Completed' : 'Scheduled';
 
     const [result] = await connection.query(
       `INSERT INTO tr_transactions
@@ -2062,6 +2123,96 @@ export const createPosTransaction = async (req, res) => {
     const isDurationValidation =
       typeof message === 'string' && message.includes('Durasi pengerjaan tidak valid');
     return res.status(isMeterValidation || isDurationValidation ? 400 : 500).json({ message });
+  } finally {
+    connection.release();
+  }
+};
+
+export const updatePosTransactionBillingHours = async (req, res) => {
+  const transactionId = Number(req.params.id);
+  const billingHoursRaw = req.body?.billing_hours;
+  const billingHours = Number(billingHoursRaw);
+
+  if (!transactionId) {
+    return res.status(400).json({ message: 'ID transaksi tidak valid' });
+  }
+  if (!Number.isFinite(billingHours) || billingHours <= 0 || billingHours > 999) {
+    return res.status(400).json({
+      message: 'Jam billing wajib angka lebih dari 0 dan maksimal 999',
+    });
+  }
+
+  const connection = await cleanoxPool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const [[transaction]] = await connection.query(
+      `SELECT * FROM tr_transactions WHERE id = ? FOR UPDATE`,
+      [transactionId]
+    );
+    if (!transaction) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Transaksi POS tidak ditemukan' });
+    }
+    try {
+      assertTransactionItemsMutable(transaction);
+    } catch (mutableErr) {
+      await connection.rollback();
+      return res.status(mutableErr.statusCode || 409).json({ message: mutableErr.message });
+    }
+
+    const [items] = await connection.query(
+      `SELECT
+        i.id,
+        c.name AS category_name
+       FROM tr_transaction_items i
+       INNER JOIN mst_services s ON s.id = i.service_id
+       LEFT JOIN mst_category c ON c.id = s.category_id
+       WHERE i.transaction_id = ?`,
+      [transactionId]
+    );
+    if (!transactionHasGeneralCleaning(items)) {
+      await connection.rollback();
+      return res.status(400).json({
+        message: 'Transaksi tidak memiliki layanan General Cleaning',
+      });
+    }
+
+    const result = await applyAdminGcBillingHours(connection, transactionId, {
+      billingHours,
+      actorId: req.user?.id || null,
+    });
+
+    const [[updated]] = await connection.query(
+      `SELECT billing_hours, final_amount, pricing_finalized_at
+       FROM tr_transactions
+       WHERE id = ?
+       LIMIT 1`,
+      [transactionId]
+    );
+
+    await connection.commit();
+
+    return res.json({
+      message: result.wasAlreadyFinalized
+        ? 'Jam billing General Cleaning berhasil dikoreksi'
+        : 'Jam billing General Cleaning berhasil disimpan',
+      data: {
+        billing_hours:
+          updated?.billing_hours == null ? result.billingHours : Number(updated.billing_hours),
+        final_amount:
+          updated?.final_amount == null ? result.finalAmount : Number(updated.final_amount),
+        pricing_finalized_at: updated?.pricing_finalized_at || null,
+        was_already_finalized: result.wasAlreadyFinalized,
+      },
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[pos/updatePosTransactionBillingHours]', error.message);
+    const status = error.statusCode || 500;
+    return res.status(status).json({
+      message: error.message || 'Gagal menyimpan jam billing General Cleaning',
+    });
   } finally {
     connection.release();
   }
@@ -3426,6 +3577,7 @@ export const getPosCalendar = async (req, res) => {
         t.total_people,
         t.final_amount,
         t.status,
+        t.payment_status,
         a.employee_id,
         a.employee_name,
         a.assignment_status
@@ -3456,6 +3608,7 @@ export const getPosCalendar = async (req, res) => {
           total_people: Number(row.total_people || 0),
           final_amount: Number(row.final_amount || 0),
           status: row.status,
+          payment_status: row.payment_status || 'belum_lunas',
           workers: [],
         });
       }

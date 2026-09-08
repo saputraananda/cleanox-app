@@ -290,6 +290,124 @@ export async function finalizeGeneralCleaningPricingFromWindow(
 }
 
 /**
+ * Admin set/override GC billing hours (does not touch assignment Done status).
+ * Allowed even when pricing_finalized_at is already set.
+ * Must run inside an open DB transaction; throws on invalid input (caller should rollback).
+ */
+export async function applyAdminGcBillingHours(
+  connection,
+  transactionId,
+  { billingHours, actorId = null } = {}
+) {
+  if (!transactionId) {
+    const err = new Error('Transaksi POS tidak ditemukan');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const hours = Number(billingHours);
+  if (!Number.isFinite(hours) || hours <= 0 || hours > 999) {
+    const err = new Error('Jam billing wajib angka lebih dari 0 dan maksimal 999');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const [[tx]] = await connection.query(
+    `SELECT * FROM tr_transactions WHERE id = ? FOR UPDATE`,
+    [transactionId]
+  );
+  if (!tx) {
+    const err = new Error('Transaksi POS tidak ditemukan');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const wasAlreadyFinalized = Boolean(tx.pricing_finalized_at);
+
+  const [items] = await connection.query(
+    `SELECT
+      i.*,
+      s.name AS service_name,
+      c.name AS category_name
+     FROM tr_transaction_items i
+     INNER JOIN mst_services s ON s.id = i.service_id
+     LEFT JOIN mst_category c ON c.id = s.category_id
+     WHERE i.transaction_id = ?
+     ORDER BY i.id`,
+    [transactionId]
+  );
+
+  if (!transactionHasGeneralCleaning(items)) {
+    const err = new Error('Transaksi tidak memiliki layanan General Cleaning');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const hasHeaderPromo = Boolean(tx.promo_type_snapshot);
+
+  for (const item of items) {
+    if (!isGeneralCleaningCategory(item.category_name)) continue;
+
+    const computed = computeGcLineTotals({
+      basePrice: item.base_price_snapshot,
+      promoType: hasHeaderPromo ? null : item.promo_type_snapshot,
+      promoValue: hasHeaderPromo ? null : item.promo_value_snapshot,
+      billingHours: hours,
+    });
+
+    await connection.query(
+      `UPDATE tr_transaction_items
+       SET qty = ?,
+           promo_discount_amount = ?,
+           final_price_snapshot = ?,
+           line_total = ?,
+           updated_at = NOW()
+       WHERE id = ?`,
+      [
+        hours,
+        toMoney(hasHeaderPromo ? 0 : computed.promoDiscountAmount),
+        toMoney(computed.rateFinal),
+        toMoney(computed.lineTotal),
+        item.id,
+      ]
+    );
+  }
+
+  await connection.query(
+    `UPDATE tr_transactions
+     SET billing_hours = ?,
+         pricing_finalized_at = COALESCE(pricing_finalized_at, NOW()),
+         updated_at = NOW()
+     WHERE id = ?`,
+    [toMoney(hours), transactionId]
+  );
+
+  const { recalcPosTransactionMoney } = await import('./posTransactionTotals.js');
+  const totals = await recalcPosTransactionMoney(connection, transactionId, {
+    actorId,
+  });
+
+  const trackingTitle = wasAlreadyFinalized
+    ? 'Admin adjust billing hours'
+    : 'Admin set billing hours';
+
+  await createPosTracking(
+    connection,
+    transactionId,
+    tx.status || 'In_Progress',
+    trackingTitle,
+    `General Cleaning: ${toMoney(hours)} jam · total ${toMoney(totals.finalAmount)}`,
+    actorId
+  );
+
+  return {
+    billingHours: toMoney(hours),
+    finalAmount: toMoney(totals.finalAmount),
+    wasAlreadyFinalized,
+  };
+}
+
+/**
  * Finalize GC pricing (once) from Done assignment window:
  * earliest started_at → latest completed_at among Done workers.
  * Must run inside an open DB transaction; throws on invalid duration (caller should rollback).

@@ -9,6 +9,7 @@ import {
   DEFAULT_ABSEN_RADIUS_KM,
   resolveAttendanceLocationLabel,
 } from '@mobile/utils/attendanceLocation.js';
+import { resolvePhotoUploadError } from '@mobile/utils/photoUploadError.js';
 
 const MONTHS_ID_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
 const pad2 = (n) => String(n).padStart(2, '0');
@@ -84,6 +85,7 @@ export default function MobileWorkerAttendancePage() {
   const [success, setSuccess] = useState('');
   const [photoRequirementAlertOpen, setPhotoRequirementAlertOpen] = useState(false);
   const [checkoutPhotoRequirementAlertOpen, setCheckoutPhotoRequirementAlertOpen] = useState(false);
+  const [uploadFailAlert, setUploadFailAlert] = useState(null);
   const [now, setNow] = useState(new Date());
   const [cameraTarget, setCameraTarget] = useState(null);
   const [checkInPreviewUrl, setCheckInPreviewUrl] = useState('');
@@ -282,7 +284,9 @@ export default function MobileWorkerAttendancePage() {
       handleCheckInFileChange(null);
       await loadStatus();
     } catch (err) {
-      setError(err.response?.data?.message || 'Gagal menyimpan absen masuk');
+      const info = resolvePhotoUploadError(err, 'attendance-check-in');
+      setUploadFailAlert(info);
+      setError(info.description);
     } finally {
       setSubmitting(false);
     }
@@ -307,7 +311,9 @@ export default function MobileWorkerAttendancePage() {
       setSuccess('Absen pulang berhasil disimpan.');
       await loadStatus();
     } catch (err) {
-      setError(err.response?.data?.message || 'Gagal menyimpan absen pulang');
+      const info = resolvePhotoUploadError(err, 'attendance-check-out');
+      setUploadFailAlert(info);
+      setError(info.description);
     } finally {
       setSubmitting(false);
     }
@@ -631,26 +637,36 @@ export default function MobileWorkerAttendancePage() {
 
       <MobileConfirmDialog
         open={photoRequirementAlertOpen}
+        mode="alert"
         title="Check-In Belum Bisa Diproses"
         description="Ambil dulu Foto In sebelum melakukan absen masuk."
         variant="danger"
-        confirmLabel="Isi Foto Dulu"
-        cancelLabel="Tutup"
+        confirmLabel="Mengerti"
         onConfirm={() => setPhotoRequirementAlertOpen(false)}
-        onCancel={() => setPhotoRequirementAlertOpen(false)}
         onClose={() => setPhotoRequirementAlertOpen(false)}
       />
 
       <MobileConfirmDialog
         open={checkoutPhotoRequirementAlertOpen}
+        mode="alert"
         title="Check-Out Belum Bisa Diproses"
         description="Ambil dulu Foto Out sebelum melakukan absen pulang."
         variant="danger"
-        confirmLabel="Isi Foto Dulu"
-        cancelLabel="Tutup"
+        confirmLabel="Mengerti"
         onConfirm={() => setCheckoutPhotoRequirementAlertOpen(false)}
-        onCancel={() => setCheckoutPhotoRequirementAlertOpen(false)}
         onClose={() => setCheckoutPhotoRequirementAlertOpen(false)}
+      />
+
+      <MobileConfirmDialog
+        open={Boolean(uploadFailAlert)}
+        mode="alert"
+        variant="danger"
+        eyebrow={uploadFailAlert?.categoryLabel}
+        title={uploadFailAlert?.title}
+        description={uploadFailAlert?.description}
+        confirmLabel="Mengerti"
+        onConfirm={() => setUploadFailAlert(null)}
+        onClose={() => setUploadFailAlert(null)}
       />
     </div>
   );

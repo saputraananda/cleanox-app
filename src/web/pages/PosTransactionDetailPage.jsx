@@ -152,6 +152,8 @@ export default function PosTransactionDetailPage() {
   const [paymentSaving, setPaymentSaving] = useState(false);
   const [meterDrafts, setMeterDrafts] = useState({});
   const [meterSavingId, setMeterSavingId] = useState(null);
+  const [gcHoursDraft, setGcHoursDraft] = useState('');
+  const [gcHoursSaving, setGcHoursSaving] = useState(false);
   const [services, setServices] = useState([]);
   const [addItemModalOpen, setAddItemModalOpen] = useState(false);
   const [itemModalMode, setItemModalMode] = useState('add');
@@ -352,6 +354,11 @@ export default function PosTransactionDetailPage() {
         tx.transport_fee == null || tx.transport_fee === ''
           ? ''
           : String(Number(tx.transport_fee))
+      );
+      setGcHoursDraft(
+        tx.billing_hours == null || tx.billing_hours === ''
+          ? ''
+          : String(Number(tx.billing_hours))
       );
       await Promise.all([
         refreshEvidencePreviews({
@@ -826,6 +833,26 @@ export default function PosTransactionDetailPage() {
       setError(err.response?.data?.message || 'Gagal menyimpan ukuran meter');
     } finally {
       setMeterSavingId(null);
+    }
+  };
+
+  const handleSaveGcBillingHours = async () => {
+    const hours = Number(gcHoursDraft);
+    if (!Number.isFinite(hours) || hours <= 0 || hours > 999) {
+      setError('Jam billing wajib angka lebih dari 0 dan maksimal 999');
+      return;
+    }
+    setGcHoursSaving(true);
+    setError('');
+    try {
+      await api.patch(`/pos-transactions/${id}/billing-hours`, {
+        billing_hours: hours,
+      });
+      await loadData();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Gagal menyimpan jam billing');
+    } finally {
+      setGcHoursSaving(false);
     }
   };
 
@@ -1330,85 +1357,164 @@ export default function PosTransactionDetailPage() {
                   Metode dan status dapat diubah. Status lunas wajib punya minimal 1 bukti.
                 </p>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {['Tunai', 'BCA', 'EDC'].map((group) => {
-                  const active =
-                    (paymentForm.payment_group || selectedPaymentMethod?.method_group || '') ===
-                    group;
-                  return (
-                    <button
-                      key={group}
-                      type="button"
-                      onClick={() => handlePaymentGroupChange(group)}
-                      className={`rounded-xl border px-3.5 py-2 text-sm font-semibold transition ${
-                        active
-                          ? 'border-slate-900 bg-slate-900 text-white'
-                          : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                      }`}
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="space-y-4">
+                  <div className="flex flex-wrap gap-2">
+                    {['Tunai', 'BCA', 'EDC'].map((group) => {
+                      const active =
+                        (paymentForm.payment_group || selectedPaymentMethod?.method_group || '') ===
+                        group;
+                      return (
+                        <button
+                          key={group}
+                          type="button"
+                          onClick={() => handlePaymentGroupChange(group)}
+                          className={`rounded-xl border px-3.5 py-2 text-sm font-semibold transition ${
+                            active
+                              ? 'border-slate-900 bg-slate-900 text-white'
+                              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          {group}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {(paymentForm.payment_group || selectedPaymentMethod?.method_group) === 'BCA' &&
+                    selectedPaymentMethod && (
+                      <p className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
+                        {selectedPaymentMethod.label}
+                      </p>
+                    )}
+                  {(paymentForm.payment_group || selectedPaymentMethod?.method_group) === 'EDC' && (
+                    <label className="block space-y-1.5">
+                      <span className="text-xs font-semibold text-slate-600">Jenis kartu EDC BCA</span>
+                      <select
+                        value={paymentForm.payment_method_id}
+                        onChange={(e) =>
+                          setPaymentForm((prev) => ({
+                            ...prev,
+                            payment_method_id: e.target.value,
+                            payment_group: 'EDC',
+                          }))
+                        }
+                        className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
+                      >
+                        <option value="">Pilih jenis kartu</option>
+                        {edcPaymentMethods.map((method) => (
+                          <option key={method.id} value={method.id}>
+                            {method.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  <label className="block space-y-1.5">
+                    <span className="text-xs font-semibold text-slate-600">Status pembayaran</span>
+                    <select
+                      value={paymentForm.payment_status}
+                      onChange={(e) =>
+                        setPaymentForm((prev) => ({ ...prev, payment_status: e.target.value }))
+                      }
+                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
                     >
-                      {group}
-                    </button>
-                  );
-                })}
-              </div>
-              {(paymentForm.payment_group || selectedPaymentMethod?.method_group) === 'BCA' &&
-                selectedPaymentMethod && (
-                  <p className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
-                    {selectedPaymentMethod.label}
-                  </p>
-                )}
-              {(paymentForm.payment_group || selectedPaymentMethod?.method_group) === 'EDC' && (
-                <label className="block space-y-1.5">
-                  <span className="text-xs font-semibold text-slate-600">Jenis kartu EDC BCA</span>
-                  <select
-                    value={paymentForm.payment_method_id}
-                    onChange={(e) =>
-                      setPaymentForm((prev) => ({
-                        ...prev,
-                        payment_method_id: e.target.value,
-                        payment_group: 'EDC',
-                      }))
+                      <option value="belum_lunas">Belum lunas</option>
+                      <option value="lunas">Lunas</option>
+                    </select>
+                    {paymentForm.payment_status === 'lunas' && paymentProofs.length < 1 && (
+                      <p className="text-xs text-amber-700">Unggah bukti dulu sebelum menandai lunas.</p>
+                    )}
+                  </label>
+                  <button
+                    type="button"
+                    disabled={
+                      paymentSaving ||
+                      !paymentForm.payment_method_id ||
+                      (paymentForm.payment_status === 'lunas' && paymentProofs.length < 1)
                     }
-                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
+                    onClick={handleSavePayment}
+                    className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
                   >
-                    <option value="">Pilih jenis kartu</option>
-                    {edcPaymentMethods.map((method) => (
-                      <option key={method.id} value={method.id}>
-                        {method.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              <label className="block space-y-1.5">
-                <span className="text-xs font-semibold text-slate-600">Status pembayaran</span>
-                <select
-                  value={paymentForm.payment_status}
-                  onChange={(e) =>
-                    setPaymentForm((prev) => ({ ...prev, payment_status: e.target.value }))
-                  }
-                  className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
-                >
-                  <option value="belum_lunas">Belum lunas</option>
-                  <option value="lunas">Lunas</option>
-                </select>
-                {paymentForm.payment_status === 'lunas' && paymentProofs.length < 1 && (
-                  <p className="text-xs text-amber-700">Unggah bukti dulu sebelum menandai lunas.</p>
-                )}
-              </label>
-              <button
-                type="button"
-                disabled={
-                  paymentSaving ||
-                  !paymentForm.payment_method_id ||
-                  (paymentForm.payment_status === 'lunas' && paymentProofs.length < 1)
-                }
-                onClick={handleSavePayment}
-                className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
-              >
-                <Save className="h-4 w-4" />
-                {paymentSaving ? 'Menyimpan...' : 'Simpan pembayaran'}
-              </button>
+                    <Save className="h-4 w-4" />
+                    {paymentSaving ? 'Menyimpan...' : 'Simpan pembayaran'}
+                  </button>
+                </div>
+
+                <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">Bukti pembayaran</p>
+                      <p className="text-xs text-slate-500">
+                        Lampiran transfer/EDC/tunai · {paymentProofs.length}/10
+                      </p>
+                    </div>
+                    <div>
+                      <input
+                        ref={paymentProofFileInputRef}
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        className="hidden"
+                        onChange={handlePaymentProofsSelected}
+                      />
+                      <button
+                        type="button"
+                        disabled={!canUploadPaymentProofs || paymentProofUploading}
+                        onClick={() => paymentProofFileInputRef.current?.click()}
+                        className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <ImagePlus className="h-4 w-4" />
+                        {paymentProofUploading ? 'Mengunggah...' : 'Tambah bukti'}
+                      </button>
+                    </div>
+                  </div>
+                  {paymentProofs.length === 0 ? (
+                    <p className="text-sm text-slate-500">Belum ada bukti pembayaran.</p>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2">
+                      {paymentProofs.map((photo) => (
+                        <div
+                          key={photo.id}
+                          className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-50"
+                        >
+                          <button
+                            type="button"
+                            disabled={paymentProofUploading}
+                            onClick={() => handleDeletePaymentProof(photo.id)}
+                            className="absolute right-1.5 top-1.5 z-[1] inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/65 text-white shadow-lg disabled:opacity-60"
+                            aria-label="Hapus bukti pembayaran"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                          {paymentPreviewMap[String(photo.id)] ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openPhotoPreview(
+                                  paymentPreviewMap[String(photo.id)],
+                                  'Bukti Pembayaran'
+                                )
+                              }
+                              aria-label="Preview bukti pembayaran"
+                              className="block w-full cursor-pointer"
+                            >
+                              <img
+                                src={paymentPreviewMap[String(photo.id)]}
+                                alt="Bukti pembayaran"
+                                className="h-28 w-full object-cover"
+                              />
+                            </button>
+                          ) : (
+                            <div className="flex h-28 w-full items-center justify-center text-xs text-slate-400">
+                              Memuat...
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 
@@ -1518,7 +1624,42 @@ export default function PosTransactionDetailPage() {
                       )}
                     </td>
                     <td className="px-3 py-3 text-slate-600">
-                      {pendingGc ? (
+                      {isGc && canMutateItems ? (
+                        <div className="space-y-1.5">
+                          {!pendingGc && (
+                            <p>
+                              {item.qty}
+                              {' jam'}
+                            </p>
+                          )}
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0.01"
+                              max="999"
+                              placeholder="Jam"
+                              value={gcHoursDraft}
+                              onChange={(e) => setGcHoursDraft(e.target.value)}
+                              className="w-20 rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+                              disabled={gcHoursSaving}
+                            />
+                            <button
+                              type="button"
+                              disabled={gcHoursSaving}
+                              onClick={handleSaveGcBillingHours}
+                              className="rounded-lg bg-slate-900 px-2.5 py-1.5 text-[11px] font-semibold text-white disabled:opacity-60"
+                            >
+                              {gcHoursSaving ? '...' : pendingGc ? 'Simpan' : 'Update'}
+                            </button>
+                          </div>
+                          <p className="text-[11px] text-slate-500">
+                            {pendingGc
+                              ? 'Isi jam untuk finalisasi harga'
+                              : `Tersimpan: ${Number(transaction.billing_hours)} jam`}
+                          </p>
+                        </div>
+                      ) : pendingGc ? (
                         '—'
                       ) : isMeter ? (
                         <div className="space-y-2">
@@ -1575,9 +1716,11 @@ export default function PosTransactionDetailPage() {
                           )}
                         </div>
                       ) : (
-                        item.qty
+                        <>
+                          {item.qty}
+                          {isGc && transaction.pricing_finalized_at ? ' jam' : ''}
+                        </>
                       )}
-                      {isGc && transaction.pricing_finalized_at ? ' jam' : ''}
                     </td>
                     <td className="px-3 py-3 text-slate-600">{item.promo_name_snapshot || '-'}</td>
                     <td className="px-3 py-3 text-right text-slate-700">
@@ -1816,6 +1959,7 @@ export default function PosTransactionDetailPage() {
         )}
       </div>
 
+      {!canEditPayment && (
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -1823,25 +1967,6 @@ export default function PosTransactionDetailPage() {
             <p className="mt-1 text-sm text-slate-500">
               Lampiran bukti transfer/EDC/tunai · {paymentProofs.length}/10
             </p>
-          </div>
-          <div>
-            <input
-              ref={paymentProofFileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              className="hidden"
-              onChange={handlePaymentProofsSelected}
-            />
-            <button
-              type="button"
-              disabled={!canUploadPaymentProofs || paymentProofUploading}
-              onClick={() => paymentProofFileInputRef.current?.click()}
-              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-800 shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <ImagePlus className="h-4 w-4" />
-              {paymentProofUploading ? 'Mengunggah...' : 'Tambah bukti'}
-            </button>
           </div>
         </div>
 
@@ -1855,17 +1980,6 @@ export default function PosTransactionDetailPage() {
                   key={photo.id}
                   className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-50"
                 >
-                  {canEditPayment && (
-                    <button
-                      type="button"
-                      disabled={paymentProofUploading}
-                      onClick={() => handleDeletePaymentProof(photo.id)}
-                      className="absolute right-1.5 top-1.5 z-[1] inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/65 text-white shadow-lg disabled:opacity-60"
-                      aria-label="Hapus bukti pembayaran"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  )}
                   {paymentPreviewMap[String(photo.id)] ? (
                     <button
                       type="button"
@@ -1897,6 +2011,7 @@ export default function PosTransactionDetailPage() {
           </p>
         )}
       </section>
+      )}
 
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3">

@@ -5,6 +5,7 @@ import api from '@shared/utils/api.js';
 import MobileWorkerBottomNav from '@mobile/components/MobileWorkerBottomNav.jsx';
 import MobileConfirmDialog from '@mobile/components/MobileConfirmDialog.jsx';
 import MobileCameraCapture from '@mobile/components/MobileCameraCapture.jsx';
+import { resolvePhotoUploadError } from '@mobile/utils/photoUploadError.js';
 
 const MAX_PHOTOS_PER_KIND = 50;
 
@@ -182,6 +183,7 @@ export default function MobileWorkerTasksPage() {
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [cameraTarget, setCameraTarget] = useState(null);
   const [evidenceAlert, setEvidenceAlert] = useState(null);
+  const [uploadFailAlert, setUploadFailAlert] = useState(null);
   const [photoPreviewMap, setPhotoPreviewMap] = useState({});
   const [photoPreview, setPhotoPreview] = useState(null);
   const [workNoteDrafts, setWorkNoteDrafts] = useState({});
@@ -309,11 +311,12 @@ export default function MobileWorkerTasksPage() {
     const task = tasks.find((item) => item.assignment_id === assignmentId);
     const evidence = evidenceOf(task);
     if (!evidence.can_complete) {
-      setEvidenceAlert(
-        isTakeHomeTask(task)
+      setEvidenceAlert({
+        title: 'Evidence Belum Lengkap',
+        description: isTakeHomeTask(task)
           ? 'Lengkapi 5 stage take-home dan survey kepuasan sebelum menandai tugas selesai.'
-          : 'Lengkapi foto before & after untuk setiap layanan, lalu survey kepuasan sebelum menandai tugas selesai.'
-      );
+          : 'Lengkapi foto before & after untuk setiap layanan, lalu survey kepuasan sebelum menandai tugas selesai.',
+      });
       return;
     }
     setConfirmDialog({
@@ -449,7 +452,10 @@ export default function MobileWorkerTasksPage() {
     try {
       if (target.kind === 'arrival') {
         if (!meta?.latitude || !meta?.longitude) {
-          setEvidenceAlert('Lokasi GPS wajib ikut bersama foto kedatangan.');
+          setEvidenceAlert({
+            title: 'Lokasi GPS Diperlukan',
+            description: 'Lokasi GPS wajib ikut bersama foto kedatangan.',
+          });
           return;
         }
         const formData = new FormData();
@@ -509,7 +515,9 @@ export default function MobileWorkerTasksPage() {
         await loadDetail(target.assignmentId, true);
       }
     } catch (err) {
-      setError(err.response?.data?.message || 'Gagal menyimpan foto evidence');
+      const info = resolvePhotoUploadError(err, 'task');
+      setUploadFailAlert(info);
+      setError(info.description);
     } finally {
       setSubmitting(false);
     }
@@ -518,11 +526,19 @@ export default function MobileWorkerTasksPage() {
   const openSurveyPage = (assignmentId, evidence, task = null) => {
     if (isTakeHomeTask(task || {})) {
       if (!evidence?.has_takehome_complete) {
-        setEvidenceAlert('Lengkapi semua stage take-home terlebih dahulu sebelum mengisi survey.');
+        setEvidenceAlert({
+          title: 'Survey Belum Bisa Dibuka',
+          description:
+            'Lengkapi semua stage take-home terlebih dahulu sebelum mengisi survey.',
+        });
         return;
       }
     } else if (!evidence?.all_items_complete) {
-      setEvidenceAlert('Lengkapi foto before & after untuk setiap layanan sebelum mengisi survey.');
+      setEvidenceAlert({
+        title: 'Survey Belum Bisa Dibuka',
+        description:
+          'Lengkapi foto before & after untuk setiap layanan sebelum mengisi survey.',
+      });
       return;
     }
     navigate(`/mobile-worker/tasks/${assignmentId}/survey`);
@@ -531,15 +547,19 @@ export default function MobileWorkerTasksPage() {
   const requestSurveyExternal = (assignmentId, evidence, task = null) => {
     if (isTakeHomeTask(task || {})) {
       if (!evidence?.has_takehome_complete) {
-        setEvidenceAlert(
-          'Lengkapi semua stage take-home terlebih dahulu sebelum menandai survey eksternal.'
-        );
+        setEvidenceAlert({
+          title: 'Survey Belum Bisa Dibuka',
+          description:
+            'Lengkapi semua stage take-home terlebih dahulu sebelum menandai survey eksternal.',
+        });
         return;
       }
     } else if (!evidence?.all_items_complete) {
-      setEvidenceAlert(
-        'Lengkapi foto before & after untuk setiap layanan sebelum menandai survey eksternal.'
-      );
+      setEvidenceAlert({
+        title: 'Survey Belum Bisa Dibuka',
+        description:
+          'Lengkapi foto before & after untuk setiap layanan sebelum menandai survey eksternal.',
+      });
       return;
     }
     setConfirmDialog({ type: 'survey_external', assignmentId });
@@ -1373,14 +1393,25 @@ export default function MobileWorkerTasksPage() {
 
       <MobileConfirmDialog
         open={Boolean(evidenceAlert)}
+        mode="alert"
         variant="danger"
-        title="Evidence Belum Lengkap"
-        description={evidenceAlert || ''}
+        title={evidenceAlert?.title || 'Evidence Belum Lengkap'}
+        description={evidenceAlert?.description || ''}
         confirmLabel="Mengerti"
-        cancelLabel="Tutup"
         onConfirm={() => setEvidenceAlert(null)}
-        onCancel={() => setEvidenceAlert(null)}
         onClose={() => setEvidenceAlert(null)}
+      />
+
+      <MobileConfirmDialog
+        open={Boolean(uploadFailAlert)}
+        mode="alert"
+        variant="danger"
+        eyebrow={uploadFailAlert?.categoryLabel}
+        title={uploadFailAlert?.title}
+        description={uploadFailAlert?.description}
+        confirmLabel="Mengerti"
+        onConfirm={() => setUploadFailAlert(null)}
+        onClose={() => setUploadFailAlert(null)}
       />
 
       <MobileCameraCapture

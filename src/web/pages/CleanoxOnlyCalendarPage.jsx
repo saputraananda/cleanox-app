@@ -14,32 +14,36 @@ import {
 } from 'lucide-react';
 import api from '@shared/utils/api.js';
 
-const STATUS_STYLE = {
-  Draft: { bg: 'bg-slate-100', text: 'text-slate-700', border: 'border-slate-200', dot: '#64748B' },
-  Assigned: { bg: 'bg-sky-100', text: 'text-sky-700', border: 'border-sky-200', dot: '#0284C7' },
-  Waiting_Confirmation: {
-    bg: 'bg-amber-100',
-    text: 'text-amber-700',
-    border: 'border-amber-200',
-    dot: '#D97706',
-    label: 'Waiting Confirmation',
+const CALENDAR_STATUS_STYLE = {
+  Terjadwal: {
+    bg: 'bg-blue-100',
+    text: 'text-blue-800',
+    border: 'border-blue-200',
+    pillBg: '#DBEAFE',
+    pillText: '#1E40AF',
+    dot: '#3B82F6',
   },
-  Scheduled: { bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-blue-200', dot: '#3B82F6' },
-  In_Progress: {
-    bg: 'bg-indigo-100',
-    text: 'text-indigo-700',
-    border: 'border-indigo-200',
-    dot: '#4F46E5',
-    label: 'In Progress',
+  Lunas: {
+    bg: 'bg-emerald-100',
+    text: 'text-emerald-800',
+    border: 'border-emerald-200',
+    pillBg: '#D1FAE5',
+    pillText: '#065F46',
+    dot: '#059669',
   },
-  Completed: { bg: 'bg-emerald-100', text: 'text-emerald-700', border: 'border-emerald-200', dot: '#059669' },
-  Cancelled: { bg: 'bg-rose-100', text: 'text-rose-700', border: 'border-rose-200', dot: '#E11D48' },
 };
 
 const WEEKDAYS = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
+const MAX_PILLS_PER_DAY = 3;
 
-function statusLabel(status) {
-  return STATUS_STYLE[status]?.label || String(status || '—').replaceAll('_', ' ');
+function resolveCalendarStatus(job) {
+  if (!job || job.status === 'Cancelled') return null;
+  if (String(job.payment_status || '').toLowerCase() === 'lunas') return 'Lunas';
+  return 'Terjadwal';
+}
+
+function jobsForCalendar(jobs) {
+  return (jobs || []).filter((job) => resolveCalendarStatus(job) != null);
 }
 
 function toMonthKey(date) {
@@ -101,8 +105,8 @@ function buildCalendarCells(month) {
   return cells;
 }
 
-function StatusBadge({ status }) {
-  const style = STATUS_STYLE[status] || {
+function StatusBadge({ displayStatus }) {
+  const style = CALENDAR_STATUS_STYLE[displayStatus] || {
     bg: 'bg-slate-100',
     text: 'text-slate-600',
     border: 'border-slate-200',
@@ -111,7 +115,7 @@ function StatusBadge({ status }) {
     <span
       className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${style.bg} ${style.text} ${style.border}`}
     >
-      {statusLabel(status)}
+      {displayStatus || '—'}
     </span>
   );
 }
@@ -158,6 +162,7 @@ export default function CleanoxOnlyCalendarPage() {
   }, [month, selectedDate]);
 
   const selectedDay = calendarData.days[selectedDate] || { jobs: [], workers: [] };
+  const selectedJobs = jobsForCalendar(selectedDay.jobs);
 
   const goToday = () => {
     const now = new Date();
@@ -187,8 +192,7 @@ export default function CleanoxOnlyCalendarPage() {
             </p>
             <h1 className="mt-2 text-[22px] font-extrabold tracking-[-0.01em]">Calendar</h1>
             <p className="mt-2 max-w-xl text-[13px] text-blue-100/90">
-              Jadwal transaksi POS per tanggal layanan. Titik warna menandai status; chip warna menandai
-              pekerja.
+              Jadwal transaksi POS per tanggal layanan. Blok biru = Terjadwal, hijau = Lunas.
             </p>
           </div>
           <button
@@ -250,11 +254,11 @@ export default function CleanoxOnlyCalendarPage() {
             </button>
           </div>
 
-          <div className="grid grid-cols-7 gap-1.5">
+          <div className="grid grid-cols-7 gap-px overflow-hidden rounded-[12px] border border-slate-200 bg-slate-200">
             {WEEKDAYS.map((label) => (
               <div
                 key={label}
-                className="px-1 py-1 text-center text-[9.5px] font-semibold uppercase tracking-[.14em] text-slate-400"
+                className="bg-white px-1 py-2 text-center text-[9.5px] font-semibold uppercase tracking-[.14em] text-slate-400"
               >
                 {label}
               </div>
@@ -266,85 +270,62 @@ export default function CleanoxOnlyCalendarPage() {
               <Loader2 className="h-7 w-7 animate-spin text-blue-600" />
             </div>
           ) : (
-            <div className="grid grid-cols-7 gap-1.5">
+            <div className="grid grid-cols-7 gap-px overflow-hidden rounded-[12px] border border-slate-200 bg-slate-200">
               {cells.map((cell) => {
                 if (cell.type === 'pad') {
-                  return <div key={cell.key} className="min-h-[84px] rounded-[12px] bg-slate-50/60" />;
+                  return <div key={cell.key} className="min-h-[112px] bg-slate-50/80" />;
                 }
 
                 const dayData = calendarData.days[cell.dateKey] || { jobs: [], workers: [] };
                 const isSelected = selectedDate === cell.dateKey;
                 const isToday = todayKey === cell.dateKey;
-                const jobs = dayData.jobs || [];
-                const workers = dayData.workers || [];
-                const visibleDots = jobs.slice(0, 4);
-                const extraJobs = Math.max(0, jobs.length - visibleDots.length);
-                const visibleWorkers = workers.slice(0, 3);
-                const extraWorkers = Math.max(0, workers.length - visibleWorkers.length);
+                const jobs = jobsForCalendar(dayData.jobs);
+                const visiblePills = jobs.slice(0, MAX_PILLS_PER_DAY);
+                const extraJobs = Math.max(0, jobs.length - visiblePills.length);
 
                 return (
                   <button
                     key={cell.key}
                     type="button"
                     onClick={() => setSelectedDate(cell.dateKey)}
-                    className={`min-h-[84px] rounded-[12px] border p-2 text-left transition duration-150 hover:-translate-y-0.5 active:scale-[.98] ${
-                      isSelected
-                        ? 'border-blue-400 bg-blue-50 shadow-[0_0_0_3px_rgba(59,130,246,.12)]'
-                        : 'border-slate-200 bg-slate-50/80 hover:bg-white'
+                    className={`min-h-[112px] bg-white p-1.5 text-left align-top transition duration-150 hover:bg-slate-50 ${
+                      isSelected ? 'ring-2 ring-inset ring-blue-400' : ''
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-1">
+                    <div className="mb-1 flex items-center">
                       <span
-                        className={`font-mono text-[13px] font-bold ${
-                          isToday ? 'text-blue-700' : 'text-slate-800'
+                        className={`inline-flex h-6 w-6 items-center justify-center text-[12px] font-semibold ${
+                          isToday
+                            ? 'rounded-full bg-blue-600 text-white'
+                            : 'text-slate-700'
                         }`}
                       >
                         {cell.day}
                       </span>
-                      {isToday && (
-                        <span className="rounded-full border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[9px] font-semibold text-blue-700">
-                          Hari ini
-                        </span>
-                      )}
                     </div>
 
-                    {jobs.length > 0 && (
-                      <div className="mt-2 flex flex-wrap items-center gap-1">
-                        {visibleDots.map((job) => (
-                          <span
+                    <div className="space-y-0.5">
+                      {visiblePills.map((job) => {
+                        const displayStatus = resolveCalendarStatus(job);
+                        const style = CALENDAR_STATUS_STYLE[displayStatus] || CALENDAR_STATUS_STYLE.Terjadwal;
+                        const label = job.customer_name || job.transaction_no || 'Transaksi';
+                        return (
+                          <div
                             key={job.id}
-                            className="h-2 w-2 rounded-full"
-                            style={{ background: STATUS_STYLE[job.status]?.dot || '#94A3B8' }}
-                            title={statusLabel(job.status)}
-                          />
-                        ))}
-                        {extraJobs > 0 && (
-                          <span className="text-[10px] font-semibold text-slate-500">+{extraJobs}</span>
-                        )}
-                      </div>
-                    )}
-
-                    {workers.length > 0 && (
-                      <div className="mt-1.5 flex items-center gap-1">
-                        {visibleWorkers.map((worker) => (
-                          <span
-                            key={`${worker.employee_id || worker.name}`}
-                            className="h-2.5 w-2.5 rounded-full border border-white"
-                            style={{ background: worker.color }}
-                            title={worker.name}
-                          />
-                        ))}
-                        {extraWorkers > 0 && (
-                          <span className="text-[10px] font-semibold text-slate-400">+{extraWorkers}</span>
-                        )}
-                      </div>
-                    )}
-
-                    {jobs.length > 0 && (
-                      <p className="mt-1.5 text-[10px] font-medium text-slate-500">
-                        {jobs.length} transaksi
-                      </p>
-                    )}
+                            className="truncate rounded-[4px] px-1 py-0.5 text-[10px] font-semibold leading-tight"
+                            style={{ background: style.pillBg, color: style.pillText }}
+                            title={`${label} · ${displayStatus}`}
+                          >
+                            {label}
+                          </div>
+                        );
+                      })}
+                      {extraJobs > 0 && (
+                        <p className="px-0.5 text-[10px] font-semibold text-slate-500">
+                          +{extraJobs} lainnya
+                        </p>
+                      )}
+                    </div>
                   </button>
                 );
               })}
@@ -352,13 +333,13 @@ export default function CleanoxOnlyCalendarPage() {
           )}
 
           <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-3">
-            {Object.entries(STATUS_STYLE).map(([status, style]) => (
+            {Object.entries(CALENDAR_STATUS_STYLE).map(([status, style]) => (
               <span
                 key={status}
                 className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600"
               >
                 <span className="h-2 w-2 rounded-full" style={{ background: style.dot }} />
-                {statusLabel(status)}
+                {status}
               </span>
             ))}
           </div>
@@ -411,11 +392,11 @@ export default function CleanoxOnlyCalendarPage() {
                 <Package className="h-4 w-4 text-slate-500" />
                 Transaksi
                 <span className="ml-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
-                  {selectedDay.jobs.length}
+                  {selectedJobs.length}
                 </span>
               </div>
 
-              {selectedDay.jobs.length === 0 ? (
+              {selectedJobs.length === 0 ? (
                 <div className="rounded-[16px] border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center">
                   <p className="text-[13px] font-semibold text-slate-700">Tidak ada transaksi</p>
                   <p className="mt-1 text-[11.5px] text-slate-500">
@@ -433,7 +414,7 @@ export default function CleanoxOnlyCalendarPage() {
                 </div>
               ) : (
                 <div className="max-h-[420px] space-y-2.5 overflow-y-auto pr-1">
-                  {selectedDay.jobs.map((job) => (
+                  {selectedJobs.map((job) => (
                     <button
                       key={job.id}
                       type="button"
@@ -456,7 +437,7 @@ export default function CleanoxOnlyCalendarPage() {
                         <ExternalLink className="mt-0.5 h-[14px] w-[14px] shrink-0 text-slate-400" />
                       </div>
                       <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                        <StatusBadge status={job.status} />
+                        <StatusBadge displayStatus={resolveCalendarStatus(job)} />
                         {job.workers.map((worker) => (
                           <span
                             key={`${job.id}-${worker.employee_id || worker.name}`}

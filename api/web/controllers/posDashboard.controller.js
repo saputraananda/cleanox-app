@@ -83,8 +83,8 @@ export const getDashboardData = async (req, res) => {
       `SELECT
         COUNT(*) AS total_transactions,
         SUM(CASE WHEN status <> 'Cancelled' THEN final_amount ELSE 0 END) AS total_revenue,
-        SUM(CASE WHEN status IN ('Draft', 'Waiting_Confirmation') THEN 1 ELSE 0 END) AS incoming_transactions,
-        SUM(CASE WHEN status IN ('Assigned', 'Scheduled', 'In_Progress') THEN 1 ELSE 0 END) AS active_transactions,
+        SUM(CASE WHEN status = 'Scheduled' THEN 1 ELSE 0 END) AS incoming_transactions,
+        SUM(CASE WHEN status = 'In_Progress' THEN 1 ELSE 0 END) AS active_transactions,
         SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed_transactions,
         SUM(CASE WHEN status = 'Cancelled' THEN 1 ELSE 0 END) AS cancelled_transactions
        FROM tr_transactions

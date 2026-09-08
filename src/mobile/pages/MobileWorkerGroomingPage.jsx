@@ -5,6 +5,7 @@ import api from '@shared/utils/api.js';
 import MobileWorkerBottomNav from '@mobile/components/MobileWorkerBottomNav.jsx';
 import MobileCameraCapture from '@mobile/components/MobileCameraCapture.jsx';
 import MobileConfirmDialog from '@mobile/components/MobileConfirmDialog.jsx';
+import { resolvePhotoUploadError } from '@mobile/utils/photoUploadError.js';
 
 const PHOTO_FIELDS = [
   { key: 'full_body_photo', photoType: 'full_body', label: 'Foto Satu Badan' },
@@ -68,6 +69,7 @@ export default function MobileWorkerGroomingPage() {
   const [photoPreview, setPhotoPreview] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [uploadFailAlert, setUploadFailAlert] = useState(null);
   const draftPreviewUrlsRef = useRef({});
   const savedPreviewUrlsRef = useRef({});
 
@@ -197,7 +199,9 @@ export default function MobileWorkerGroomingPage() {
       );
       await loadStatus();
     } catch (err) {
-      setError(err.response?.data?.message || 'Gagal menyimpan foto grooming');
+      const info = resolvePhotoUploadError(err, 'grooming');
+      setUploadFailAlert(info);
+      setError(info.description);
     } finally {
       setUploadingKey(null);
     }
@@ -498,6 +502,18 @@ export default function MobileWorkerGroomingPage() {
         onConfirm={confirmDeleteSavedPhoto}
         onCancel={() => !deleting && setDeleteTarget(null)}
         onClose={() => !deleting && setDeleteTarget(null)}
+      />
+
+      <MobileConfirmDialog
+        open={Boolean(uploadFailAlert)}
+        mode="alert"
+        variant="danger"
+        eyebrow={uploadFailAlert?.categoryLabel}
+        title={uploadFailAlert?.title}
+        description={uploadFailAlert?.description}
+        confirmLabel="Mengerti"
+        onConfirm={() => setUploadFailAlert(null)}
+        onClose={() => setUploadFailAlert(null)}
       />
     </div>
   );

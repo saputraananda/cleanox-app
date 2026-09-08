@@ -10,6 +10,10 @@ import {
   getBusyEmployeeIdsOnServiceDate,
 } from '../../shared/utils/posWorkerBusy.js';
 import { syncTransactionStatusFromAssignments } from '../../shared/utils/posTransactionStatusSync.js';
+import {
+  cascadePeersToDone,
+  cascadePeersToOnProgress,
+} from '../../shared/utils/posAssignmentProgressShare.js';
 import { finalizeGeneralCleaningPricing } from '../../shared/utils/posGeneralCleaningBilling.js';
 import {
   TAKEHOME_STAGE_LABELS,
@@ -35,6 +39,7 @@ import {
   loadSharedPhotosGrouped,
   loadItemWorkNotesByTransactionId,
   loadSharedSurvey,
+  loadSharedArrival,
   resolveSurveyState,
   evaluateItemEvidenceCompletion,
   MAX_PHOTOS_PER_KIND_PER_ITEM,
@@ -386,9 +391,6 @@ function mapEvidence(row, photos = [], takehomeProgress = null, shared = null, i
   const before = isHome ? sharedBefore : ownSplit.before;
   const after = isHome ? sharedAfter : ownSplit.after;
 
-  const hasArrival = Boolean(
-    row.arrival_photo_path && row.arrival_latitude != null && row.arrival_longitude != null
-  );
   const hasBefore = isHome
     ? itemCompletion.all_items_complete
     : before.length >= 1 || Boolean(row.before_photo_path);
@@ -407,6 +409,29 @@ function mapEvidence(row, photos = [], takehomeProgress = null, shared = null, i
   const survey = sharedSurvey?.hasSurvey ? sharedSurvey : ownSurvey;
   const hasSurvey = Boolean(survey.hasSurvey);
 
+  const sharedArrival = shared?.arrival || null;
+  const ownHasArrival = Boolean(
+    row.arrival_photo_path && row.arrival_latitude != null && row.arrival_longitude != null
+  );
+  const hasArrival = Boolean(sharedArrival?.hasArrival || ownHasArrival);
+  const arrivalPhotoPath =
+    row.arrival_photo_path || sharedArrival?.photo_path || null;
+  const arrivalLatitude =
+    row.arrival_latitude != null
+      ? Number(row.arrival_latitude)
+      : sharedArrival?.latitude != null
+        ? Number(sharedArrival.latitude)
+        : null;
+  const arrivalLongitude =
+    row.arrival_longitude != null
+      ? Number(row.arrival_longitude)
+      : sharedArrival?.longitude != null
+        ? Number(sharedArrival.longitude)
+        : null;
+  const arrivalLocationName =
+    row.arrival_location_name || sharedArrival?.location_name || null;
+  const arrivalAt = row.arrival_at || sharedArrival?.at || null;
+
   const takehomeDto =
     serviceMode === 'take_home'
       ? mapTakehomeProgressDto(takehomeProgress, { photoPathBuilder: toMobileTakehomePhotoPath })
@@ -420,11 +445,11 @@ function mapEvidence(row, photos = [], takehomeProgress = null, shared = null, i
       : hasArrival && itemCompletion.all_items_complete && hasSurvey;
 
   return {
-    arrival_photo_path: row.arrival_photo_path || null,
-    arrival_latitude: row.arrival_latitude != null ? Number(row.arrival_latitude) : null,
-    arrival_longitude: row.arrival_longitude != null ? Number(row.arrival_longitude) : null,
-    arrival_location_name: row.arrival_location_name || null,
-    arrival_at: row.arrival_at || null,
+    arrival_photo_path: arrivalPhotoPath,
+    arrival_latitude: arrivalLatitude,
+    arrival_longitude: arrivalLongitude,
+    arrival_location_name: arrivalLocationName,
+    arrival_at: arrivalAt,
     before_photos: before,
     after_photos: after,
     general_before_photos: isHome ? generalBefore : [],
@@ -517,6 +542,16 @@ async function buildSharedContextForRow(row, sharedMap = null) {
         at: null,
         fromAssignmentId: null,
       },
+      arrival: {
+        hasArrival: false,
+        photo_path: null,
+        latitude: null,
+        longitude: null,
+        location_name: null,
+        at: null,
+        fromAssignmentId: null,
+      },
+      hasArrival: false,
     }
   );
 }
@@ -937,6 +972,7 @@ export const startTask = async (req, res) => {
         employeeId
       );
 
+      await cascadePeersToOnProgress(connection, row.transaction_id, assignmentId);
       await syncTransactionStatusFromAssignments(connection, row.transaction_id);
       await connection.commit();
       return res.json({ message: 'Order diambil — On Progress' });
@@ -989,6 +1025,7 @@ export const startTask = async (req, res) => {
       employeeId
     );
 
+    await cascadePeersToOnProgress(connection, row.transaction_id, assignmentId);
     await syncTransactionStatusFromAssignments(connection, row.transaction_id);
 
     await connection.commit();
@@ -1294,10 +1331,13 @@ export const uploadAfterPhoto = async (req, res) => {
     } else {
       const sharedPhotos = await loadSharedBeforeAfterPhotos(connection, row.transaction_id);
       const sharedSurvey = await loadSharedSurvey(connection, row.transaction_id);
+      const sharedArrival = await loadSharedArrival(connection, row.transaction_id);
       const shared = {
         before: sharedPhotos.before,
         after: sharedPhotos.after,
         survey: sharedSurvey,
+        arrival: sharedArrival,
+        hasArrival: sharedArrival.hasArrival,
       };
       const existingEvidence = mapEvidence(row, [], null, shared);
       if (!existingEvidence.has_before) {
@@ -1818,6 +1858,7 @@ export const completeTask = async (req, res) => {
       employeeId
     );
 
+    await cascadePeersToDone(connection, row.transaction_id, assignmentId);
     await syncTransactionStatusFromAssignments(connection, row.transaction_id);
 
     const [activeAssignments] = await connection.query(

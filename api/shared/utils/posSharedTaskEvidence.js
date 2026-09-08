@@ -218,6 +218,53 @@ export async function loadSharedSurvey(connection, transactionId) {
   return resolveSurveyState(rows[0]);
 }
 
+function emptyArrival() {
+  return {
+    hasArrival: false,
+    photo_path: null,
+    latitude: null,
+    longitude: null,
+    location_name: null,
+    at: null,
+    fromAssignmentId: null,
+  };
+}
+
+function mapArrivalFromAssignmentRow(row) {
+  if (!row?.arrival_photo_path || row.arrival_latitude == null || row.arrival_longitude == null) {
+    return emptyArrival();
+  }
+  return {
+    hasArrival: true,
+    photo_path: row.arrival_photo_path || null,
+    latitude: row.arrival_latitude != null ? Number(row.arrival_latitude) : null,
+    longitude: row.arrival_longitude != null ? Number(row.arrival_longitude) : null,
+    location_name: row.arrival_location_name || null,
+    at: row.arrival_at || null,
+    fromAssignmentId: row.id == null ? null : Number(row.id),
+  };
+}
+
+/**
+ * Canonical arrival for a transaction = earliest arrival among assignments that have GPS + photo.
+ */
+export async function loadSharedArrival(connection, transactionId) {
+  const [rows] = await connection.query(
+    `SELECT id, arrival_photo_path, arrival_latitude, arrival_longitude,
+            arrival_location_name, arrival_at
+     FROM tr_worker_assignments
+     WHERE transaction_id = ?
+       AND arrival_photo_path IS NOT NULL
+       AND arrival_latitude IS NOT NULL
+       AND arrival_longitude IS NOT NULL
+     ORDER BY arrival_at ASC, id ASC
+     LIMIT 1`,
+    [transactionId]
+  );
+  if (!rows.length) return emptyArrival();
+  return mapArrivalFromAssignmentRow(rows[0]);
+}
+
 /**
  * Batch shared evidence for many transaction ids.
  * @returns Map<transactionId, { before, after, survey, grouped, items, itemCompletion }>
@@ -240,6 +287,8 @@ export async function loadSharedEvidenceByTransactionIds(connection, transaction
         at: null,
         fromAssignmentId: null,
       },
+      arrival: emptyArrival(),
+      hasArrival: false,
       grouped: { general: emptyItemBucket(), byItem: new Map() },
       items: [],
       itemCompletion: evaluateItemEvidenceCompletion([], new Map()),
@@ -249,7 +298,9 @@ export async function loadSharedEvidenceByTransactionIds(connection, transaction
   const itemsByTx = await loadTransactionItemsByTransactionIds(connection, ids);
 
   const [assignmentRows] = await connection.query(
-    `SELECT id, transaction_id, survey_rating, survey_note, survey_answers, survey_at
+    `SELECT id, transaction_id, survey_rating, survey_note, survey_answers, survey_at,
+            arrival_photo_path, arrival_latitude, arrival_longitude,
+            arrival_location_name, arrival_at
      FROM tr_worker_assignments
      WHERE transaction_id IN (?)`,
     [ids]
@@ -257,18 +308,33 @@ export async function loadSharedEvidenceByTransactionIds(connection, transaction
 
   const assignmentToTx = new Map();
   const surveyCandidates = new Map();
+  const arrivalCandidates = new Map();
 
   for (const row of assignmentRows) {
     const txId = Number(row.transaction_id);
     const assignmentId = Number(row.id);
     assignmentToTx.set(assignmentId, txId);
 
-    if (!row.survey_at) continue;
-    const prev = surveyCandidates.get(txId);
-    const prevAt = prev?.survey_at ? new Date(prev.survey_at).getTime() : 0;
-    const nextAt = new Date(row.survey_at).getTime();
-    if (!prev || nextAt > prevAt || (nextAt === prevAt && assignmentId > Number(prev.id))) {
-      surveyCandidates.set(txId, row);
+    if (row.survey_at) {
+      const prev = surveyCandidates.get(txId);
+      const prevAt = prev?.survey_at ? new Date(prev.survey_at).getTime() : 0;
+      const nextAt = new Date(row.survey_at).getTime();
+      if (!prev || nextAt > prevAt || (nextAt === prevAt && assignmentId > Number(prev.id))) {
+        surveyCandidates.set(txId, row);
+      }
+    }
+
+    if (
+      row.arrival_photo_path &&
+      row.arrival_latitude != null &&
+      row.arrival_longitude != null
+    ) {
+      const prev = arrivalCandidates.get(txId);
+      const prevAt = prev?.arrival_at ? new Date(prev.arrival_at).getTime() : Number.POSITIVE_INFINITY;
+      const nextAt = row.arrival_at ? new Date(row.arrival_at).getTime() : Number.POSITIVE_INFINITY;
+      if (!prev || nextAt < prevAt || (nextAt === prevAt && assignmentId < Number(prev.id))) {
+        arrivalCandidates.set(txId, row);
+      }
     }
   }
 
@@ -279,6 +345,13 @@ export async function loadSharedEvidenceByTransactionIds(connection, transaction
       ...row,
       assignment_id: row.id,
     });
+  }
+
+  for (const [txId, row] of arrivalCandidates.entries()) {
+    const entry = map.get(txId);
+    if (!entry) continue;
+    entry.arrival = mapArrivalFromAssignmentRow(row);
+    entry.hasArrival = entry.arrival.hasArrival;
   }
 
   const assignmentIds = [...assignmentToTx.keys()];

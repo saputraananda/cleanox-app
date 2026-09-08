@@ -5,6 +5,7 @@ import api from '@shared/utils/api.js';
 import MobileWorkerBottomNav from '@mobile/components/MobileWorkerBottomNav.jsx';
 import MobileCameraCapture from '@mobile/components/MobileCameraCapture.jsx';
 import MobileConfirmDialog from '@mobile/components/MobileConfirmDialog.jsx';
+import { resolvePhotoUploadError } from '@mobile/utils/photoUploadError.js';
 
 const SESSIONS = [
   { key: 'pagi', label: 'Pagi', hint: '07:00 – 09:00 WIB' },
@@ -50,6 +51,7 @@ export default function MobileWorkerKebersihanPage() {
   const [photoPreview, setPhotoPreview] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [uploadFailAlert, setUploadFailAlert] = useState(null);
   const previewMapRef = useRef({});
   const draftPreviewMapRef = useRef({});
 
@@ -187,7 +189,9 @@ export default function MobileWorkerKebersihanPage() {
       clearDraftForArea(areaId);
       await loadStatus(session);
     } catch (err) {
-      setError(err.response?.data?.message || 'Gagal mengunggah foto kebersihan');
+      const info = resolvePhotoUploadError(err, 'kebersihan');
+      setUploadFailAlert(info);
+      setError(info.description);
     } finally {
       setUploadingAreaId(null);
     }
@@ -547,6 +551,18 @@ export default function MobileWorkerKebersihanPage() {
         onConfirm={confirmDeleteSavedPhoto}
         onCancel={() => !deleting && setDeleteTarget(null)}
         onClose={() => !deleting && setDeleteTarget(null)}
+      />
+
+      <MobileConfirmDialog
+        open={Boolean(uploadFailAlert)}
+        mode="alert"
+        variant="danger"
+        eyebrow={uploadFailAlert?.categoryLabel}
+        title={uploadFailAlert?.title}
+        description={uploadFailAlert?.description}
+        confirmLabel="Mengerti"
+        onConfirm={() => setUploadFailAlert(null)}
+        onClose={() => setUploadFailAlert(null)}
       />
     </div>
   );

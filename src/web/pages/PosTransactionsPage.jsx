@@ -29,6 +29,8 @@ export default function PosTransactionsPage() {
   const [transactions, setTransactions] = useState([]);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [pagination, setPagination] = useState({
@@ -45,6 +47,8 @@ export default function PosTransactionsPage() {
     size = pageSize,
     searchTerm = search,
     statusValue = status,
+    dateFromValue = dateFrom,
+    dateToValue = dateTo,
   } = {}) => {
     setLoading(true);
     setError('');
@@ -55,6 +59,8 @@ export default function PosTransactionsPage() {
           params: {
             search: searchTerm,
             status: statusValue,
+            ...(dateFromValue ? { date_from: dateFromValue } : {}),
+            ...(dateToValue ? { date_to: dateToValue } : {}),
             page,
             page_size: size,
           },
@@ -94,7 +100,18 @@ export default function PosTransactionsPage() {
 
   const handleFilter = async (e) => {
     e.preventDefault();
-    await loadData({ page: 1, size: pageSize, searchTerm: search, statusValue: status });
+    if (dateFrom && dateTo && dateFrom > dateTo) {
+      setError('Tanggal mulai tidak boleh setelah tanggal akhir');
+      return;
+    }
+    await loadData({
+      page: 1,
+      size: pageSize,
+      searchTerm: search,
+      statusValue: status,
+      dateFromValue: dateFrom,
+      dateToValue: dateTo,
+    });
   };
 
   const handleRefresh = async () => {
@@ -103,6 +120,8 @@ export default function PosTransactionsPage() {
       size: pageSize,
       searchTerm: search,
       statusValue: status,
+      dateFromValue: dateFrom,
+      dateToValue: dateTo,
     });
   };
 
@@ -112,6 +131,8 @@ export default function PosTransactionsPage() {
       size: pageSize,
       searchTerm: search,
       statusValue: status,
+      dateFromValue: dateFrom,
+      dateToValue: dateTo,
     });
   };
 
@@ -121,6 +142,8 @@ export default function PosTransactionsPage() {
       size,
       searchTerm: search,
       statusValue: status,
+      dateFromValue: dateFrom,
+      dateToValue: dateTo,
     });
   };
 
@@ -165,8 +188,8 @@ export default function PosTransactionsPage() {
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
-        <form onSubmit={handleFilter} className="flex flex-col lg:flex-row gap-3">
-          <div className="relative flex-1">
+        <form onSubmit={handleFilter} className="flex flex-col lg:flex-row lg:flex-wrap gap-3">
+          <div className="relative flex-1 min-w-[220px] self-end">
             <Search className="absolute left-3 top-1/2 w-4 h-4 -translate-y-1/2 text-slate-400" />
             <input
               value={search}
@@ -175,23 +198,47 @@ export default function PosTransactionsPage() {
               className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
             />
           </div>
-          <select
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
-          >
-            <option value="">All Statuses</option>
-            <option value="Draft">Draft</option>
-            <option value="Assigned">Assigned</option>
-            <option value="Waiting_Confirmation">Waiting Confirmation</option>
-            <option value="Scheduled">Scheduled</option>
-            <option value="In_Progress">In Progress</option>
-            <option value="Completed">Completed</option>
-            <option value="Cancelled">Cancelled</option>
-          </select>
+          <label className="flex min-w-[150px] flex-col gap-1">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              Status
+            </span>
+            <select
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
+            >
+              <option value="">All Statuses</option>
+              <option value="Scheduled">Scheduled</option>
+              <option value="In_Progress">In Progress</option>
+              <option value="Completed">Completed</option>
+              <option value="Cancelled">Cancelled</option>
+            </select>
+          </label>
+          <label className="flex min-w-[150px] flex-col gap-1">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              Tanggal layanan dari
+            </span>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
+            />
+          </label>
+          <label className="flex min-w-[150px] flex-col gap-1">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              Tanggal layanan sampai
+            </span>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400"
+            />
+          </label>
           <button
             type="submit"
-            className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
+            className="inline-flex items-center justify-center gap-2 self-end rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
           >
             <SlidersHorizontal className="w-4 h-4" />
             Terapkan

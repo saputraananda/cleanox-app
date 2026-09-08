@@ -16,6 +16,7 @@ import {
   Pencil,
   Trash2,
   Copy,
+  BadgePercent,
 } from 'lucide-react';
 import api from '@shared/utils/api.js';
 import CustomerFormFields, {
@@ -188,15 +189,12 @@ export default function PosTransactionCreatePage() {
     items: [],
     worker_ids: [],
     service_mode: 'home_service',
-    payment_method_id: '',
     promo_id: '',
     discount_id: '',
     discount_value: '',
     transport_fee: '',
   });
-  const [paymentMethods, setPaymentMethods] = useState([]);
   const [discountOptions, setDiscountOptions] = useState([]);
-  const [paymentGroup, setPaymentGroup] = useState('');
   const [itemModalOpen, setItemModalOpen] = useState(false);
   const [editingItemIndex, setEditingItemIndex] = useState(null);
   const [itemDraft, setItemDraft] = useState({
@@ -331,15 +329,13 @@ export default function PosTransactionCreatePage() {
     const loadData = async () => {
       setLoading(true);
       try {
-        const [serviceRes, paymentRes, discountRes] = await Promise.all([
+        const [serviceRes, discountRes] = await Promise.all([
           api.get('/pos-transactions/services'),
-          api.get('/pos-master/payment-methods', { params: { is_active: 1 } }),
           api.get('/pos-master/discounts', { params: { status: 'Aktif' } }),
           loadCustomers({ search: '', page: 1, pageSize: PAGE_SIZE_OPTIONS[0] || 10 }),
         ]);
         setServices(serviceRes.data.services || []);
         setServiceCategoriesMaster(serviceRes.data.categories || []);
-        setPaymentMethods(paymentRes.data.data || []);
         setDiscountOptions(discountRes.data.discounts || []);
         const workerRes = await api.get('/pos-transactions/workers');
         setWorkers(workerRes.data.workers || []);
@@ -1015,10 +1011,6 @@ export default function PosTransactionCreatePage() {
       setError('Tambah minimal 1 item service');
       return;
     }
-    if (!form.payment_method_id) {
-      setError('Metode pembayaran wajib dipilih');
-      return;
-    }
 
     setSaving(true);
     setError('');
@@ -1032,7 +1024,6 @@ export default function PosTransactionCreatePage() {
         total_people: Number(form.total_people || 1),
         notes: form.notes,
         service_mode: form.service_mode || 'home_service',
-        payment_method_id: Number(form.payment_method_id),
         promo_id: form.promo_id ? Number(form.promo_id) : null,
         discount_id: form.discount_id ? Number(form.discount_id) : null,
         discount_value:
@@ -1075,30 +1066,9 @@ export default function PosTransactionCreatePage() {
     selectedTotals.subtotal - selectedTotals.discount + Number(selectedTotals.transportFee || 0);
   const stepOrder = STEPS.map((s) => s.key);
   const activeIndex = stepOrder.indexOf(activeStepKey);
-  const selectedPaymentMethod = paymentMethods.find(
-    (m) => Number(m.id) === Number(form.payment_method_id)
-  );
-  const edcMethods = paymentMethods.filter((m) => m.method_group === 'EDC');
-  const paymentGroups = ['Tunai', 'BCA', 'EDC'];
-
-  const handlePaymentGroupChange = (group) => {
-    setPaymentGroup(group);
-    if (group === 'EDC') {
-      const stillEdc = edcMethods.some((m) => Number(m.id) === Number(form.payment_method_id));
-      if (!stillEdc) {
-        setForm((prev) => ({ ...prev, payment_method_id: '' }));
-      }
-      return;
-    }
-    const method = paymentMethods.find((m) => m.method_group === group);
-    setForm((prev) => ({
-      ...prev,
-      payment_method_id: method ? String(method.id) : '',
-    }));
-  };
 
   return (
-    <div className={`p-3 sm:p-5 space-y-5 max-w-[1400px] mx-auto bg-slate-50 min-h-full ${canShowItems ? 'pb-28' : 'pb-6'}`}>
+    <div className={`p-3 sm:p-5 space-y-5 max-w-[1400px] mx-auto bg-slate-50 min-h-full ${canShowItems ? 'pb-24 xl:pb-6' : 'pb-6'}`}>
       <section
         className="relative overflow-hidden rounded-[20px] px-5 py-[18px] text-white"
         style={{
@@ -1467,6 +1437,8 @@ export default function PosTransactionCreatePage() {
             ) : null
           ) : (
             <>
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px] xl:items-start">
+                <div className="min-w-0 space-y-5">
               <section className={`${sectionCardClass} transition duration-150`}>
                 <SectionHeader
                   step="Langkah 4"
@@ -1604,59 +1576,92 @@ export default function PosTransactionCreatePage() {
 
               <section className={sectionCardClass}>
                 <SectionHeader
-                  icon={MessageSquareText}
-                  title="Pembayaran"
-                  hint="Status default belum lunas — bukti diunggah di detail transaksi"
+                  icon={BadgePercent}
+                  title="Penyesuaian Harga"
+                  hint="Promo, diskon, dan transport memengaruhi estimasi di panel kanan"
                 />
                 <div className="space-y-3">
-                  <div className="flex flex-wrap gap-2">
-                    {paymentGroups.map((group) => {
-                      const active =
-                        (paymentGroup || selectedPaymentMethod?.method_group || '') === group;
-                      return (
-                        <button
-                          key={group}
-                          type="button"
-                          onClick={() => handlePaymentGroupChange(group)}
-                          className={`rounded-xl border px-3.5 py-2 text-sm font-semibold transition ${
-                            active
-                              ? 'border-slate-900 bg-slate-900 text-white'
-                              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                          }`}
-                        >
-                          {group}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  {(paymentGroup || selectedPaymentMethod?.method_group) === 'BCA' &&
-                    selectedPaymentMethod && (
-                      <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-                        {selectedPaymentMethod.label}
-                      </p>
-                    )}
-                  {(paymentGroup || selectedPaymentMethod?.method_group) === 'EDC' && (
+                  <label className="block space-y-1.5">
+                    <span className={labelEyebrowClass}>Promo (satu transaksi)</span>
+                    <select
+                      value={form.promo_id}
+                      onChange={(e) =>
+                        setForm((prev) => ({ ...prev, promo_id: e.target.value }))
+                      }
+                      disabled={form.items.length === 0}
+                      className={inputClass}
+                    >
+                      <option value="">Tanpa promo</option>
+                      {availablePromos.map((promo) => (
+                        <option key={promo.id} value={promo.id}>
+                          {promo.name} -{' '}
+                          {promo.promo_type === 'persen'
+                            ? `${promo.promo_value}%`
+                            : `Rp ${Number(promo.promo_value || 0).toLocaleString('id-ID')}`}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block space-y-1.5">
+                    <span className={labelEyebrowClass}>Diskon (satu transaksi)</span>
+                    <select
+                      value={form.discount_id}
+                      onChange={(e) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          discount_id: e.target.value,
+                          discount_value: '',
+                        }))
+                      }
+                      className={inputClass}
+                    >
+                      <option value="">Tanpa diskon</option>
+                      {discountOptions.map((discount) => (
+                        <option key={discount.id} value={discount.id}>
+                          {discount.discount_type === 'additional'
+                            ? `${discount.name} (Additional)`
+                            : `${discount.name} - ${
+                                discount.discount_type === 'persen'
+                                  ? `${discount.discount_value}%`
+                                  : `Rp ${Number(discount.discount_value || 0).toLocaleString('id-ID')}`
+                              }`}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {discountOptions.find((row) => Number(row.id) === Number(form.discount_id))
+                    ?.discount_type === 'additional' && (
                     <label className="block space-y-1.5">
-                      <span className={labelEyebrowClass}>Jenis kartu EDC BCA</span>
-                      <select
-                        value={form.payment_method_id}
+                      <span className={labelEyebrowClass}>Nominal diskon tambahan</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={form.discount_value}
                         onChange={(e) =>
-                          setForm((prev) => ({ ...prev, payment_method_id: e.target.value }))
+                          setForm((prev) => ({ ...prev, discount_value: e.target.value }))
                         }
                         className={inputClass}
-                      >
-                        <option value="">Pilih jenis kartu</option>
-                        {edcMethods.map((method) => (
-                          <option key={method.id} value={method.id}>
-                            {method.name}
-                          </option>
-                        ))}
-                      </select>
+                        placeholder="Contoh: 500"
+                      />
                     </label>
                   )}
-                  <p className="text-[11.5px] text-slate-400">
-                    Status pembayaran: Belum lunas (otomatis saat dibuat)
-                  </p>
+                  {form.service_mode === 'home_service' && (
+                    <label className="block space-y-1.5">
+                      <span className={labelEyebrowClass}>Biaya Transport (opsional)</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={form.transport_fee}
+                        onChange={(e) =>
+                          setForm((prev) => ({ ...prev, transport_fee: e.target.value }))
+                        }
+                        className={inputClass}
+                        placeholder="Contoh: 25000"
+                      />
+                    </label>
+                  )}
                 </div>
               </section>
 
@@ -1731,142 +1736,56 @@ export default function PosTransactionCreatePage() {
                   </div>
                 </div>
               </section>
+                </div>
 
-              <section
-                className="sticky bottom-4 z-10 rounded-[20px] p-5 text-white shadow-[0_12px_40px_rgba(15,23,42,.25)]"
-                style={{
-                  background: 'linear-gradient(135deg, #0F172A 0%, #1E3A8A 55%, #1D4ED8 100%)',
-                }}
-              >
-                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                  <div className="min-w-0 flex-1 space-y-3">
-                    <label className="block max-w-md space-y-1.5">
-                      <span className="text-[9.5px] font-semibold uppercase tracking-[.14em] text-blue-200/80">
-                        Promo (satu transaksi)
-                      </span>
-                      <select
-                        value={form.promo_id}
-                        onChange={(e) =>
-                          setForm((prev) => ({ ...prev, promo_id: e.target.value }))
-                        }
-                        disabled={form.items.length === 0}
-                        className="w-full rounded-[12px] border border-white/20 bg-white/10 px-3 py-2.5 text-[13px] text-white focus:border-white/40 focus:outline-none disabled:opacity-50"
-                      >
-                        <option value="" className="text-slate-800">
-                          Tanpa promo
-                        </option>
-                        {availablePromos.map((promo) => (
-                          <option key={promo.id} value={promo.id} className="text-slate-800">
-                            {promo.name} -{' '}
-                            {promo.promo_type === 'persen'
-                              ? `${promo.promo_value}%`
-                              : `Rp ${Number(promo.promo_value || 0).toLocaleString('id-ID')}`}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="block max-w-md space-y-1.5">
-                      <span className="text-[9.5px] font-semibold uppercase tracking-[.14em] text-blue-200/80">
-                        Diskon (satu transaksi)
-                      </span>
-                      <select
-                        value={form.discount_id}
-                        onChange={(e) =>
-                          setForm((prev) => ({
-                            ...prev,
-                            discount_id: e.target.value,
-                            discount_value: '',
-                          }))
-                        }
-                        className="w-full rounded-[12px] border border-white/20 bg-white/10 px-3 py-2.5 text-[13px] text-white focus:border-white/40 focus:outline-none"
-                      >
-                        <option value="" className="text-slate-800">
-                          Tanpa diskon
-                        </option>
-                        {discountOptions.map((discount) => (
-                          <option key={discount.id} value={discount.id} className="text-slate-800">
-                            {discount.discount_type === 'additional'
-                              ? `${discount.name} (Additional)`
-                              : `${discount.name} - ${
-                                  discount.discount_type === 'persen'
-                                    ? `${discount.discount_value}%`
-                                    : `Rp ${Number(discount.discount_value || 0).toLocaleString('id-ID')}`
-                                }`}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    {discountOptions.find((row) => Number(row.id) === Number(form.discount_id))
-                      ?.discount_type === 'additional' && (
-                      <label className="block max-w-md space-y-1.5">
-                        <span className="text-[9.5px] font-semibold uppercase tracking-[.14em] text-blue-200/80">
-                          Nominal diskon tambahan
-                        </span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={form.discount_value}
-                          onChange={(e) =>
-                            setForm((prev) => ({ ...prev, discount_value: e.target.value }))
-                          }
-                          className="w-full rounded-[12px] border border-white/20 bg-white/10 px-3 py-2.5 text-[13px] text-white placeholder:text-blue-100/50 focus:border-white/40 focus:outline-none"
-                          placeholder="Contoh: 500"
-                        />
-                      </label>
-                    )}
-                    {form.service_mode === 'home_service' && (
-                      <label className="mt-3 block space-y-1.5 text-[12.5px] text-blue-100">
-                        <span className="font-medium">Biaya Transport (opsional)</span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={form.transport_fee}
-                          onChange={(e) =>
-                            setForm((prev) => ({ ...prev, transport_fee: e.target.value }))
-                          }
-                          className="w-full rounded-[12px] border border-white/20 bg-white/10 px-3 py-2.5 text-[13px] text-white placeholder:text-blue-100/50 focus:border-white/40 focus:outline-none"
-                          placeholder="Contoh: 25000"
-                        />
-                      </label>
-                    )}
-                    <div>
+                <aside className="hidden xl:block xl:sticky xl:top-4">
+                  <div
+                    className="rounded-[20px] p-5 text-white shadow-[0_12px_40px_rgba(15,23,42,.18)]"
+                    style={{
+                      background: 'linear-gradient(135deg, #0F172A 0%, #1E3A8A 55%, #1D4ED8 100%)',
+                    }}
+                  >
                     <p className="text-[9.5px] font-semibold uppercase tracking-[.14em] text-blue-200/80">
                       Ringkasan biaya
                     </p>
-                    <p className="mt-1 text-[11.5px] text-blue-100">Subtotal (non-GC)</p>
-                    <p className="font-sans text-[20px] font-extrabold tracking-[-0.01em]">
+                    <p className="mt-2 text-[11.5px] text-blue-100/90">
+                      {form.items.length} item ·{' '}
+                      {form.service_mode === 'take_home' ? 'Take Home' : 'Home Service'}
+                    </p>
+                    <p className="mt-4 text-[11.5px] text-blue-100">Subtotal (non-GC)</p>
+                    <p className="font-sans text-[22px] font-extrabold tracking-[-0.01em]">
                       Rp {selectedTotals.subtotal.toLocaleString('id-ID')}
                     </p>
-                    <p className="mt-2 text-[12.5px] text-blue-100">
-                      Diskon promo:{' '}
-                      <span className="font-sans">
-                        Rp {Number(selectedTotals.promoPart || 0).toLocaleString('id-ID')}
-                      </span>
-                    </p>
-                    <p className="text-[12.5px] text-blue-100">
-                      Diskon tambahan:{' '}
-                      <span className="font-sans">
-                        Rp {Number(selectedTotals.diskonPart || 0).toLocaleString('id-ID')}
-                      </span>
-                    </p>
-                    <p className="mt-1 text-[12.5px] text-blue-100">
-                      Total diskon:{' '}
-                      <span className="font-sans">
-                        Rp {selectedTotals.discount.toLocaleString('id-ID')}
-                      </span>
-                    </p>
-                    {form.service_mode === 'home_service' && (
-                      <p className="mt-1 text-[12.5px] text-blue-100">
-                        Biaya transport:{' '}
+                    <div className="mt-3 space-y-1.5 border-t border-white/10 pt-3 text-[12.5px] text-blue-100">
+                      <p className="flex justify-between gap-2">
+                        <span>Diskon promo</span>
                         <span className="font-sans">
-                          Rp {Number(selectedTotals.transportFee || 0).toLocaleString('id-ID')}
+                          Rp {Number(selectedTotals.promoPart || 0).toLocaleString('id-ID')}
                         </span>
                       </p>
-                    )}
+                      <p className="flex justify-between gap-2">
+                        <span>Diskon tambahan</span>
+                        <span className="font-sans">
+                          Rp {Number(selectedTotals.diskonPart || 0).toLocaleString('id-ID')}
+                        </span>
+                      </p>
+                      <p className="flex justify-between gap-2">
+                        <span>Total diskon</span>
+                        <span className="font-sans">
+                          Rp {selectedTotals.discount.toLocaleString('id-ID')}
+                        </span>
+                      </p>
+                      {form.service_mode === 'home_service' && (
+                        <p className="flex justify-between gap-2">
+                          <span>Biaya transport</span>
+                          <span className="font-sans">
+                            Rp {Number(selectedTotals.transportFee || 0).toLocaleString('id-ID')}
+                          </span>
+                        </p>
+                      )}
+                    </div>
                     {selectedTotals.hasGc && (
-                      <div className="mt-2 space-y-1 text-[12px] text-blue-100">
+                      <div className="mt-3 space-y-1 text-[12px] text-blue-100">
                         {selectedTotals.gcRates.map((row, idx) => (
                           <p key={`${row.name}-${idx}`}>
                             GC: Rp {Number(row.rate || 0).toLocaleString('id-ID')} / {row.crew}{' '}
@@ -1875,27 +1794,51 @@ export default function PosTransactionCreatePage() {
                         ))}
                       </div>
                     )}
-                    <p className="mt-1 text-[13px] font-semibold text-white">
+                    <p className="mt-4 text-[13px] font-semibold text-white">
                       {selectedTotals.hasGc ? (
                         <>Total final: Menyesuaikan total jam pengerjaan</>
                       ) : (
                         <>
                           Estimasi total:{' '}
-                          <span className="font-sans">Rp {finalTotal.toLocaleString('id-ID')}</span>
+                          <span className="font-sans text-[18px]">
+                            Rp {finalTotal.toLocaleString('id-ID')}
+                          </span>
                         </>
                       )}
                     </p>
-                    </div>
+                    <button
+                      type="submit"
+                      disabled={saving}
+                      className="mt-4 w-full rounded-[12px] bg-white px-5 py-3 text-[13px] font-bold text-slate-900 transition duration-150 hover:-translate-y-0.5 active:scale-[.98] disabled:opacity-60"
+                    >
+                      {saving ? 'Menyimpan...' : 'Simpan Transaksi POS'}
+                    </button>
+                  </div>
+                </aside>
+              </div>
+
+              <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white/95 px-3 py-3 shadow-[0_-8px_24px_rgba(15,23,42,.08)] backdrop-blur xl:hidden">
+                <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-semibold uppercase tracking-[.14em] text-slate-400">
+                      Estimasi
+                    </p>
+                    <p className="truncate font-sans text-[15px] font-extrabold text-slate-900">
+                      {selectedTotals.hasGc
+                        ? 'Menyesuaikan jam GC'
+                        : `Rp ${finalTotal.toLocaleString('id-ID')}`}
+                    </p>
                   </div>
                   <button
                     type="submit"
                     disabled={saving}
-                    className="rounded-[12px] bg-white px-5 py-3 text-[13px] font-bold text-slate-900 transition duration-150 hover:-translate-y-0.5 active:scale-[.98] disabled:opacity-60"
+                    className="shrink-0 rounded-[12px] px-4 py-2.5 text-[13px] font-bold text-white transition duration-150 hover:-translate-y-0.5 active:scale-[.98] disabled:opacity-60"
+                    style={primaryBtnStyle}
                   >
                     {saving ? 'Menyimpan...' : 'Simpan Transaksi POS'}
                   </button>
                 </div>
-              </section>
+              </div>
             </>
           )}
         </form>

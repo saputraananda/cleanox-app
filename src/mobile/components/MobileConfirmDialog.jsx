@@ -30,6 +30,7 @@ const VARIANT_UI = {
 /**
  * Standar dialog konfirmasi / alert kecil terpusat (centered single-card).
  * Props selaras template ConfirmModal + dukungan variant aksi Cleanox.
+ * mode="alert" → satu tombol OK; mode="confirm" (default) → Cancel + Confirm.
  */
 export default function MobileConfirmDialog({
   open,
@@ -39,6 +40,8 @@ export default function MobileConfirmDialog({
   confirmLabel = 'Ya',
   cancelLabel = 'Batal',
   variant = 'accept',
+  mode = 'confirm',
+  eyebrow = null,
   busy = false,
   loading,
   onConfirm,
@@ -48,16 +51,25 @@ export default function MobileConfirmDialog({
   if (!open || typeof document === 'undefined') return null;
 
   const isLoading = busy || loading;
+  const isAlert = mode === 'alert';
   const close = onClose || onCancel;
+  const dismissAlert = () => {
+    if (onConfirm) onConfirm();
+    else close?.();
+  };
   const bodyText = desc || description;
   const ui = VARIANT_UI[variant] || VARIANT_UI.accept;
   const Icon = ui.icon;
+  const eyebrowClass =
+    variant === 'danger' ? 'text-rose-600' : 'text-slate-500';
 
   return createPortal(
     <div
       className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 animate-fadeIn"
       onClick={() => {
-        if (!isLoading) close?.();
+        if (isLoading) return;
+        if (isAlert) dismissAlert();
+        else close?.();
       }}
       role="presentation"
     >
@@ -75,32 +87,54 @@ export default function MobileConfirmDialog({
         </div>
 
         <div className="space-y-2">
+          {eyebrow ? (
+            <p
+              className={`text-[10px] font-bold uppercase tracking-wider ${eyebrowClass}`}
+            >
+              {eyebrow}
+            </p>
+          ) : null}
           <h3 id="confirm-modal-title" className="text-sm font-bold text-slate-800">
             {title}
           </h3>
           {bodyText ? (
-            <p className="text-xs text-slate-400 leading-relaxed">{bodyText}</p>
+            <p className="text-xs text-slate-400 leading-relaxed whitespace-pre-line">
+              {bodyText}
+            </p>
           ) : null}
         </div>
 
-        <div className="flex items-center gap-3 pt-2">
-          <button
-            type="button"
-            disabled={isLoading}
-            onClick={() => close?.()}
-            className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-xs font-bold text-slate-500 hover:bg-slate-50 transition active:scale-95 disabled:opacity-60"
-          >
-            {cancelLabel}
-          </button>
-          <button
-            type="button"
-            disabled={isLoading}
-            onClick={() => onConfirm?.()}
-            className={`flex-1 rounded-xl py-2.5 text-xs font-bold text-white transition active:scale-95 disabled:opacity-60 ${ui.confirmBtn}`}
-          >
-            {isLoading ? 'Memproses...' : confirmLabel}
-          </button>
-        </div>
+        {isAlert ? (
+          <div className="pt-2">
+            <button
+              type="button"
+              disabled={isLoading}
+              onClick={() => dismissAlert()}
+              className={`w-full rounded-xl py-2.5 text-xs font-bold text-white transition active:scale-95 disabled:opacity-60 ${ui.confirmBtn}`}
+            >
+              {isLoading ? 'Memproses...' : confirmLabel}
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-3 pt-2">
+            <button
+              type="button"
+              disabled={isLoading}
+              onClick={() => close?.()}
+              className="flex-1 rounded-xl border border-slate-200 bg-white py-2.5 text-xs font-bold text-slate-500 hover:bg-slate-50 transition active:scale-95 disabled:opacity-60"
+            >
+              {cancelLabel}
+            </button>
+            <button
+              type="button"
+              disabled={isLoading}
+              onClick={() => onConfirm?.()}
+              className={`flex-1 rounded-xl py-2.5 text-xs font-bold text-white transition active:scale-95 disabled:opacity-60 ${ui.confirmBtn}`}
+            >
+              {isLoading ? 'Memproses...' : confirmLabel}
+            </button>
+          </div>
+        )}
       </div>
     </div>,
     document.body
