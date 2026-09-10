@@ -3,21 +3,27 @@ import { isGcPricingPending } from './posGeneralCleaningBilling.js';
 import { transactionHasMeterPending } from './posMeterServices.js';
 import {
   CLEANOX_RECEIPT_COMPANY,
-  drawA4LandscapeHeader,
-  drawCompanyBlock,
-  drawCustomerBox,
-  drawFooter,
   drawItemsTable,
   drawTotalsBox,
-  drawTransactionMeta,
   loadImageAsDataUrl as loadImageAsDataUrlFromLayout,
 } from './posPdfLayout.js';
+import {
+  drawEReceiptCustomerAndInfo,
+  drawEReceiptKop,
+  drawEReceiptPrintedAt,
+  drawEReceiptThanksNote,
+  drawEReceiptTitleRow,
+  loadEReceiptKopAsDataUrl,
+} from './posEReceiptLayout.js';
 
 export { CLEANOX_RECEIPT_COMPANY };
 export const loadImageAsDataUrl = loadImageAsDataUrlFromLayout;
+export { loadEReceiptKopAsDataUrl };
 
 const E_RECEIPT_FOOTER_TEXT =
   'Terima kasih atas kepercayaan Anda. Jadwalkan pembersihan rutin berikutnya dan nikmati rumah yang selalu bersih dan segar bersama Cleanox.';
+
+const TOTALS_BOX_W = 72;
 
 function normalizeLogoInput(logoDataUrl) {
   if (!logoDataUrl) {
@@ -34,8 +40,7 @@ function normalizeLogoInput(logoDataUrl) {
 }
 
 /**
- * E-Receipt A4 landscape — same layout as internal invoice,
- * without jumlah teknisi and without assigned technicians list.
+ * E-Receipt A4 portrait — full-width kop (aspect preserved) + 2-column body.
  * @param {{ transaction: object, items?: array, logoDataUrl?: string|{ dataUrl: string, width?: number, height?: number }|null }} params
  */
 export async function downloadPosEReceiptPdf({ transaction, items = [], logoDataUrl = null }) {
@@ -44,45 +49,48 @@ export async function downloadPosEReceiptPdf({ transaction, items = [], logoData
   const logo = normalizeLogoInput(logoDataUrl);
 
   const doc = new jsPDF({
-    orientation: 'landscape',
+    orientation: 'portrait',
     unit: 'mm',
     format: 'a4',
   });
 
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
-  const margin = 14;
+  const margin = 12;
   const contentW = pageW - margin * 2;
   const itemRows = Array.isArray(items) ? items : [];
   const pendingGc = isGcPricingPending(transaction, itemRows);
   const pendingMeter = transactionHasMeterPending(itemRows);
   const crew = Math.max(1, Number(transaction.total_people || 1));
 
-  let y = drawA4LandscapeHeader(doc, {
-    logoDataUrl: logo.dataUrl,
-    logoNaturalWidth: logo.width,
-    logoNaturalHeight: logo.height,
-    title: 'E-RECEIPT',
+  // Portrait column widths (sum = contentW)
+  const colNo = 8;
+  const colService = 58;
+  const colPromo = 28;
+  const colQty = 12;
+  const colPrice = 36;
+  const colTotal = contentW - colNo - colService - colPromo - colQty - colPrice;
+
+  let y = drawEReceiptKop(doc, {
+    dataUrl: logo.dataUrl,
+    naturalWidth: logo.width,
+    naturalHeight: logo.height,
+    pageW,
   });
 
-  const companyBottom = drawCompanyBlock(doc, {
-    company: CLEANOX_RECEIPT_COMPANY,
-    startY: y,
-    margin,
-  });
-
-  const metaBottom = drawTransactionMeta(doc, {
+  y = drawEReceiptTitleRow(doc, {
     transaction,
-    pendingGc,
-    startY: y,
+    margin,
+    pageW,
+    y,
+  });
+
+  y = drawEReceiptCustomerAndInfo(doc, {
+    transaction,
     margin,
     contentW,
-    includeCrewCount: false,
-    includePaymentStatus: false,
+    y,
   });
-
-  y = Math.max(companyBottom, metaBottom) + 6;
-  y = drawCustomerBox(doc, { transaction, margin, contentW, y, comfortableSpacing: true });
 
   y = drawItemsTable(doc, {
     items: itemRows,
@@ -92,14 +100,26 @@ export async function downloadPosEReceiptPdf({ transaction, items = [], logoData
     contentW,
     pageH,
     y,
+    columnWidths: [colNo, colService, colPromo, colQty, colPrice, colTotal],
   });
 
-  y += 4;
-  doc.setDrawColor(226, 232, 240);
-  doc.line(margin, y, pageW - margin, y);
-  y += 4;
+  const totalsBlockH = pendingGc || pendingMeter ? 40 : 58;
+  const printedGap = 8;
+  if (y + totalsBlockH + printedGap > pageH - 8) {
+    doc.addPage();
+    y = margin;
+  }
 
-  drawTotalsBox(doc, {
+  y += 4;
+  const thanksMaxW = Math.max(60, contentW - TOTALS_BOX_W - 8);
+  drawEReceiptThanksNote(doc, {
+    text: E_RECEIPT_FOOTER_TEXT,
+    x: margin,
+    y: y + 8,
+    maxWidth: thanksMaxW,
+  });
+
+  const totalsBottom = drawTotalsBox(doc, {
     transaction,
     pendingGc,
     pendingMeter,
@@ -109,12 +129,11 @@ export async function downloadPosEReceiptPdf({ transaction, items = [], logoData
     showPaymentBadge: true,
   });
 
-  drawFooter(doc, {
+  drawEReceiptPrintedAt(doc, {
     pageW,
     pageH,
     margin,
-    footerNote: E_RECEIPT_FOOTER_TEXT,
-    multiline: true,
+    y: totalsBottom + 6,
   });
 
   const filename = `ereceipt-${transaction.transaction_no || transaction.id || 'pos'}.pdf`;

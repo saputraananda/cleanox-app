@@ -37,6 +37,67 @@ const CREATE_STEPS = [
   { key: 'simpan', label: 'Simpan' },
 ];
 
+function HorizontalStepper({ steps, stepIndex, onStepClick }) {
+  return (
+    <div className="mt-4 overflow-x-auto pb-1">
+      <div className="flex min-w-[520px] items-start">
+        {steps.map((step, idx) => {
+          const completed = idx < stepIndex;
+          const current = idx === stepIndex;
+          const clickable = idx < stepIndex;
+          return (
+            <div key={step.key} className="contents">
+              <button
+                type="button"
+                disabled={!clickable}
+                onClick={() => clickable && onStepClick?.(idx)}
+                className={`flex w-[72px] shrink-0 flex-col items-center gap-2 ${
+                  clickable ? 'cursor-pointer' : 'cursor-default'
+                }`}
+              >
+                <span
+                  className={`flex h-7 w-7 items-center justify-center rounded-full ${
+                    completed
+                      ? 'bg-violet-700'
+                      : current
+                        ? 'border-2 border-violet-700 bg-white'
+                        : 'border border-slate-200 bg-white'
+                  }`}
+                >
+                  <span
+                    className={`h-2 w-2 rounded-full ${
+                      completed ? 'bg-white' : current ? 'bg-violet-700' : 'bg-slate-300'
+                    }`}
+                  />
+                </span>
+                <span
+                  className={`text-center text-[11px] leading-tight ${
+                    current
+                      ? 'font-semibold text-slate-800'
+                      : completed
+                        ? 'font-medium text-slate-700'
+                        : 'font-medium text-slate-400'
+                  }`}
+                >
+                  {step.label}
+                </span>
+              </button>
+              {idx < steps.length - 1 && (
+                <div
+                  className={`mt-3.5 h-0.5 min-w-[8px] flex-1 ${
+                    idx < stepIndex ? 'bg-violet-700' : 'bg-slate-200'
+                  }`}
+                  aria-hidden
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 const DAY_NAMES = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
 const inputClass =
@@ -113,6 +174,7 @@ export default function PosAgendaCreatePage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [stepIndex, setStepIndex] = useState(0);
 
   const isSingleDay =
     Boolean(form.start_date) && Boolean(form.end_date) && form.start_date === form.end_date;
@@ -313,6 +375,64 @@ export default function PosAgendaCreatePage() {
     });
   };
 
+  const validateStep = (index) => {
+    if (index === 0) {
+      if (form.agenda_kind === 'other' && !form.other_type) {
+        return 'Tipe agenda lain wajib dipilih';
+      }
+      if (form.other_type === 'lainnya' && !form.other_type_label.trim()) {
+        return 'Isian Lainnya wajib diisi';
+      }
+      return null;
+    }
+    if (index === 1) {
+      if (!form.name.trim() || !form.location.trim()) {
+        return 'Nama dan lokasi wajib diisi';
+      }
+      if (!form.start_date || !form.end_date) {
+        return 'Tanggal mulai dan selesai wajib diisi';
+      }
+      if (form.end_date < form.start_date) {
+        return 'Tanggal selesai tidak boleh sebelum tanggal mulai';
+      }
+      if (isSingleDay && !form.agenda_time) {
+        return 'Jam wajib diisi untuk agenda satu hari';
+      }
+      return null;
+    }
+    if (index === 2) {
+      if (form.content_type === 'description' && !form.description.trim()) {
+        return 'Deskripsi wajib diisi';
+      }
+      if (form.content_type === 'item_service' && form.items.length < 1) {
+        return 'Minimal 1 item service';
+      }
+      return null;
+    }
+    if (index === 3) {
+      if (form.worker_ids.length < 1) return 'Minimal 1 teknisi';
+      return null;
+    }
+    return null;
+  };
+
+  const goNext = () => {
+    const msg = validateStep(stepIndex);
+    if (msg) {
+      setError(msg);
+      return;
+    }
+    setError('');
+    setSuccess('');
+    setStepIndex((i) => Math.min(i + 1, CREATE_STEPS.length - 1));
+  };
+
+  const goBack = () => {
+    setError('');
+    setSuccess('');
+    setStepIndex((i) => Math.max(i - 1, 0));
+  };
+
   const submitAgenda = async (saveMode) => {
     setError('');
     setSuccess('');
@@ -424,16 +544,15 @@ export default function PosAgendaCreatePage() {
         <p className="mt-1 text-sm text-slate-500">
           Lengkapi langkah berikut lalu simpan sebagai draft atau jadwalkan.
         </p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {CREATE_STEPS.map((step) => (
-            <span
-              key={step.key}
-              className="rounded-full border border-violet-200 bg-violet-50 px-3 py-1 text-[11px] font-semibold text-violet-800"
-            >
-              {step.label}
-            </span>
-          ))}
-        </div>
+        <HorizontalStepper
+          steps={CREATE_STEPS}
+          stepIndex={stepIndex}
+          onStepClick={(idx) => {
+            setError('');
+            setSuccess('');
+            setStepIndex(idx);
+          }}
+        />
       </div>
 
       {error && (
@@ -449,369 +568,420 @@ export default function PosAgendaCreatePage() {
 
       <section className="space-y-5 rounded-[20px] border border-slate-200 bg-white p-4 sm:p-5">
         <div>
-          <p className="text-[13px] font-semibold text-slate-900">Form Agenda</p>
+          <p className="text-[13px] font-semibold text-slate-900">
+            {CREATE_STEPS[stepIndex]?.label}
+          </p>
           <p className="mt-1 text-[12px] text-slate-500">
-            Lengkapi semua langkah lalu simpan draft atau jadwalkan.
+            Langkah {stepIndex + 1} dari {CREATE_STEPS.length}
           </p>
         </div>
 
-        <div className="space-y-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">1. Jenis Agenda</p>
-          <div className="flex flex-wrap gap-2">
-            {[
-              { value: 'special_collaboration', label: 'Special Collaboration' },
-              { value: 'other', label: 'Agenda lain' },
-            ].map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() =>
-                  setForm((prev) => ({
-                    ...prev,
-                    agenda_kind: opt.value,
-                    other_type: opt.value === 'other' ? prev.other_type : '',
-                    other_type_label: opt.value === 'other' ? prev.other_type_label : '',
-                  }))
-                }
-                className={`rounded-xl border px-3.5 py-2 text-sm font-semibold ${
-                  form.agenda_kind === opt.value
-                    ? 'border-violet-700 bg-violet-700 text-white'
-                    : 'border-slate-200 bg-white text-slate-700'
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-          {form.agenda_kind === 'other' && (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="block space-y-1.5">
-                <span className="text-xs font-semibold text-slate-600">Tipe agenda lain</span>
-                <select
-                  value={form.other_type}
-                  onChange={(e) =>
+        {stepIndex === 0 && (
+          <div key="jenis" className="space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Jenis Agenda
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { value: 'special_collaboration', label: 'Special Collaboration' },
+                { value: 'other', label: 'Agenda lain' },
+              ].map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() =>
                     setForm((prev) => ({
                       ...prev,
-                      other_type: e.target.value,
-                      other_type_label: e.target.value === 'lainnya' ? prev.other_type_label : '',
+                      agenda_kind: opt.value,
+                      other_type: opt.value === 'other' ? prev.other_type : '',
+                      other_type_label: opt.value === 'other' ? prev.other_type_label : '',
                     }))
                   }
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+                  className={`rounded-xl border px-3.5 py-2 text-sm font-semibold ${
+                    form.agenda_kind === opt.value
+                      ? 'border-violet-700 bg-violet-700 text-white'
+                      : 'border-slate-200 bg-white text-slate-700'
+                  }`}
                 >
-                  <option value="">Pilih tipe</option>
-                  {OTHER_TYPES.map((t) => (
-                    <option key={t.value} value={t.value}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {form.other_type === 'lainnya' && (
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            {form.agenda_kind === 'other' && (
+              <div className="grid gap-3 sm:grid-cols-2">
                 <label className="block space-y-1.5">
-                  <span className="text-xs font-semibold text-slate-600">Isian manual</span>
-                  <input
-                    value={form.other_type_label}
+                  <span className="text-xs font-semibold text-slate-600">Tipe agenda lain</span>
+                  <select
+                    value={form.other_type}
                     onChange={(e) =>
-                      setForm((prev) => ({ ...prev, other_type_label: e.target.value }))
+                      setForm((prev) => ({
+                        ...prev,
+                        other_type: e.target.value,
+                        other_type_label:
+                          e.target.value === 'lainnya' ? prev.other_type_label : '',
+                      }))
                     }
                     className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
-                    placeholder="Nama agenda lain"
-                  />
+                  >
+                    <option value="">Pilih tipe</option>
+                    {OTHER_TYPES.map((t) => (
+                      <option key={t.value} value={t.value}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
                 </label>
-              )}
-            </div>
-          )}
-        </div>
+                {form.other_type === 'lainnya' && (
+                  <label className="block space-y-1.5">
+                    <span className="text-xs font-semibold text-slate-600">Isian manual</span>
+                    <input
+                      value={form.other_type_label}
+                      onChange={(e) =>
+                        setForm((prev) => ({ ...prev, other_type_label: e.target.value }))
+                      }
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+                      placeholder="Nama agenda lain"
+                    />
+                  </label>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
-        <div className="space-y-3 border-t border-slate-100 pt-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">2. Detail Agenda</p>
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="block space-y-1.5 md:col-span-2">
-              <span className="text-xs font-semibold text-slate-600">Nama Agenda</span>
-              <input
-                value={form.name}
-                onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
-                className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
-              />
-            </label>
-            <label className="block space-y-1.5 md:col-span-2">
-              <span className="text-xs font-semibold text-slate-600">Lokasi</span>
-              <input
-                value={form.location}
-                onChange={(e) => setForm((prev) => ({ ...prev, location: e.target.value }))}
-                className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
-              />
-            </label>
-            <label className="block space-y-1.5">
-              <span className="text-xs font-semibold text-slate-600">Tanggal mulai</span>
-              <input
-                type="date"
-                value={form.start_date}
-                onChange={(e) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    start_date: e.target.value,
-                    end_date: prev.end_date || e.target.value,
-                  }))
-                }
-                className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
-              />
-            </label>
-            <label className="block space-y-1.5">
-              <span className="text-xs font-semibold text-slate-600">Tanggal selesai</span>
-              <input
-                type="date"
-                value={form.end_date}
-                onChange={(e) => setForm((prev) => ({ ...prev, end_date: e.target.value }))}
-                className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
-              />
-            </label>
-            <label className="block space-y-1.5">
-              <span className="text-xs font-semibold text-slate-600">Hari (otomatis)</span>
-              <input
-                value={dayLabel}
-                readOnly
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-600"
-              />
-            </label>
-            {isSingleDay && (
-              <label className="block space-y-1.5">
-                <span className="text-xs font-semibold text-slate-600">Jam</span>
+        {stepIndex === 1 && (
+          <div key="detail" className="space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Detail Agenda
+            </p>
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="block space-y-1.5 md:col-span-2">
+                <span className="text-xs font-semibold text-slate-600">Nama Agenda</span>
                 <input
-                  type="time"
-                  value={form.agenda_time}
-                  onChange={(e) => setForm((prev) => ({ ...prev, agenda_time: e.target.value }))}
+                  value={form.name}
+                  onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
                   className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
                 />
               </label>
-            )}
-            {isMultiDay && (
-              <p className="text-xs text-slate-500 md:col-span-2">
-                Agenda multi-hari tidak memakai jam.
-              </p>
-            )}
-          </div>
-        </div>
-
-        <div className="space-y-3 border-t border-slate-100 pt-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">3. Isi Agenda</p>
-          <div className="flex flex-wrap gap-2">
-            {[
-              { value: 'item_service', label: 'Item Service' },
-              { value: 'description', label: 'Deskripsi' },
-            ].map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() =>
-                  setForm((prev) => ({
-                    ...prev,
-                    content_type: opt.value,
-                    items: opt.value === 'item_service' ? prev.items : [],
-                    description: opt.value === 'description' ? prev.description : '',
-                  }))
-                }
-                className={`rounded-xl border px-3.5 py-2 text-sm font-semibold ${
-                  form.content_type === opt.value
-                    ? 'border-slate-900 bg-slate-900 text-white'
-                    : 'border-slate-200 bg-white text-slate-700'
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-
-          {form.content_type === 'description' ? (
-            <label className="block space-y-1.5">
-              <span className="text-xs font-semibold text-slate-600">Deskripsi</span>
-              <textarea
-                rows={4}
-                value={form.description}
-                onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
-                className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
-              />
-            </label>
-          ) : (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <p className="text-sm font-semibold text-slate-800">Item Service</p>
-                  <p className="text-[11.5px] text-slate-500">Tanpa harga — tidak masuk sales</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={openAddItemModal}
-                  className="inline-flex items-center gap-1.5 rounded-[12px] border border-blue-200 bg-blue-50 px-3 py-2 text-[13px] font-semibold text-blue-700"
-                >
-                  <Plus className="h-4 w-4" />
-                  Tambah Item
-                </button>
-              </div>
-              {form.items.length === 0 ? (
-                <div className="rounded-[16px] border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center">
-                  <p className="text-[13px] font-semibold text-slate-700">Belum ada item</p>
-                  <p className="mt-1 text-[11.5px] text-slate-500">
-                    Klik Tambah Item untuk memilih service dan qty.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-2.5">
-                  {form.items.map((item, index) => {
-                    const dimLabel = formatMeterDimensionsLabel({
-                      length: item.meter_length,
-                      width: item.meter_width,
-                      meter: item.meter,
-                    });
-                    return (
-                      <div
-                        key={`${item.service_id}-${index}`}
-                        className="flex items-start justify-between gap-3 rounded-[16px] border border-slate-200 bg-slate-50/80 px-4 py-3.5"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[.14em] text-slate-500">
-                            Item {index + 1}
-                          </span>
-                          <p className="mt-2 truncate text-[14px] font-bold text-slate-900">
-                            {item.service_name || 'Service'}
-                          </p>
-                          <p className="mt-1 text-[11.5px] text-slate-500">
-                            Qty {item.qty}
-                            {dimLabel ? ` · ${dimLabel}` : ''}
-                            {isMeterPricedService({ satuanName: item.satuan_name }) &&
-                            item.meter == null
-                              ? ' · Pending meter'
-                              : ''}
-                          </p>
-                        </div>
-                        <div className="flex shrink-0 items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => openEditItemModal(index)}
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-[10px] border border-blue-200 bg-blue-50 text-blue-700"
-                            aria-label="Edit item"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => removeItem(index)}
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-[10px] border border-rose-200 bg-rose-50 text-rose-700"
-                            aria-label="Hapus item"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+              <label className="block space-y-1.5 md:col-span-2">
+                <span className="text-xs font-semibold text-slate-600">Lokasi</span>
+                <input
+                  value={form.location}
+                  onChange={(e) => setForm((prev) => ({ ...prev, location: e.target.value }))}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+                />
+              </label>
+              <label className="block space-y-1.5">
+                <span className="text-xs font-semibold text-slate-600">Tanggal mulai</span>
+                <input
+                  type="date"
+                  value={form.start_date}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      start_date: e.target.value,
+                      end_date: prev.end_date || e.target.value,
+                    }))
+                  }
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+                />
+              </label>
+              <label className="block space-y-1.5">
+                <span className="text-xs font-semibold text-slate-600">Tanggal selesai</span>
+                <input
+                  type="date"
+                  value={form.end_date}
+                  onChange={(e) => setForm((prev) => ({ ...prev, end_date: e.target.value }))}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+                />
+              </label>
+              <label className="block space-y-1.5">
+                <span className="text-xs font-semibold text-slate-600">Hari (otomatis)</span>
+                <input
+                  value={dayLabel}
+                  readOnly
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-600"
+                />
+              </label>
+              {isSingleDay && (
+                <label className="block space-y-1.5">
+                  <span className="text-xs font-semibold text-slate-600">Jam</span>
+                  <input
+                    type="time"
+                    value={form.agenda_time}
+                    onChange={(e) =>
+                      setForm((prev) => ({ ...prev, agenda_time: e.target.value }))
+                    }
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+                  />
+                </label>
+              )}
+              {isMultiDay && (
+                <p className="text-xs text-slate-500 md:col-span-2">
+                  Agenda multi-hari tidak memakai jam.
+                </p>
               )}
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
-        <div className="space-y-3 border-t border-slate-100 pt-4">
-          <div className="flex items-center justify-between">
+        {stepIndex === 2 && (
+          <div key="isi" className="space-y-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-              4. Pilih Teknisi
+              Isi Agenda
             </p>
-            <p className="text-xs text-slate-500">{form.worker_ids.length} dipilih</p>
-          </div>
-          {!form.start_date ? (
-            <p className="text-sm text-slate-500">Isi tanggal dulu untuk memuat teknisi.</p>
-          ) : workers.length === 0 ? (
-            <p className="text-sm text-slate-500">Tidak ada teknisi produksi tersedia.</p>
-          ) : (
-            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {workers.map((worker) => {
-                const checked = form.worker_ids.includes(Number(worker.employee_id));
-                return (
-                  <button
-                    key={worker.employee_id}
-                    type="button"
-                    onClick={() => toggleWorker(worker.employee_id)}
-                    className={`rounded-xl border px-3 py-3 text-left ${
-                      checked
-                        ? 'border-violet-300 bg-violet-50'
-                        : 'border-slate-200 bg-white hover:border-violet-200'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-semibold text-slate-900">{worker.full_name}</p>
-                      {checked && <Check className="h-4 w-4 text-violet-700" />}
-                    </div>
-                    <p className="text-xs text-slate-500">{worker.phone_number || '-'}</p>
-                    {worker.is_busy && (
-                      <p className="mt-1 text-[11px] font-semibold text-amber-700">
-                        {worker.busy_reason || 'Busy'}
-                      </p>
-                    )}
-                  </button>
-                );
-              })}
+            <div className="flex flex-wrap gap-2">
+              {[
+                { value: 'item_service', label: 'Item Service' },
+                { value: 'description', label: 'Deskripsi' },
+              ].map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() =>
+                    setForm((prev) => ({
+                      ...prev,
+                      content_type: opt.value,
+                      items: opt.value === 'item_service' ? prev.items : [],
+                      description: opt.value === 'description' ? prev.description : '',
+                    }))
+                  }
+                  className={`rounded-xl border px-3.5 py-2 text-sm font-semibold ${
+                    form.content_type === opt.value
+                      ? 'border-slate-900 bg-slate-900 text-white'
+                      : 'border-slate-200 bg-white text-slate-700'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
             </div>
+
+            {form.content_type === 'description' ? (
+              <label className="block space-y-1.5">
+                <span className="text-xs font-semibold text-slate-600">Deskripsi</span>
+                <textarea
+                  rows={4}
+                  value={form.description}
+                  onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+                />
+              </label>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-800">Item Service</p>
+                    <p className="text-[11.5px] text-slate-500">Tanpa harga — tidak masuk sales</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={openAddItemModal}
+                    className="inline-flex items-center gap-1.5 rounded-[12px] border border-blue-200 bg-blue-50 px-3 py-2 text-[13px] font-semibold text-blue-700"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Tambah Item
+                  </button>
+                </div>
+                {form.items.length === 0 ? (
+                  <div className="rounded-[16px] border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center">
+                    <p className="text-[13px] font-semibold text-slate-700">Belum ada item</p>
+                    <p className="mt-1 text-[11.5px] text-slate-500">
+                      Klik Tambah Item untuk memilih service dan qty.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {form.items.map((item, index) => {
+                      const dimLabel = formatMeterDimensionsLabel({
+                        length: item.meter_length,
+                        width: item.meter_width,
+                        meter: item.meter,
+                      });
+                      return (
+                        <div
+                          key={`${item.service_id}-${index}`}
+                          className="flex items-start justify-between gap-3 rounded-[16px] border border-slate-200 bg-slate-50/80 px-4 py-3.5"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[.14em] text-slate-500">
+                              Item {index + 1}
+                            </span>
+                            <p className="mt-2 truncate text-[14px] font-bold text-slate-900">
+                              {item.service_name || 'Service'}
+                            </p>
+                            <p className="mt-1 text-[11.5px] text-slate-500">
+                              Qty {item.qty}
+                              {dimLabel ? ` · ${dimLabel}` : ''}
+                              {isMeterPricedService({ satuanName: item.satuan_name }) &&
+                              item.meter == null
+                                ? ' · Pending meter'
+                                : ''}
+                            </p>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => openEditItemModal(index)}
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-[10px] border border-blue-200 bg-blue-50 text-blue-700"
+                              aria-label="Edit item"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => removeItem(index)}
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-[10px] border border-rose-200 bg-rose-50 text-rose-700"
+                              aria-label="Hapus item"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {stepIndex === 3 && (
+          <div key="teknisi" className="space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                Pilih Teknisi
+              </p>
+              <p className="text-xs text-slate-500">{form.worker_ids.length} dipilih</p>
+            </div>
+            {!form.start_date ? (
+              <p className="text-sm text-slate-500">Isi tanggal dulu untuk memuat teknisi.</p>
+            ) : workers.length === 0 ? (
+              <p className="text-sm text-slate-500">Tidak ada teknisi produksi tersedia.</p>
+            ) : (
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {workers.map((worker) => {
+                  const checked = form.worker_ids.includes(Number(worker.employee_id));
+                  return (
+                    <button
+                      key={worker.employee_id}
+                      type="button"
+                      onClick={() => toggleWorker(worker.employee_id)}
+                      className={`rounded-xl border px-3 py-3 text-left ${
+                        checked
+                          ? 'border-violet-300 bg-violet-50'
+                          : 'border-slate-200 bg-white hover:border-violet-200'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-slate-900">{worker.full_name}</p>
+                        {checked && <Check className="h-4 w-4 text-violet-700" />}
+                      </div>
+                      <p className="text-xs text-slate-500">{worker.phone_number || '-'}</p>
+                      {worker.is_busy && (
+                        <p className="mt-1 text-[11px] font-semibold text-amber-700">
+                          {worker.busy_reason || 'Busy'}
+                        </p>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {stepIndex === 4 && (
+          <div key="catatan" className="space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Catatan</p>
+            <textarea
+              rows={5}
+              value={form.notes}
+              onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
+              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
+              placeholder="Catatan opsional"
+            />
+          </div>
+        )}
+
+        {stepIndex === 5 && (
+          <div key="simpan" className="space-y-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Review & Simpan
+            </p>
+            <div className="space-y-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+              <p>
+                <span className="font-semibold">Nama:</span> {form.name || '-'}
+              </p>
+              <p>
+                <span className="font-semibold">Lokasi:</span> {form.location || '-'}
+              </p>
+              <p>
+                <span className="font-semibold">Jadwal:</span>{' '}
+                {formatDateRange(
+                  form.start_date,
+                  form.end_date,
+                  isSingleDay ? form.agenda_time : null
+                )}{' '}
+                ({dayLabel || '-'})
+              </p>
+              <p>
+                <span className="font-semibold">Isi:</span>{' '}
+                {form.content_type === 'item_service'
+                  ? `${form.items.length} item service`
+                  : 'Deskripsi'}
+              </p>
+              <p>
+                <span className="font-semibold">Teknisi:</span>{' '}
+                {selectedWorkers.map((w) => w.full_name).join(', ') || '-'}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => submitAgenda('draft')}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 disabled:opacity-60"
+              >
+                <Save className="h-4 w-4" />
+                {saving ? 'Menyimpan...' : 'Simpan sebagai draft'}
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => submitAgenda('schedule')}
+                className="inline-flex items-center gap-2 rounded-xl bg-violet-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-800 disabled:opacity-60"
+              >
+                <CalendarDays className="h-4 w-4" />
+                {saving ? 'Menyimpan...' : 'Simpan & Jadwalkan'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-4">
+          {stepIndex > 0 ? (
+            <button
+              type="button"
+              onClick={goBack}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Kembali
+            </button>
+          ) : (
+            <span />
           )}
-        </div>
-
-        <div className="space-y-3 border-t border-slate-100 pt-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">5. Catatan</p>
-          <textarea
-            rows={3}
-            value={form.notes}
-            onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
-            className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm"
-            placeholder="Catatan opsional"
-          />
-        </div>
-
-        <div className="space-y-3 border-t border-slate-100 pt-4">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-            6. Review & Simpan
-          </p>
-          <div className="space-y-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-            <p>
-              <span className="font-semibold">Nama:</span> {form.name || '-'}
-            </p>
-            <p>
-              <span className="font-semibold">Lokasi:</span> {form.location || '-'}
-            </p>
-            <p>
-              <span className="font-semibold">Jadwal:</span>{' '}
-              {formatDateRange(form.start_date, form.end_date, isSingleDay ? form.agenda_time : null)}{' '}
-              ({dayLabel || '-'})
-            </p>
-            <p>
-              <span className="font-semibold">Isi:</span>{' '}
-              {form.content_type === 'item_service'
-                ? `${form.items.length} item service`
-                : 'Deskripsi'}
-            </p>
-            <p>
-              <span className="font-semibold">Teknisi:</span>{' '}
-              {selectedWorkers.map((w) => w.full_name).join(', ') || '-'}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
+          {stepIndex < CREATE_STEPS.length - 1 && (
             <button
               type="button"
-              disabled={saving}
-              onClick={() => submitAgenda('draft')}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 disabled:opacity-60"
+              onClick={goNext}
+              className="inline-flex items-center gap-2 rounded-xl bg-violet-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-800"
             >
-              <Save className="h-4 w-4" />
-              {saving ? 'Menyimpan...' : 'Simpan sebagai draft'}
+              Lanjut
             </button>
-            <button
-              type="button"
-              disabled={saving}
-              onClick={() => submitAgenda('schedule')}
-              className="inline-flex items-center gap-2 rounded-xl bg-violet-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-800 disabled:opacity-60"
-            >
-              <CalendarDays className="h-4 w-4" />
-              {saving ? 'Menyimpan...' : 'Simpan & Jadwalkan'}
-            </button>
-          </div>
+          )}
         </div>
       </section>
 

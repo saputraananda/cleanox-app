@@ -254,16 +254,25 @@ export function drawItemsTable(
     contentW,
     pageH,
     y,
+    /** Optional column widths [no, layanan, promo, qty, price, total]. Default = landscape invoice layout. */
+    columnWidths = null,
   } = {}
 ) {
   const itemRows = Array.isArray(items) ? items : [];
+  const wNo = columnWidths?.[0] ?? 10;
+  const wService = columnWidths?.[1] ?? 90;
+  const wPromo = columnWidths?.[2] ?? 45;
+  const wQty = columnWidths?.[3] ?? 16;
+  const wPrice = columnWidths?.[4] ?? 40;
+  const wTotal =
+    columnWidths?.[5] ?? contentW - wNo - wService - wPromo - wQty - wPrice;
   const cols = [
-    { key: 'no', label: 'No', w: 10 },
-    { key: 'service', label: 'Layanan', w: 90 },
-    { key: 'promo', label: 'Promo', w: 45 },
-    { key: 'qty', label: 'Qty', w: 16 },
-    { key: 'price', label: 'Harga Satuan', w: 40 },
-    { key: 'total', label: 'Line Total', w: contentW - 10 - 90 - 45 - 16 - 40 },
+    { key: 'no', label: 'No', w: wNo },
+    { key: 'service', label: 'Layanan', w: wService },
+    { key: 'promo', label: 'Promo', w: wPromo },
+    { key: 'qty', label: 'Qty', w: wQty },
+    { key: 'price', label: 'Harga Satuan', w: wPrice },
+    { key: 'total', label: 'Line Total', w: wTotal },
   ];
 
   doc.setFillColor(...PDF_HEADER_RGB);

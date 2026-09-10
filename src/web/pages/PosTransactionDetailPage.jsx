@@ -15,7 +15,7 @@ import {
   resolveMeterFromDimensions,
   transactionHasMeterPending,
 } from '@web/utils/posMeterServices.js';
-import { downloadPosEReceiptPdf, loadImageAsDataUrl } from '@web/utils/posEReceipt.js';
+import { downloadPosEReceiptPdf, loadEReceiptKopAsDataUrl, loadImageAsDataUrl } from '@web/utils/posEReceipt.js';
 import { downloadPosInternalInvoicePdf } from '@web/utils/posInternalInvoicePdf.js';
 import { downloadPosOrderFormPdf } from '@web/utils/posOrderFormPdf.js';
 import PosTakehomeStageTimeline from '@web/components/PosTakehomeStageTimeline.jsx';
@@ -539,7 +539,9 @@ export default function PosTransactionDetailPage() {
     try {
       let logo = null;
       try {
-        logo = await loadImageAsDataUrl(cleanoxLogo);
+        logo = await loadEReceiptKopAsDataUrl(
+          `${encodeURI('/KOP SURAT CLEANOX INDONESIA.png')}`
+        );
       } catch {
         logo = null;
       }
