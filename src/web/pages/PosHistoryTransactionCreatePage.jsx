@@ -956,7 +956,7 @@ export default function PosHistoryTransactionCreatePage() {
             Status default belum lunas — bukti diunggah di detail transaksi
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
-            {['Tunai', 'BCA', 'EDC'].map((group) => {
+            {['Tunai', 'BCA', 'EDC', 'QRIS'].map((group) => {
               const selectedMethod = paymentMethods.find(
                 (m) => Number(m.id) === Number(form.payment_method_id)
               );
@@ -1001,6 +1001,13 @@ export default function PosHistoryTransactionCreatePage() {
             );
             const group = paymentGroup || selectedMethod?.method_group || '';
             if (group === 'BCA' && selectedMethod) {
+              return (
+                <p className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                  {selectedMethod.label}
+                </p>
+              );
+            }
+            if (group === 'QRIS' && selectedMethod) {
               return (
                 <p className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
                   {selectedMethod.label}

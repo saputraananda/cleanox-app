@@ -14,6 +14,9 @@ import PosWaschenReferralPage from '@web/pages/PosWaschenReferralPage.jsx';
 import PosPricesPage from '@web/pages/PosPricesPage.jsx';
 import PosPromosPage from '@web/pages/PosPromosPage.jsx';
 import PosDiskonsPage from '@web/pages/PosDiskonsPage.jsx';
+import PosAgendaPage from '@web/pages/PosAgendaPage.jsx';
+import PosAgendaCreatePage from '@web/pages/PosAgendaCreatePage.jsx';
+import PosAgendaDetailPage from '@web/pages/PosAgendaDetailPage.jsx';
 
 const RedirectPosDetail = () => {
   const { id } = useParams();
@@ -39,6 +42,39 @@ const webRoutes = [
       <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>
         <Layout>
           <CleanoxOnlyDashboardPage />
+        </Layout>
+      </PrivateRoute>
+    }
+  />,
+  <Route
+    key="co-agenda"
+    path="/cleanox-only/agenda"
+    element={
+      <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>
+        <Layout>
+          <PosAgendaPage />
+        </Layout>
+      </PrivateRoute>
+    }
+  />,
+  <Route
+    key="co-agenda-new"
+    path="/cleanox-only/agenda/new"
+    element={
+      <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>
+        <Layout>
+          <PosAgendaCreatePage />
+        </Layout>
+      </PrivateRoute>
+    }
+  />,
+  <Route
+    key="co-agenda-detail"
+    path="/cleanox-only/agenda/:id"
+    element={
+      <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>
+        <Layout>
+          <PosAgendaDetailPage />
         </Layout>
       </PrivateRoute>
     }

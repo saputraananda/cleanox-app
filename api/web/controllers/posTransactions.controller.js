@@ -670,7 +670,8 @@ export const getPosTransactions = async (req, res) => {
         v.is_history_entry,
         v.payment_method_id,
         v.payment_status,
-        v.payment_method_label
+        v.payment_method_label,
+        v.payment_settled_date
       ${fromSql}
       ORDER BY v.created_at DESC, v.transaction_no DESC
       LIMIT ? OFFSET ?`;
@@ -699,6 +700,7 @@ export const getPosTransactions = async (req, res) => {
         payment_method_id: row.payment_method_id == null ? null : Number(row.payment_method_id),
         payment_status: row.payment_status || null,
         payment_method_label: row.payment_method_label || null,
+        payment_settled_date: formatServiceDateKey(row.payment_settled_date),
       })),
       pagination: {
         page,
@@ -892,6 +894,7 @@ export const getPosTransactionDetail = async (req, res) => {
         payment_method_id:
           transaction.payment_method_id == null ? null : Number(transaction.payment_method_id),
         payment_status: transaction.payment_status || 'belum_lunas',
+        payment_settled_date: formatServiceDateKey(transaction.payment_settled_date),
         payment_method,
         subtotal_amount: Number(transaction.subtotal_amount || 0),
         discount_amount: Number(transaction.discount_amount || 0),
@@ -1041,6 +1044,10 @@ export const updatePosTransactionPayment = async (req, res) => {
 
   const hasMethod = Object.prototype.hasOwnProperty.call(req.body || {}, 'payment_method_id');
   const hasStatus = Object.prototype.hasOwnProperty.call(req.body || {}, 'payment_status');
+  const hasSettledDate = Object.prototype.hasOwnProperty.call(
+    req.body || {},
+    'payment_settled_date'
+  );
   if (!hasMethod && !hasStatus) {
     return res.status(400).json({ message: 'payment_method_id atau payment_status wajib diisi' });
   }
@@ -1050,7 +1057,7 @@ export const updatePosTransactionPayment = async (req, res) => {
     await connection.beginTransaction();
 
     const [[transaction]] = await connection.query(
-      `SELECT id, status, payment_method_id, payment_status
+      `SELECT id, status, payment_method_id, payment_status, payment_settled_date
        FROM tr_transactions
        WHERE id = ?
        LIMIT 1
@@ -1071,6 +1078,7 @@ export const updatePosTransactionPayment = async (req, res) => {
     let nextMethodId =
       transaction.payment_method_id == null ? null : Number(transaction.payment_method_id);
     let nextPaymentStatus = String(transaction.payment_status || 'belum_lunas');
+    let nextSettledDate = formatServiceDateKey(transaction.payment_settled_date);
 
     if (hasMethod) {
       const methodId = Number(req.body.payment_method_id);
@@ -1100,6 +1108,23 @@ export const updatePosTransactionPayment = async (req, res) => {
       nextPaymentStatus = status;
     }
 
+    if (nextPaymentStatus === 'belum_lunas') {
+      nextSettledDate = null;
+    } else if (nextPaymentStatus === 'lunas') {
+      const rawSettled = hasSettledDate
+        ? req.body.payment_settled_date
+        : nextSettledDate;
+      const parsedSettled = formatServiceDateKey(rawSettled);
+      const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+      if (!parsedSettled || !datePattern.test(parsedSettled)) {
+        await connection.rollback();
+        return res.status(400).json({
+          message: 'Tanggal pelunasan wajib diisi (YYYY-MM-DD) saat status lunas',
+        });
+      }
+      nextSettledDate = parsedSettled;
+    }
+
     if (nextPaymentStatus === 'lunas') {
       const [[countRow]] = await connection.query(
         `SELECT COUNT(*) AS total FROM tr_transaction_payment_proofs WHERE transaction_id = ?`,
@@ -1115,9 +1140,9 @@ export const updatePosTransactionPayment = async (req, res) => {
 
     await connection.query(
       `UPDATE tr_transactions
-       SET payment_method_id = ?, payment_status = ?, updated_by = ?, updated_at = NOW()
+       SET payment_method_id = ?, payment_status = ?, payment_settled_date = ?, updated_by = ?, updated_at = NOW()
        WHERE id = ?`,
-      [nextMethodId, nextPaymentStatus, req.user?.id || null, transactionId]
+      [nextMethodId, nextPaymentStatus, nextSettledDate, req.user?.id || null, transactionId]
     );
 
     await syncTransactionStatusFromAssignments(connection, transactionId);
@@ -1133,7 +1158,7 @@ export const updatePosTransactionPayment = async (req, res) => {
       : [[]];
 
     const [[freshTx]] = await connection.query(
-      `SELECT status, payment_status FROM tr_transactions WHERE id = ? LIMIT 1`,
+      `SELECT status, payment_status, payment_settled_date FROM tr_transactions WHERE id = ? LIMIT 1`,
       [transactionId]
     );
 
@@ -1143,6 +1168,7 @@ export const updatePosTransactionPayment = async (req, res) => {
       message: 'Pembayaran transaksi diperbarui',
       payment_method_id: nextMethodId,
       payment_status: nextPaymentStatus,
+      payment_settled_date: formatServiceDateKey(freshTx?.payment_settled_date) || nextSettledDate,
       payment_method: method || null,
       status: freshTx?.status || transaction.status,
     });

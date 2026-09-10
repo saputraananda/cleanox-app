@@ -217,10 +217,30 @@ export default function MobileWorkerTasksPage() {
     setLoading(true);
     setError('');
     try {
-      const { data } = await api.get('/mobile-tasks', { params: { status } });
-      const nextTasks = data.tasks || [];
+      const [posRes, agendaRes] = await Promise.all([
+        api.get('/mobile-tasks', { params: { status } }),
+        api.get('/mobile-agenda', { params: { status } }).catch(() => ({ data: { tasks: [] } })),
+      ]);
+      const posTasks = posRes.data.tasks || [];
+      const agendaTasks = (agendaRes.data.tasks || []).map((row) => ({
+        ...row,
+        task_source: 'agenda',
+        // Stable key for list UI: avoid collision with POS assignment ids
+        assignment_id: `agenda-${row.agenda_id}-${row.assignment_id}`,
+        agenda_id: row.agenda_id,
+        raw_assignment_id: row.assignment_id,
+        transaction: {
+          customer_name: row.agenda?.name || 'Agenda',
+          transaction_no: `AGD-${row.agenda_id}`,
+          service_date: row.agenda?.start_date,
+          customer_address: row.agenda?.location,
+          notes: row.agenda?.notes,
+          service_mode: 'home_service',
+        },
+      }));
+      const nextTasks = [...agendaTasks, ...posTasks];
       setTasks(nextTasks);
-      await refreshPhotoPreviews(nextTasks);
+      await refreshPhotoPreviews(posTasks);
     } catch (err) {
       setError(err.response?.data?.message || 'Gagal memuat daftar task');
       setTasks([]);
@@ -279,6 +299,7 @@ export default function MobileWorkerTasksPage() {
 
   useEffect(() => {
     tasks.forEach((task) => {
+      if (task.task_source === 'agenda') return;
       if (
         task.assignment_status === 'On_Progress'
         && !isTakeHomeTask(task)
@@ -755,6 +776,40 @@ export default function MobileWorkerTasksPage() {
             </div>
           ) : (
             tasks.map((task) => {
+              if (task.task_source === 'agenda') {
+                return (
+                  <div
+                    key={task.assignment_id}
+                    className="rounded-[22px] border border-violet-100 bg-white p-4 shadow-[0_10px_28px_rgba(15,23,42,.05)] space-y-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-[13px] font-extrabold text-slate-900 truncate">
+                          {task.agenda?.name || 'Agenda'}
+                        </p>
+                        <p className="mt-0.5 text-[11px] text-slate-500">
+                          {task.agenda?.location || '—'} · {task.agenda?.day_label || ''}
+                        </p>
+                      </div>
+                      <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                        <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+                          {STATUS_LABEL[task.assignment_status] || task.assignment_status}
+                        </span>
+                        <span className="rounded-full bg-violet-50 text-violet-700 border border-violet-200 px-2 py-0.5 text-[10px] font-bold">
+                          Agenda
+                        </span>
+                      </div>
+                    </div>
+                    <Link
+                      to={`/mobile-worker/agenda/${task.agenda_id}`}
+                      className="flex h-[40px] items-center justify-center rounded-[12px] bg-violet-700 text-white text-[12px] font-extrabold"
+                    >
+                      Buka Agenda
+                    </Link>
+                  </div>
+                );
+              }
+
               const isRejecting = rejectingId === task.assignment_id;
               const detail = detailMap[task.assignment_id];
               const isExpanded = expandedId === task.assignment_id;

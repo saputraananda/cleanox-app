@@ -192,7 +192,7 @@ export const getDashboardData = async (req, res) => {
            AND DATE(t.service_date) BETWEEN ? AND ?
          GROUP BY COALESCE(pm.\`group\`, 'Belum diisi')
        ) AS payment_method_agg
-       ORDER BY FIELD(method_group, 'Tunai', 'BCA', 'EDC', 'Belum diisi'), method_group`,
+       ORDER BY FIELD(method_group, 'Tunai', 'BCA', 'EDC', 'QRIS', 'Belum diisi'), method_group`,
       [date_start, date_end]
     );
 

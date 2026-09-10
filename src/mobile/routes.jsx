@@ -13,6 +13,7 @@ import MobileWorkerLeavePage from '@mobile/pages/MobileWorkerLeavePage.jsx';
 import MobileWorkerKasbonPage from '@mobile/pages/MobileWorkerKasbonPage.jsx';
 import MobileWorkerGroomingPage from '@mobile/pages/MobileWorkerGroomingPage.jsx';
 import MobileWorkerOvertimePage from '@mobile/pages/MobileWorkerOvertimePage.jsx';
+import MobileWorkerAgendaDetailPage from '@mobile/pages/MobileWorkerAgendaDetailPage.jsx';
 
 function withMorningUnlock(page) {
   return (
@@ -45,6 +46,11 @@ const mobileRoutes = [
     key="mobile-tasks"
     path="/mobile-worker/tasks"
     element={withMorningUnlock(<MobileWorkerTasksPage />)}
+  />,
+  <Route
+    key="mobile-agenda-detail"
+    path="/mobile-worker/agenda/:id"
+    element={withMorningUnlock(<MobileWorkerAgendaDetailPage />)}
   />,
   <Route
     key="mobile-survey"

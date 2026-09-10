@@ -148,6 +148,7 @@ export default function PosTransactionDetailPage() {
     payment_method_id: '',
     payment_status: 'belum_lunas',
     payment_group: '',
+    payment_settled_date: '',
   });
   const [paymentSaving, setPaymentSaving] = useState(false);
   const [meterDrafts, setMeterDrafts] = useState({});
@@ -341,6 +342,7 @@ export default function PosTransactionDetailPage() {
         payment_method_id: tx.payment_method_id ? String(tx.payment_method_id) : '',
         payment_status: tx.payment_status || 'belum_lunas',
         payment_group: tx.payment_method?.method_group || '',
+        payment_settled_date: toDateKeyJakarta(tx.payment_settled_date) || '',
       });
       setOfferForm({
         promo_id: tx.promo_id ? String(tx.promo_id) : '',
@@ -752,12 +754,18 @@ export default function PosTransactionDetailPage() {
       setError('Unggah bukti pembayaran terlebih dahulu sebelum menandai lunas');
       return;
     }
+    if (paymentForm.payment_status === 'lunas' && !paymentForm.payment_settled_date) {
+      setError('Tanggal pelunasan wajib diisi saat status lunas');
+      return;
+    }
     setPaymentSaving(true);
     setError('');
     try {
       await api.patch(`/pos-transactions/${id}/payment`, {
         payment_method_id: Number(paymentForm.payment_method_id),
         payment_status: paymentForm.payment_status,
+        payment_settled_date:
+          paymentForm.payment_status === 'lunas' ? paymentForm.payment_settled_date : null,
       });
       await loadData();
     } catch (err) {
@@ -1342,6 +1350,15 @@ export default function PosTransactionDetailPage() {
               >
                 {transaction.payment_status === 'lunas' ? 'Lunas' : 'Belum lunas'}
               </span>
+              {transaction.payment_settled_date ? (
+                <p className="mt-1 text-xs text-slate-500">
+                  Tanggal pelunasan:{' '}
+                  {new Date(`${toDateKeyJakarta(transaction.payment_settled_date)}T00:00:00`).toLocaleDateString(
+                    'id-ID',
+                    { day: '2-digit', month: 'short', year: 'numeric' }
+                  )}
+                </p>
+              ) : null}
             </div>
             <div>
               <p className="text-xs uppercase tracking-wide text-slate-400">Catatan</p>
@@ -1360,7 +1377,7 @@ export default function PosTransactionDetailPage() {
               <div className="grid gap-4 lg:grid-cols-2">
                 <div className="space-y-4">
                   <div className="flex flex-wrap gap-2">
-                    {['Tunai', 'BCA', 'EDC'].map((group) => {
+                    {['Tunai', 'BCA', 'EDC', 'QRIS'].map((group) => {
                       const active =
                         (paymentForm.payment_group || selectedPaymentMethod?.method_group || '') ===
                         group;
@@ -1381,6 +1398,12 @@ export default function PosTransactionDetailPage() {
                     })}
                   </div>
                   {(paymentForm.payment_group || selectedPaymentMethod?.method_group) === 'BCA' &&
+                    selectedPaymentMethod && (
+                      <p className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
+                        {selectedPaymentMethod.label}
+                      </p>
+                    )}
+                  {(paymentForm.payment_group || selectedPaymentMethod?.method_group) === 'QRIS' &&
                     selectedPaymentMethod && (
                       <p className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
                         {selectedPaymentMethod.label}
@@ -1425,12 +1448,32 @@ export default function PosTransactionDetailPage() {
                       <p className="text-xs text-amber-700">Unggah bukti dulu sebelum menandai lunas.</p>
                     )}
                   </label>
+                  <label className="block space-y-1.5">
+                    <span className="text-xs font-semibold text-slate-600">Tanggal pelunasan</span>
+                    <input
+                      type="date"
+                      value={paymentForm.payment_settled_date}
+                      onChange={(e) =>
+                        setPaymentForm((prev) => ({
+                          ...prev,
+                          payment_settled_date: e.target.value,
+                        }))
+                      }
+                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
+                    />
+                    {paymentForm.payment_status === 'lunas' && !paymentForm.payment_settled_date && (
+                      <p className="text-xs text-amber-700">
+                        Tanggal pelunasan wajib diisi saat status lunas.
+                      </p>
+                    )}
+                  </label>
                   <button
                     type="button"
                     disabled={
                       paymentSaving ||
                       !paymentForm.payment_method_id ||
-                      (paymentForm.payment_status === 'lunas' && paymentProofs.length < 1)
+                      (paymentForm.payment_status === 'lunas' && paymentProofs.length < 1) ||
+                      (paymentForm.payment_status === 'lunas' && !paymentForm.payment_settled_date)
                     }
                     onClick={handleSavePayment}
                     className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
@@ -1445,7 +1488,7 @@ export default function PosTransactionDetailPage() {
                     <div>
                       <p className="text-sm font-semibold text-slate-900">Bukti pembayaran</p>
                       <p className="text-xs text-slate-500">
-                        Lampiran transfer/EDC/tunai · {paymentProofs.length}/10
+                        Lampiran transfer/EDC/tunai/QRIS · {paymentProofs.length}/10
                       </p>
                     </div>
                     <div>

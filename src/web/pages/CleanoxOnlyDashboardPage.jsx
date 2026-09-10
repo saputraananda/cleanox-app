@@ -587,7 +587,7 @@ export default function CleanoxOnlyDashboardPage() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
             <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
               <h3 className="text-sm font-bold text-slate-800">Omzet per Metode Pembayaran</h3>
-              <p className="text-[11px] text-slate-400 mt-0.5 mb-4">Tunai, BCA, EDC (exclude cancelled)</p>
+              <p className="text-[11px] text-slate-400 mt-0.5 mb-4">Tunai, BCA, EDC, QRIS (exclude cancelled)</p>
               <div className="h-56">
                 {paymentMethodChartData.length === 0 ? (
                   <div className="h-full flex items-center justify-center text-xs text-slate-400">

@@ -37,6 +37,7 @@ const NAV_TREE = [
     children: [
       { label: 'Dashboard', icon: LayoutDashboard, to: '/cleanox-only/dashboard' },
       { label: 'Calendar', icon: CalendarDays, to: '/cleanox-only/calendar' },
+      { label: 'Agenda', icon: ClipboardList, to: '/cleanox-only/agenda' },
       { label: 'Tambah Transaksi', icon: PlusCircle, to: '/cleanox-only/transactions/new' },
       { label: 'Input Transaksi History', icon: ClipboardPen, to: '/cleanox-only/transactions/history/new' },
       { label: 'Riwayat Transaksi', icon: History, to: '/cleanox-only/transactions' },

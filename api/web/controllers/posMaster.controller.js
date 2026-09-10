@@ -584,7 +584,7 @@ export const listPaymentMethods = async (req, res) => {
       params.push(Number(isActiveRaw) ? 1 : 0);
     }
 
-    sql += ` ORDER BY FIELD(\`group\`, 'Tunai', 'BCA', 'EDC'), id ASC`;
+    sql += ` ORDER BY FIELD(\`group\`, 'Tunai', 'BCA', 'EDC', 'QRIS'), id ASC`;
 
     const [rows] = await cleanoxPool.query(sql, params);
     return res.json({
