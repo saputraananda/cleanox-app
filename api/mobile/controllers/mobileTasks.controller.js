@@ -9,6 +9,12 @@ import {
   formatServiceDateKey,
   getBusyEmployeeIdsOnServiceDate,
 } from '../../shared/utils/posWorkerBusy.js';
+import {
+  eachDateKeyInclusive,
+  formatAgendaTime,
+  resolveAgendaCompletion,
+  toDateKey,
+} from '../../shared/utils/agendaHelpers.js';
 import { syncTransactionStatusFromAssignments } from '../../shared/utils/posTransactionStatusSync.js';
 import {
   cascadePeersToDone,
@@ -2148,12 +2154,19 @@ export const getMyCalendar = async (req, res) => {
       const txId = Number(row.transaction_id);
       if (!jobsMap.has(txId)) {
         jobsMap.set(txId, {
+          job_kind: 'pos',
           transaction_id: txId,
+          agenda_id: null,
+          content_type: null,
+          agenda_status: null,
+          day_label: null,
+          agenda_time: null,
           transaction_no: row.transaction_no,
           customer_name: row.customer_name,
           customer_address: row.customer_address || null,
           service_date: row.service_date,
           service_date_key: formatServiceDateKey(row.service_date),
+          service_date_keys: [formatServiceDateKey(row.service_date)].filter(Boolean),
           transaction_status: row.transaction_status,
           workers: [],
           is_mine: false,
@@ -2181,13 +2194,109 @@ export const getMyCalendar = async (req, res) => {
       }
     }
 
-    const jobs = [...jobsMap.values()];
+    const placeholders = employeeIds.map(() => '?').join(',');
+    const [agendaRows] = await cleanoxPool.query(
+      `SELECT
+         a.id AS agenda_id,
+         a.name,
+         a.location,
+         a.start_date,
+         a.end_date,
+         a.agenda_time,
+         a.day_label,
+         a.content_type,
+         a.status AS agenda_status,
+         w.id AS assignment_id,
+         w.employee_id,
+         w.employee_name,
+         w.assignment_status
+       FROM tr_agendas a
+       INNER JOIN tr_agenda_workers w ON w.agenda_id = a.id
+       WHERE a.status IN ('scheduled', 'completed')
+         AND w.employee_id IN (${placeholders})
+         AND a.start_date <= ?
+         AND a.end_date >= ?
+       ORDER BY a.start_date ASC, a.id ASC, w.id ASC`,
+      [...employeeIds, dateEnd, dateStart]
+    );
+
+    const agendaMap = new Map();
+    const resolvedStatusByAgendaId = new Map();
+
+    for (const row of agendaRows || []) {
+      const agendaId = Number(row.agenda_id);
+      if (!Number.isFinite(agendaId) || agendaId <= 0) continue;
+
+      if (!resolvedStatusByAgendaId.has(agendaId)) {
+        const nextStatus = await resolveAgendaCompletion(cleanoxPool, agendaId);
+        resolvedStatusByAgendaId.set(
+          agendaId,
+          nextStatus || String(row.agenda_status || 'scheduled')
+        );
+      }
+
+      if (!agendaMap.has(agendaId)) {
+        const startKey = toDateKey(row.start_date);
+        const endKey = toDateKey(row.end_date) || startKey;
+        const dateKeys = eachDateKeyInclusive(startKey, endKey).filter(
+          (key) => key >= dateStart && key <= dateEnd
+        );
+        agendaMap.set(agendaId, {
+          job_kind: 'agenda',
+          transaction_id: null,
+          agenda_id: agendaId,
+          content_type: row.content_type || null,
+          agenda_status: resolvedStatusByAgendaId.get(agendaId),
+          day_label: row.day_label || null,
+          agenda_time: formatAgendaTime(row.agenda_time),
+          transaction_no: `AGD-${agendaId}`,
+          customer_name: row.name || 'Agenda',
+          customer_address: row.location || null,
+          service_date: row.start_date,
+          service_date_key: startKey,
+          service_date_keys: dateKeys,
+          transaction_status: null,
+          workers: [],
+          is_mine: false,
+          my_assignment_id: null,
+          my_assignment_status: null,
+        });
+      }
+
+      const job = agendaMap.get(agendaId);
+
+      const workerEmployeeId = Number(row.employee_id);
+      const already = job.workers.some((w) => Number(w.employee_id) === workerEmployeeId);
+      if (!already) {
+        job.workers.push({
+          employee_id: workerEmployeeId,
+          employee_name: row.employee_name || `Pekerja #${workerEmployeeId}`,
+          assignment_id: Number(row.assignment_id),
+          assignment_status: row.assignment_status,
+        });
+      }
+
+      if (Number.isFinite(employeeId) && workerEmployeeId === employeeId) {
+        job.is_mine = true;
+        job.my_assignment_id = Number(row.assignment_id);
+        job.my_assignment_status = row.assignment_status;
+      }
+    }
+
+    const jobs = [...jobsMap.values(), ...agendaMap.values()];
     const days = {};
     for (const job of jobs) {
-      const serviceDateKey = job.service_date_key;
-      if (!serviceDateKey) continue;
-      if (!days[serviceDateKey]) days[serviceDateKey] = { jobs: [] };
-      days[serviceDateKey].jobs.push(job);
+      const keys =
+        Array.isArray(job.service_date_keys) && job.service_date_keys.length > 0
+          ? job.service_date_keys
+          : job.service_date_key
+            ? [job.service_date_key]
+            : [];
+      for (const serviceDateKey of keys) {
+        if (!serviceDateKey) continue;
+        if (!days[serviceDateKey]) days[serviceDateKey] = { jobs: [] };
+        days[serviceDateKey].jobs.push(job);
+      }
     }
 
     return res.json({

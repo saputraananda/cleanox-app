@@ -22,6 +22,11 @@ const STATUS_META = {
   Done: { label: 'Selesai', color: '#059669' },
 };
 
+const AGENDA_STATUS_META = {
+  scheduled: { label: 'Agenda Terjadwal', color: '#7C3AED' },
+  completed: { label: 'Selesai', color: '#059669' },
+};
+
 const toMonthKey = (date = new Date()) => {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -75,6 +80,15 @@ const formatTimeJakarta = (value) => {
   });
 };
 
+const formatAgendaScheduleLabel = (job) => {
+  if (job?.agenda_time) {
+    const hm = String(job.agenda_time);
+    return hm.length >= 5 ? hm.slice(0, 5).replace(':', '.') : hm;
+  }
+  if (job?.day_label) return job.day_label;
+  return 'Multi-hari';
+};
+
 function buildCalendarCells(month) {
   const [y, m] = month.split('-').map(Number);
   const first = new Date(y, m - 1, 1);
@@ -95,10 +109,18 @@ function buildCalendarCells(month) {
 }
 
 function jobDotColor(job) {
+  if (job?.job_kind === 'agenda') {
+    return AGENDA_STATUS_META[job.agenda_status]?.color || '#7C3AED';
+  }
   if (job?.is_mine) {
     return STATUS_META[job.my_assignment_status]?.color || TEAM_DOT_COLOR;
   }
   return TEAM_DOT_COLOR;
+}
+
+function jobListKey(job) {
+  if (job?.job_kind === 'agenda') return `agenda-${job.agenda_id}`;
+  return `pos-${job.transaction_id}`;
 }
 
 export default function MobileWorkerCalendarPage() {
@@ -245,7 +267,7 @@ export default function MobileWorkerCalendarPage() {
                         <div className="mt-1 flex flex-wrap gap-0.5">
                           {dayJobs.slice(0, 3).map((job) => (
                             <span
-                              key={job.transaction_id}
+                              key={jobListKey(job)}
                               className="h-1.5 w-1.5 rounded-full"
                               style={{ background: jobDotColor(job) }}
                             />
@@ -268,7 +290,8 @@ export default function MobileWorkerCalendarPage() {
             <div>
               <p className="text-[12.5px] font-extrabold text-slate-900">Keterangan</p>
               <p className="mt-0.5 text-[10.5px] text-slate-500">
-                Titik berwarna = tugas Anda. Titik abu = jadwal rekan (info saja).
+                Titik berwarna = tugas Anda. Titik abu = jadwal rekan (info saja). Hijau Selesai =
+                task/agenda selesai. Ungu = agenda terjadwal.
               </p>
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -284,6 +307,15 @@ export default function MobileWorkerCalendarPage() {
                   <span className="text-[11px] font-semibold text-slate-700">{meta.label}</span>
                 </div>
               ))}
+              <div className="flex items-center gap-2 rounded-[12px] bg-slate-50 px-2.5 py-2">
+                <span
+                  className="h-2.5 w-2.5 rounded-full flex-shrink-0"
+                  style={{ background: AGENDA_STATUS_META.scheduled.color }}
+                />
+                <span className="text-[11px] font-semibold text-slate-700">
+                  {AGENDA_STATUS_META.scheduled.label}
+                </span>
+              </div>
               <div className="flex items-center gap-2 rounded-[12px] bg-slate-50 px-2.5 py-2 col-span-2">
                 <span
                   className="h-2.5 w-2.5 rounded-full flex-shrink-0"
@@ -311,31 +343,46 @@ export default function MobileWorkerCalendarPage() {
               </div>
             ) : (
               selectedJobs.map((job) => {
+                const isAgenda = job.job_kind === 'agenda';
                 const isMine = Boolean(job.is_mine);
-                const meta = isMine
-                  ? STATUS_META[job.my_assignment_status] || STATUS_META.Assigned
+                const canOpenAgenda =
+                  isAgenda && isMine && job.content_type === 'item_service' && job.agenda_id;
+                const canOpenPos = !isAgenda && isMine;
+                const canOpen = canOpenAgenda || canOpenPos;
+                const agendaMeta = isAgenda
+                  ? AGENDA_STATUS_META[job.agenda_status] || AGENDA_STATUS_META.scheduled
                   : null;
+                const posMeta =
+                  !isAgenda && isMine
+                    ? STATUS_META[job.my_assignment_status] || STATUS_META.Assigned
+                    : null;
                 const workers = Array.isArray(job.workers) ? job.workers : [];
 
                 return (
                   <button
-                    key={job.transaction_id}
+                    key={jobListKey(job)}
                     type="button"
                     onClick={() => {
-                      if (isMine) navigate('/mobile-worker/tasks');
+                      if (canOpenAgenda) {
+                        navigate(`/mobile-worker/agenda/${job.agenda_id}`);
+                        return;
+                      }
+                      if (canOpenPos) navigate('/mobile-worker/tasks');
                     }}
-                    disabled={!isMine}
-                    aria-disabled={!isMine}
+                    disabled={!canOpen}
+                    aria-disabled={!canOpen}
                     className={`w-full text-left rounded-[16px] border bg-white p-3.5 shadow-[0_1px_4px_rgba(0,0,0,.04)] transition ${
-                      isMine
-                        ? 'border-[#7BC32C]/40 active:scale-[.99] cursor-pointer'
+                      canOpen
+                        ? isAgenda
+                          ? 'border-violet-300 active:scale-[.99] cursor-pointer'
+                          : 'border-[#7BC32C]/40 active:scale-[.99] cursor-pointer'
                         : 'border-slate-200 cursor-default opacity-95'
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <p className="text-[13px] font-extrabold text-slate-900 truncate">
-                          {job.customer_name || 'Pelanggan'}
+                          {job.customer_name || (isAgenda ? 'Agenda' : 'Pelanggan')}
                         </p>
                         <p className="text-[10.5px] text-slate-400 mt-0.5">
                           {job.transaction_no || '—'}
@@ -345,25 +392,42 @@ export default function MobileWorkerCalendarPage() {
                         <span
                           className={`text-[10px] font-bold px-2 py-1 rounded-full ${
                             isMine
-                              ? 'bg-[#EEF8E3] text-[#163A22]'
+                              ? isAgenda
+                                ? 'bg-violet-50 text-violet-700'
+                                : 'bg-[#EEF8E3] text-[#163A22]'
                               : 'bg-slate-100 text-slate-600'
                           }`}
                         >
                           {isMine ? 'Tugas saya' : 'Jadwal tim'}
                         </span>
-                        {isMine && meta && (
+                        {isAgenda && (
+                          <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-violet-50 text-violet-700 border border-violet-200">
+                            Agenda
+                          </span>
+                        )}
+                        {isAgenda && agendaMeta && (
                           <span
                             className="text-[10px] font-bold px-2 py-1 rounded-full"
-                            style={{ background: `${meta.color}18`, color: meta.color }}
+                            style={{ background: `${agendaMeta.color}18`, color: agendaMeta.color }}
                           >
-                            {meta.label}
+                            {agendaMeta.label}
+                          </span>
+                        )}
+                        {!isAgenda && isMine && posMeta && (
+                          <span
+                            className="text-[10px] font-bold px-2 py-1 rounded-full"
+                            style={{ background: `${posMeta.color}18`, color: posMeta.color }}
+                          >
+                            {posMeta.label}
                           </span>
                         )}
                       </div>
                     </div>
                     <div className="mt-2.5 flex items-center gap-1.5 text-[11px] text-slate-600">
                       <Clock3 className="w-3.5 h-3.5 text-slate-400" />
-                      {formatTimeJakarta(job.service_date)}
+                      {isAgenda
+                        ? formatAgendaScheduleLabel(job)
+                        : formatTimeJakarta(job.service_date)}
                     </div>
                     <div className="mt-1.5 flex items-start gap-1.5 text-[11px] text-slate-600">
                       <MapPin className="w-3.5 h-3.5 text-slate-400 mt-0.5 flex-shrink-0" />
@@ -393,9 +457,11 @@ export default function MobileWorkerCalendarPage() {
                             })}
                       </span>
                     </div>
-                    {!isMine && (
+                    {!canOpen && (
                       <p className="mt-2 text-[10px] font-medium text-slate-400">
-                        Hanya info — tidak bisa dibuka detail
+                        {isAgenda && isMine && job.content_type === 'description'
+                          ? 'Agenda deskriptif — foto kegiatan diinput admin'
+                          : 'Hanya info — tidak bisa dibuka detail'}
                       </p>
                     )}
                   </button>
