@@ -78,16 +78,19 @@ define(['./workbox-7e5eb42b'], (function (workbox) { 'use strict';
    */
   workbox.precacheAndRoute([{
     "url": "pwa-512x512.png",
-    "revision": "8938545f328561d75f769a84c4189529"
+    "revision": "2cef15692eb6ac7e44d94728cd3e2a48"
+  }, {
+    "url": "pwa-512x512-maskable.png",
+    "revision": "8e0bf5fb6f527dd129fa81b83ae888de"
   }, {
     "url": "pwa-192x192.png",
-    "revision": "c71e074c782f0331dbfddafe9ab091d6"
+    "revision": "b90b5949927c215be81d25bc488549c2"
   }, {
     "url": "KOP SURAT CLEANOX INDONESIA.png",
     "revision": "1680140e482a035f2843838ddc5b5dfc"
   }, {
     "url": "index.html",
-    "revision": "8de6c3b51176a6eff3e7e6d621b7f46c"
+    "revision": "a9d1679fe2cb5f25c2e9999480247657"
   }, {
     "url": "cleanox.png",
     "revision": "08f731ee9eb2f1d25464091426a14645"
@@ -98,10 +101,10 @@ define(['./workbox-7e5eb42b'], (function (workbox) { 'use strict';
     "url": "assets/purify.es-DP5U8-sc.js",
     "revision": null
   }, {
-    "url": "assets/index.es-DwScaP1H.js",
+    "url": "assets/index.es-DOSexq3L.js",
     "revision": null
   }, {
-    "url": "assets/index-UV0IOFGf.js",
+    "url": "assets/index-Cf9T5IFH.js",
     "revision": null
   }, {
     "url": "assets/index-0rKRZPyb.css",
@@ -138,13 +141,16 @@ define(['./workbox-7e5eb42b'], (function (workbox) { 'use strict';
     "revision": "08f731ee9eb2f1d25464091426a14645"
   }, {
     "url": "pwa-192x192.png",
-    "revision": "c71e074c782f0331dbfddafe9ab091d6"
+    "revision": "b90b5949927c215be81d25bc488549c2"
+  }, {
+    "url": "pwa-512x512-maskable.png",
+    "revision": "8e0bf5fb6f527dd129fa81b83ae888de"
   }, {
     "url": "pwa-512x512.png",
-    "revision": "8938545f328561d75f769a84c4189529"
+    "revision": "2cef15692eb6ac7e44d94728cd3e2a48"
   }, {
     "url": "manifest.webmanifest",
-    "revision": "62eb13dd3473c8438c66794a0070ad9d"
+    "revision": "09c6d577c79183bc81310472bf5309c4"
   }], {});
   workbox.cleanupOutdatedCaches();
   workbox.registerRoute(new workbox.NavigationRoute(workbox.createHandlerBoundToURL("/index.html")));

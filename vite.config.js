@@ -21,7 +21,7 @@ export default defineConfig({
         display: 'standalone',
         orientation: 'portrait',
         theme_color: '#163A22',
-        background_color: '#F7F8F5',
+        background_color: '#163A22',
         icons: [
           {
             src: '/pwa-192x192.png',
@@ -36,7 +36,7 @@ export default defineConfig({
             purpose: 'any',
           },
           {
-            src: '/pwa-512x512.png',
+            src: '/pwa-512x512-maskable.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'maskable',
