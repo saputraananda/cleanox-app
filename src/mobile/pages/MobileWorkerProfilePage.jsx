@@ -31,7 +31,20 @@ export default function MobileWorkerProfilePage() {
   const [user, setUser] = useState(() => getUser());
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutOpen, setLogoutOpen] = useState(false);
-  const { canInstall, isInstalled, promptInstall } = useMobilePwaInstall();
+  const [installBusy, setInstallBusy] = useState(false);
+  const [installFailOpen, setInstallFailOpen] = useState(false);
+  const { isInstalled, promptInstall } = useMobilePwaInstall();
+
+  const handleInstallClick = async () => {
+    if (installBusy || isInstalled) return;
+    setInstallBusy(true);
+    try {
+      const outcome = await promptInstall();
+      if (outcome === 'unavailable') setInstallFailOpen(true);
+    } finally {
+      setInstallBusy(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -166,18 +179,17 @@ export default function MobileWorkerProfilePage() {
               <p className="mt-4 mb-1 text-center text-[12px] font-medium text-slate-400">
                 Aplikasi sudah terpasang
               </p>
-            ) : canInstall ? (
+            ) : (
               <button
                 type="button"
-                onClick={async () => {
-                  await promptInstall();
-                }}
-                className="mt-4 w-full flex items-center justify-center gap-2 h-[48px] rounded-[14px] bg-[#EEF8E3] text-[#163A22] text-[14px] font-extrabold hover:bg-[#E4F3D6]"
+                onClick={handleInstallClick}
+                disabled={installBusy}
+                className="mt-4 w-full flex items-center justify-center gap-2 h-[48px] rounded-[14px] bg-[#EEF8E3] text-[#163A22] text-[14px] font-extrabold hover:bg-[#E4F3D6] disabled:opacity-60"
               >
                 <Download className="w-4 h-4" />
-                Install Aplikasi
+                {installBusy ? 'Memproses...' : 'Install Aplikasi'}
               </button>
-            ) : null}
+            )}
 
             <button
               type="button"
@@ -205,6 +217,15 @@ export default function MobileWorkerProfilePage() {
           if (!loggingOut) setLogoutOpen(false);
         }}
         onConfirm={handleLogout}
+      />
+
+      <MobileConfirmDialog
+        open={installFailOpen}
+        title="Install belum siap"
+        desc="Buka aplikasi di Chrome (bukan WebView), pastikan koneksi HTTPS, lalu ketuk Install Aplikasi lagi."
+        confirmLabel="Mengerti"
+        onClose={() => setInstallFailOpen(false)}
+        onConfirm={() => setInstallFailOpen(false)}
       />
     </div>
   );
