@@ -78,19 +78,19 @@ define(['./workbox-7e5eb42b'], (function (workbox) { 'use strict';
    */
   workbox.precacheAndRoute([{
     "url": "pwa-512x512.png",
-    "revision": "2cef15692eb6ac7e44d94728cd3e2a48"
+    "revision": "e09134de465b0583b39fa2a5d333424f"
   }, {
     "url": "pwa-512x512-maskable.png",
-    "revision": "8e0bf5fb6f527dd129fa81b83ae888de"
+    "revision": "08a778e56d25dbc544c17295ea0ebd8d"
   }, {
     "url": "pwa-192x192.png",
-    "revision": "b90b5949927c215be81d25bc488549c2"
+    "revision": "fd98cafe93d40da6b9561fd1e360a3be"
   }, {
     "url": "KOP SURAT CLEANOX INDONESIA.png",
     "revision": "1680140e482a035f2843838ddc5b5dfc"
   }, {
     "url": "index.html",
-    "revision": "a9d1679fe2cb5f25c2e9999480247657"
+    "revision": "a517940fb1cc8b9bb7799cf981004780"
   }, {
     "url": "cleanox.png",
     "revision": "08f731ee9eb2f1d25464091426a14645"
@@ -141,16 +141,16 @@ define(['./workbox-7e5eb42b'], (function (workbox) { 'use strict';
     "revision": "08f731ee9eb2f1d25464091426a14645"
   }, {
     "url": "pwa-192x192.png",
-    "revision": "b90b5949927c215be81d25bc488549c2"
+    "revision": "fd98cafe93d40da6b9561fd1e360a3be"
   }, {
     "url": "pwa-512x512-maskable.png",
-    "revision": "8e0bf5fb6f527dd129fa81b83ae888de"
+    "revision": "08a778e56d25dbc544c17295ea0ebd8d"
   }, {
     "url": "pwa-512x512.png",
-    "revision": "2cef15692eb6ac7e44d94728cd3e2a48"
+    "revision": "e09134de465b0583b39fa2a5d333424f"
   }, {
     "url": "manifest.webmanifest",
-    "revision": "09c6d577c79183bc81310472bf5309c4"
+    "revision": "5674360245719fdd781cd4d0cf754f97"
   }], {});
   workbox.cleanupOutdatedCaches();
   workbox.registerRoute(new workbox.NavigationRoute(workbox.createHandlerBoundToURL("/index.html")));
