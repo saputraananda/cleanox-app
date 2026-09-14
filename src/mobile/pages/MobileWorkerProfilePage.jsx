@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
   Building2,
+  Download,
   Hash,
   LogOut,
   Mail,
@@ -13,6 +14,7 @@ import api from '@shared/utils/api.js';
 import { clearAuth, getToken, getUser, setAuth } from '@shared/utils/auth.js';
 import MobileConfirmDialog from '@mobile/components/MobileConfirmDialog.jsx';
 import MobileWorkerBottomNav from '@mobile/components/MobileWorkerBottomNav.jsx';
+import useMobilePwaInstall from '@mobile/hooks/useMobilePwaInstall.js';
 
 const initials = (name) => {
   if (!name) return '?';
@@ -29,6 +31,7 @@ export default function MobileWorkerProfilePage() {
   const [user, setUser] = useState(() => getUser());
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutOpen, setLogoutOpen] = useState(false);
+  const { canInstall, isInstalled, promptInstall } = useMobilePwaInstall();
 
   useEffect(() => {
     let cancelled = false;
@@ -158,6 +161,23 @@ export default function MobileWorkerProfilePage() {
                 })}
               </div>
             )}
+
+            {isInstalled ? (
+              <p className="mt-4 mb-1 text-center text-[12px] font-medium text-slate-400">
+                Aplikasi sudah terpasang
+              </p>
+            ) : canInstall ? (
+              <button
+                type="button"
+                onClick={async () => {
+                  await promptInstall();
+                }}
+                className="mt-4 w-full flex items-center justify-center gap-2 h-[48px] rounded-[14px] bg-[#EEF8E3] text-[#163A22] text-[14px] font-extrabold hover:bg-[#E4F3D6]"
+              >
+                <Download className="w-4 h-4" />
+                Install Aplikasi
+              </button>
+            ) : null}
 
             <button
               type="button"
