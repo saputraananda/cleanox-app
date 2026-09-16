@@ -55,7 +55,7 @@ const MENU_ITEMS = [
   },
   {
     title: 'Lembur',
-    description: 'Ajukan & selesai lembur',
+    description: 'Ajukan jadwal lembur',
     icon: Clock3,
     to: '/mobile-worker/overtime',
     requiresMorningUnlock: false,

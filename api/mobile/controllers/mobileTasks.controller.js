@@ -2066,7 +2066,7 @@ export const rejectTask = async (req, res) => {
     await connection.beginTransaction();
 
     const [[row]] = await connection.query(
-      `SELECT a.*, t.customer_name, t.service_date
+      `SELECT a.*, t.customer_name, t.service_date, t.service_mode
        FROM tr_worker_assignments a
        INNER JOIN tr_transactions t ON t.id = a.transaction_id
        WHERE a.id = ? AND a.employee_id = ?
@@ -2078,6 +2078,10 @@ export const rejectTask = async (req, res) => {
     if (!row) {
       await connection.rollback();
       return res.status(404).json({ message: 'Task tidak ditemukan' });
+    }
+    if (String(row.service_mode || 'home_service') === 'take_home') {
+      await connection.rollback();
+      return res.status(400).json({ message: 'Reject tidak berlaku untuk order take-home' });
     }
     if (row.assignment_status !== 'Assigned') {
       await connection.rollback();

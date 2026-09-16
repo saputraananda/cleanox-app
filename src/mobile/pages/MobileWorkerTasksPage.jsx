@@ -459,15 +459,17 @@ export default function MobileWorkerTasksPage() {
   };
 
   const openRejectForm = async (assignmentId) => {
-    setRejectingId(assignmentId);
+    const id = Number(assignmentId);
+    if (!Number.isInteger(id) || id <= 0) return;
+    setRejectingId(id);
     setRejectForm({ note: '', recommended_employee_id: '' });
     setError('');
     setSuccess('');
     try {
-      const { data } = await api.get(`/mobile-tasks/${assignmentId}/replacement-candidates`);
+      const { data } = await api.get(`/mobile-tasks/${id}/replacement-candidates`);
       setCandidates(data.candidates || []);
-      await loadDetail(assignmentId);
-      setExpandedId(assignmentId);
+      await loadDetail(id);
+      setExpandedId(id);
     } catch (err) {
       setError(err.response?.data?.message || 'Gagal memuat kandidat pengganti');
       setCandidates([]);
@@ -476,12 +478,13 @@ export default function MobileWorkerTasksPage() {
 
   const handleReject = async (e) => {
     e.preventDefault();
-    if (!rejectingId) return;
+    const id = Number(rejectingId);
+    if (!Number.isInteger(id) || id <= 0) return;
     setSubmitting(true);
     setError('');
     setSuccess('');
     try {
-      await api.post(`/mobile-tasks/${rejectingId}/reject`, {
+      await api.post(`/mobile-tasks/${id}/reject`, {
         note: rejectForm.note,
         recommended_employee_id: Number(rejectForm.recommended_employee_id),
       });
@@ -881,7 +884,10 @@ export default function MobileWorkerTasksPage() {
               }
 
               const listKey = posTaskKey(task);
-              const isRejecting = rejectingId === task.assignment_id;
+              const isRejecting =
+                rejectingId != null &&
+                task.assignment_id != null &&
+                Number(rejectingId) === Number(task.assignment_id);
               const detail = task.assignment_id ? detailMap[task.assignment_id] : null;
               const isExpanded = expandedId === listKey || expandedId === task.assignment_id;
               const tx = task.transaction || {};
@@ -1457,7 +1463,7 @@ export default function MobileWorkerTasksPage() {
                     </div>
                   )}
 
-                  {isRejecting && (
+                  {isRejecting && !isTakeHomeTask(task) && (
                     <form onSubmit={handleReject} className="space-y-3 rounded-[14px] border border-rose-100 bg-rose-50/40 p-3">
                       <div>
                         <label className="text-[11px] font-bold text-slate-700">Alasan tidak bisa</label>

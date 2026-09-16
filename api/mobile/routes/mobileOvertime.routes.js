@@ -4,7 +4,6 @@ import {
   getTodayOvertimeStatus,
   listMyOvertime,
   createPengajuan,
-  selesaiOvertime,
 } from '../controllers/mobileOvertime.controller.js';
 
 const router = Router();
@@ -22,6 +21,5 @@ router.use(requireMobileWorker);
 router.get('/today', getTodayOvertimeStatus);
 router.get('/list', listMyOvertime);
 router.post('/pengajuan', createPengajuan);
-router.post('/:id/selesai', selesaiOvertime);
 
 export default router;
