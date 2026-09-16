@@ -18,6 +18,35 @@ export function formatServiceDateKey(value) {
 }
 
 /**
+ * Normalize payment_settled_date to YYYY-MM-DD without UTC off-by-one.
+ * - Exact YYYY-MM-DD passthrough (from <input type="date">)
+ * - Date / ISO with time → calendar day in Asia/Jakarta
+ * - Local datetime string without Z/offset → take date part
+ */
+export function formatPaymentSettledDateKey(value) {
+  if (!value) return null;
+  const raw = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
+  const hasTimeOrZone = value instanceof Date || /[T\s]\d{2}:\d{2}|Z|[+-]\d{2}:?\d{2}$/.test(raw);
+  if (hasTimeOrZone) {
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Jakarta',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(date);
+  }
+
+  const localMatch = raw.match(/^(\d{4}-\d{2}-\d{2})[ T]\d{2}:\d{2}/);
+  if (localMatch) return localMatch[1];
+
+  return null;
+}
+
+/**
  * Normalize service datetime to YYYY-MM-DD HH:mm (minute precision).
  */
 export function formatServiceDateTimeKey(value) {

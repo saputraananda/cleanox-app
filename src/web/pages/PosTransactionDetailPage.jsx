@@ -62,6 +62,35 @@ const toDateKeyJakarta = (value) => {
   }).format(date);
 };
 
+/** Normalize payment_settled_date only — avoid UTC off-by-one on ISO/Date. */
+const toPaymentSettledDateKey = (value) => {
+  if (!value) return null;
+  const raw = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    const localMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+    return localMatch ? localMatch[1] : null;
+  }
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+};
+
+const formatPaymentSettledLabel = (value) => {
+  const key = toPaymentSettledDateKey(value);
+  if (!key) return '-';
+  return new Date(`${key}T12:00:00+07:00`).toLocaleDateString('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+};
+
 const todayKeyJakarta = () =>
   new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Jakarta',
@@ -342,7 +371,7 @@ export default function PosTransactionDetailPage() {
         payment_method_id: tx.payment_method_id ? String(tx.payment_method_id) : '',
         payment_status: tx.payment_status || 'belum_lunas',
         payment_group: tx.payment_method?.method_group || '',
-        payment_settled_date: toDateKeyJakarta(tx.payment_settled_date) || '',
+        payment_settled_date: toPaymentSettledDateKey(tx.payment_settled_date) || '',
       });
       setOfferForm({
         promo_id: tx.promo_id ? String(tx.promo_id) : '',
@@ -1354,11 +1383,7 @@ export default function PosTransactionDetailPage() {
               </span>
               {transaction.payment_settled_date ? (
                 <p className="mt-1 text-xs text-slate-500">
-                  Tanggal pelunasan:{' '}
-                  {new Date(`${toDateKeyJakarta(transaction.payment_settled_date)}T00:00:00`).toLocaleDateString(
-                    'id-ID',
-                    { day: '2-digit', month: 'short', year: 'numeric' }
-                  )}
+                  Tanggal pelunasan: {formatPaymentSettledLabel(transaction.payment_settled_date)}
                 </p>
               ) : null}
             </div>
