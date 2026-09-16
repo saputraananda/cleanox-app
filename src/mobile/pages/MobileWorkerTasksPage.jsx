@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+﻿import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Camera, CheckCircle2, ClipboardList, Play, X, XCircle } from 'lucide-react';
 import api from '@shared/utils/api.js';
@@ -39,7 +39,7 @@ const CONFIRM_COPY = {
   },
   start_takehome: {
     title: 'Ambil order take-home?',
-    description: 'Setelah diambil, isi foto stage: Diambil → Dicuci → Packing → Diantar → Pengantaran.',
+    description: 'Setelah diambil, isi foto stage: Diambil â†’ Dicuci â†’ Packing â†’ Diantar â†’ Pengantaran.',
     confirmLabel: 'Ambil',
   },
   complete: {
@@ -75,6 +75,12 @@ const serviceModeOf = (task) =>
   task?.service_mode || task?.transaction?.service_mode || 'home_service';
 const isTakeHomeTask = (task) => serviceModeOf(task) === 'take_home';
 const isSharedCrewTask = (task) => Number(task?.transaction?.total_people || 0) > 1;
+const takehomeTxIdOf = (task) => Number(task?.transaction?.id || task?.transaction_id || 0) || null;
+const posTaskKey = (task) =>
+  isTakeHomeTask(task) ? `takehome-${takehomeTxIdOf(task)}` : `pos-${task.assignment_id}`;
+const canAmbilTakehome = (task) =>
+  Boolean(task?.can_ambil) ||
+  (isTakeHomeTask(task) && task?.assignment_status === 'In_Schedule');
 
 const surveyStatusText = (evidence, { readyHint, blockedHint, isReady }) => {
   if (!evidence?.has_survey) {
@@ -310,26 +316,45 @@ export default function MobileWorkerTasksPage() {
     });
   }, [tasks, tab]);
 
-  const toggleExpand = async (assignmentId) => {
-    const next = expandedId === assignmentId ? null : assignmentId;
+  const toggleExpand = async (key) => {
+    const next = expandedId === key ? null : key;
     setExpandedId(next);
-    if (next) await loadDetail(next);
+    const numericId = Number(key);
+    if (next && Number.isFinite(numericId) && numericId > 0 && !String(key).startsWith('takehome-')) {
+      await loadDetail(numericId);
+    }
   };
 
   const requestAccept = (assignmentId) => {
     setConfirmDialog({ type: 'accept', assignmentId });
   };
 
-  const requestStart = (assignmentId) => {
-    const task = tasks.find((item) => item.assignment_id === assignmentId);
+  const requestStart = (taskOrAssignmentId) => {
+    const task =
+      typeof taskOrAssignmentId === 'object'
+        ? taskOrAssignmentId
+        : tasks.find((item) => item.assignment_id === taskOrAssignmentId);
+    if (!task) return;
+    if (isTakeHomeTask(task)) {
+      setConfirmDialog({
+        type: 'start_takehome',
+        transactionId: takehomeTxIdOf(task),
+        assignmentId: task.assignment_id,
+      });
+      return;
+    }
     setConfirmDialog({
-      type: isTakeHomeTask(task) ? 'start_takehome' : 'start',
-      assignmentId,
+      type: 'start',
+      assignmentId: task.assignment_id,
     });
   };
 
-  const requestComplete = (assignmentId) => {
-    const task = tasks.find((item) => item.assignment_id === assignmentId);
+  const requestComplete = (taskOrAssignmentId) => {
+    const task =
+      typeof taskOrAssignmentId === 'object'
+        ? taskOrAssignmentId
+        : tasks.find((item) => item.assignment_id === taskOrAssignmentId);
+    if (!task) return;
     const evidence = evidenceOf(task);
     if (!evidence.can_complete) {
       setEvidenceAlert({
@@ -342,7 +367,8 @@ export default function MobileWorkerTasksPage() {
     }
     setConfirmDialog({
       type: isTakeHomeTask(task) ? 'complete_takehome' : 'complete',
-      assignmentId,
+      assignmentId: task.assignment_id,
+      transactionId: takehomeTxIdOf(task),
     });
   };
 
@@ -364,13 +390,17 @@ export default function MobileWorkerTasksPage() {
     }
   };
 
-  const handleComplete = async (assignmentId) => {
+  const handleComplete = async (assignmentId, transactionId = null) => {
     if (submitting) return;
     setSubmitting(true);
     setError('');
     setSuccess('');
     try {
-      await api.post(`/mobile-tasks/${assignmentId}/complete`);
+      if (transactionId) {
+        await api.post(`/mobile-tasks/takehome/${transactionId}/complete`);
+      } else {
+        await api.post(`/mobile-tasks/${assignmentId}/complete`);
+      }
       setSuccess('Pengerjaan selesai — Selesai.');
       setConfirmDialog(null);
       await loadTasks(tab);
@@ -381,13 +411,13 @@ export default function MobileWorkerTasksPage() {
     }
   };
 
-  const handleStartTakehome = async (assignmentId) => {
-    if (submitting) return;
+  const handleStartTakehome = async (transactionId) => {
+    if (submitting || !transactionId) return;
     setSubmitting(true);
     setError('');
     setSuccess('');
     try {
-      await api.post(`/mobile-tasks/${assignmentId}/start`);
+      await api.post(`/mobile-tasks/takehome/${transactionId}/ambil`);
       setSuccess('Order diambil — Sedang Dikerjakan.');
       setConfirmDialog(null);
       setTab('On_Progress');
@@ -401,13 +431,13 @@ export default function MobileWorkerTasksPage() {
 
   const runConfirmAction = async () => {
     if (!confirmDialog || submitting) return;
-    const { type, assignmentId } = confirmDialog;
+    const { type, assignmentId, transactionId } = confirmDialog;
     if (type === 'accept') {
       await handleAccept(assignmentId);
       return;
     }
     if (type === 'start_takehome') {
-      await handleStartTakehome(assignmentId);
+      await handleStartTakehome(transactionId);
       return;
     }
     if (type === 'start') {
@@ -420,8 +450,12 @@ export default function MobileWorkerTasksPage() {
       });
       return;
     }
-    if (type === 'complete' || type === 'complete_takehome') await handleComplete(assignmentId);
-    if (type === 'survey_external') await handleSurveyExternal(assignmentId);
+    if (type === 'complete' || type === 'complete_takehome') {
+      await handleComplete(assignmentId, type === 'complete_takehome' ? transactionId : null);
+    }
+    if (type === 'survey_external') {
+      await handleSurveyExternal(assignmentId, transactionId);
+    }
   };
 
   const openRejectForm = async (assignmentId) => {
@@ -526,14 +560,17 @@ export default function MobileWorkerTasksPage() {
       if (target.kind === 'takehome' && target.stage) {
         const formData = new FormData();
         formData.append('photo', file);
-        await api.post(
-          `/mobile-tasks/${target.assignmentId}/takehome-stages/${target.stage}`,
-          formData,
-          { headers: { 'Content-Type': 'multipart/form-data' } }
-        );
+        const txId = target.transactionId;
+        if (!txId) {
+          setError('ID transaksi take-home tidak valid');
+          return;
+        }
+        await api.post(`/mobile-tasks/takehome/${txId}/stages/${target.stage}`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
         setSuccess(`Stage ${target.label || target.stage} tersimpan.`);
         await loadTasks(tab);
-        await loadDetail(target.assignmentId, true);
+        if (target.assignmentId) await loadDetail(target.assignmentId, true);
       }
     } catch (err) {
       const info = resolvePhotoUploadError(err, 'task');
@@ -544,8 +581,9 @@ export default function MobileWorkerTasksPage() {
     }
   };
 
-  const openSurveyPage = (assignmentId, evidence, task = null) => {
-    if (isTakeHomeTask(task || {})) {
+  const openSurveyPage = async (assignmentId, evidence, task = null) => {
+    const current = task || tasks.find((item) => item.assignment_id === assignmentId) || null;
+    if (isTakeHomeTask(current || {})) {
       if (!evidence?.has_takehome_complete) {
         setEvidenceAlert({
           title: 'Survey Belum Bisa Dibuka',
@@ -554,7 +592,27 @@ export default function MobileWorkerTasksPage() {
         });
         return;
       }
-    } else if (!evidence?.all_items_complete) {
+      const txId = takehomeTxIdOf(current);
+      try {
+        setSubmitting(true);
+        let aid = assignmentId;
+        if (!aid && txId) {
+          const { data } = await api.post(`/mobile-tasks/takehome/${txId}/ambil`);
+          aid = data?.task?.assignment_id;
+        }
+        if (!aid) {
+          setError('Gagal membuka survey take-home');
+          return;
+        }
+        navigate(`/mobile-worker/tasks/${aid}/survey`);
+      } catch (err) {
+        setError(err.response?.data?.message || 'Gagal membuka survey take-home');
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+    if (!evidence?.all_items_complete) {
       setEvidenceAlert({
         title: 'Survey Belum Bisa Dibuka',
         description:
@@ -566,7 +624,8 @@ export default function MobileWorkerTasksPage() {
   };
 
   const requestSurveyExternal = (assignmentId, evidence, task = null) => {
-    if (isTakeHomeTask(task || {})) {
+    const current = task || tasks.find((item) => item.assignment_id === assignmentId) || null;
+    if (isTakeHomeTask(current || {})) {
       if (!evidence?.has_takehome_complete) {
         setEvidenceAlert({
           title: 'Survey Belum Bisa Dibuka',
@@ -575,7 +634,14 @@ export default function MobileWorkerTasksPage() {
         });
         return;
       }
-    } else if (!evidence?.all_items_complete) {
+      setConfirmDialog({
+        type: 'survey_external',
+        assignmentId,
+        transactionId: takehomeTxIdOf(current),
+      });
+      return;
+    }
+    if (!evidence?.all_items_complete) {
       setEvidenceAlert({
         title: 'Survey Belum Bisa Dibuka',
         description:
@@ -586,17 +652,21 @@ export default function MobileWorkerTasksPage() {
     setConfirmDialog({ type: 'survey_external', assignmentId });
   };
 
-  const handleSurveyExternal = async (assignmentId) => {
+  const handleSurveyExternal = async (assignmentId, transactionId = null) => {
     if (submitting) return;
     setSubmitting(true);
     setError('');
     setSuccess('');
     try {
-      await api.post(`/mobile-tasks/${assignmentId}/survey-external`);
+      if (transactionId) {
+        await api.post(`/mobile-tasks/takehome/${transactionId}/survey-external`);
+      } else {
+        await api.post(`/mobile-tasks/${assignmentId}/survey-external`);
+      }
       setSuccess('Survei eksternal ditandai.');
       setConfirmDialog(null);
       await loadTasks(tab);
-      await loadDetail(assignmentId, true);
+      if (assignmentId) await loadDetail(assignmentId, true);
     } catch (err) {
       setError(err.response?.data?.message || 'Gagal menandai survei eksternal');
     } finally {
@@ -732,7 +802,7 @@ export default function MobileWorkerTasksPage() {
               <div className="min-w-0">
                 <div className="text-[14px] font-extrabold text-white truncate">Tugas</div>
                 <div className="text-[10.5px] text-white/50 font-medium truncate mt-px">
-                  Konfirmasi → Terjadwal → Dikerjakan → Selesai
+                  Konfirmasi â†’ Terjadwal â†’ Dikerjakan â†’ Selesai
                 </div>
               </div>
             </div>
@@ -810,9 +880,10 @@ export default function MobileWorkerTasksPage() {
                 );
               }
 
+              const listKey = posTaskKey(task);
               const isRejecting = rejectingId === task.assignment_id;
-              const detail = detailMap[task.assignment_id];
-              const isExpanded = expandedId === task.assignment_id;
+              const detail = task.assignment_id ? detailMap[task.assignment_id] : null;
+              const isExpanded = expandedId === listKey || expandedId === task.assignment_id;
               const tx = task.transaction || {};
               const evidence = evidenceOf(task);
               const customerPhotos =
@@ -820,10 +891,14 @@ export default function MobileWorkerTasksPage() {
 
               return (
                 <div
-                  key={task.assignment_id}
+                  key={listKey}
                   className="rounded-[22px] border border-slate-100 bg-white p-4 shadow-[0_10px_28px_rgba(15,23,42,.05)] space-y-3"
                 >
-                  <button type="button" onClick={() => toggleExpand(task.assignment_id)} className="w-full text-left">
+                  <button
+                    type="button"
+                    onClick={() => toggleExpand(task.assignment_id || listKey)}
+                    className="w-full text-left"
+                  >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <p className="text-[13px] font-extrabold text-slate-900 truncate">
@@ -850,30 +925,42 @@ export default function MobileWorkerTasksPage() {
                     </div>
                   </button>
 
-                  {isExpanded && detail && (
+                  {isExpanded && (detail || isTakeHomeTask(task)) && (
                     <div className="rounded-[14px] border border-slate-100 bg-slate-50 px-3 py-2.5 text-[11.5px] text-slate-600 space-y-1">
-                      <div>Alamat: {detail.task?.transaction?.customer_address || tx.customer_address || '—'}</div>
-                      <div>Catatan: {detail.task?.transaction?.notes || '—'}</div>
-                      <div className="pt-1 font-bold text-slate-700">Item layanan</div>
-                      {(detail.items || []).length === 0 ? (
-                        <div>—</div>
-                      ) : (
-                        detail.items.map((item) => (
-                          <div key={item.id}>
-                            {item.service_name} × {item.qty}
-                          </div>
-                        ))
+                      <div>
+                        Alamat:{' '}
+                        {detail?.task?.transaction?.customer_address || tx.customer_address || '-'}
+                      </div>
+                      <div>Catatan: {detail?.task?.transaction?.notes || tx.notes || '-'}</div>
+                      {!isTakeHomeTask(task) && (
+                        <>
+                          <div className="pt-1 font-bold text-slate-700">Item layanan</div>
+                          {(detail?.items || []).length === 0 ? (
+                            <div>-</div>
+                          ) : (
+                            (detail?.items || []).map((item) => (
+                              <div key={item.id}>
+                                {item.service_name} x {item.qty}
+                              </div>
+                            ))
+                          )}
+                        </>
+                      )}
+                      {isTakeHomeTask(task) && (
+                        <div className="pt-1 text-[11px] text-emerald-700 font-semibold">
+                          Shared pool — semua mobile worker bisa mengerjakan stage bersama
+                        </div>
                       )}
                       {task.assignment_status === 'Rejected' && (
                         <>
-                          <div className="pt-1">Alasan reject: {task.assignment_note || '—'}</div>
-                          <div>Rekomendasi: {task.recommended_employee_name || '—'}</div>
+                          <div className="pt-1">Alasan reject: {task.assignment_note || '-'}</div>
+                          <div>Rekomendasi: {task.recommended_employee_name || '-'}</div>
                         </>
                       )}
                     </div>
                   )}
 
-                  {task.assignment_status === 'Assigned' && !isRejecting && (
+                  {task.assignment_status === 'Assigned' && !isTakeHomeTask(task) && !isRejecting && (
                     <div className="grid grid-cols-2 gap-2">
                       <button
                         type="button"
@@ -896,11 +983,12 @@ export default function MobileWorkerTasksPage() {
                     </div>
                   )}
 
-                  {task.assignment_status === 'In_Schedule' && (
+                  {task.assignment_status === 'In_Schedule' &&
+                    (!isTakeHomeTask(task) || canAmbilTakehome(task)) && (
                     <button
                       type="button"
                       disabled={submitting}
-                      onClick={() => requestStart(task.assignment_id)}
+                      onClick={() => requestStart(task)}
                       className="w-full h-[40px] rounded-[12px] bg-[#163A22] text-white text-[12px] font-extrabold disabled:opacity-60 flex items-center justify-center gap-1.5"
                     >
                       <Play className="w-4 h-4" />
@@ -978,6 +1066,7 @@ export default function MobileWorkerTasksPage() {
                                 onClick={() =>
                                   setCameraTarget({
                                     assignmentId: task.assignment_id,
+                                    transactionId: takehomeTxIdOf(task),
                                     kind: 'takehome',
                                     stage: stage.key,
                                     label: stage.label,
@@ -1037,7 +1126,7 @@ export default function MobileWorkerTasksPage() {
                       <button
                         type="button"
                         disabled={submitting || !evidence.can_complete}
-                        onClick={() => requestComplete(task.assignment_id)}
+                        onClick={() => requestComplete(task)}
                         className="w-full h-[40px] rounded-[12px] bg-[#163A22] text-white text-[12px] font-extrabold disabled:opacity-60 flex items-center justify-center gap-1.5"
                       >
                         <CheckCircle2 className="w-4 h-4" />
@@ -1185,7 +1274,7 @@ export default function MobileWorkerTasksPage() {
                               <div>
                                 <p className="text-[12px] font-extrabold text-slate-800">
                                   {itemIndex + 1}. {item.service_name}
-                                  {item.qty != null ? ` × ${item.qty}` : ''}
+                                  {item.qty != null ? ` x ${item.qty}` : ''}
                                   {item.unit_label ? ` ${item.unit_label}` : ''}
                                 </p>
                                 <p className="text-[10.5px] text-slate-500">

@@ -2,7 +2,9 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
+import http from 'node:http';
 import { fileURLToPath } from 'url';
+import { Server as SocketServer } from 'socket.io';
 
 import authRoutes from './api/auth/routes/auth.routes.js';
 import cleanoxByWaschenProductionRoutes from './api/web/routes/cleanoxByWaschenProduction.routes.js';
@@ -24,6 +26,7 @@ import mobileLeaveRoutes from './api/mobile/routes/mobileLeave.routes.js';
 import mobileOffDayRoutes from './api/mobile/routes/mobileOffDay.routes.js';
 import mobileKasbonRoutes from './api/mobile/routes/mobileKasbon.routes.js';
 import mobileOvertimeRoutes from './api/mobile/routes/mobileOvertime.routes.js';
+import { getAppBuildId } from './api/shared/utils/appBuildVersion.js';
 
 
 dotenv.config();
@@ -32,6 +35,20 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+const httpServer = http.createServer(app);
+const buildId = getAppBuildId();
+
+const io = new SocketServer(httpServer, {
+  path: '/socket.io',
+  cors: {
+    origin: process.env.CORS_ORIGIN || true,
+    credentials: true,
+  },
+});
+
+io.on('connection', (socket) => {
+  socket.emit('app:version', { buildId });
+});
 
 app.use(
   cors({
@@ -73,7 +90,8 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 const PORT = process.env.PORT || 6000;
-app.listen(PORT, () => {
+httpServer.listen(PORT, () => {
   console.log(`🚀  Server running on http://localhost:${PORT}`);
   console.log(`🌍  Mode: ${process.env.NODE_ENV || 'development (NODE_ENV not set)'}`);
+  console.log(`📦  Build ID: ${buildId}`);
 });

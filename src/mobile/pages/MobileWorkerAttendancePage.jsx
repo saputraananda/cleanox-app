@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, Camera, CheckCircle2, X } from 'lucide-react';
+import { ArrowLeft, Camera, CheckCircle2, Trash2, X } from 'lucide-react';
 import api from '@shared/utils/api.js';
 import MobileWorkerBottomNav from '@mobile/components/MobileWorkerBottomNav.jsx';
 import MobileCameraCapture from '@mobile/components/MobileCameraCapture.jsx';
@@ -93,6 +93,8 @@ export default function MobileWorkerAttendancePage() {
   const [savedCheckInPhotoUrl, setSavedCheckInPhotoUrl] = useState('');
   const [savedCheckOutPhotoUrl, setSavedCheckOutPhotoUrl] = useState('');
   const [photoPreview, setPhotoPreview] = useState(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [photoActionBusy, setPhotoActionBusy] = useState(false);
   const [activeLeave, setActiveLeave] = useState(null);
   const [activeOffDay, setActiveOffDay] = useState(null);
   const [absenOffice, setAbsenOffice] = useState(null);
@@ -252,12 +254,84 @@ export default function MobileWorkerAttendancePage() {
     };
   }, []);
 
-  const openPhotoPreview = (url, title) => {
+  const openPhotoPreview = (url, title, options = {}) => {
     if (!url) return;
-    setPhotoPreview({ url, title });
+    setPhotoPreview({
+      url,
+      title,
+      kind: options.kind || null,
+      saved: Boolean(options.saved),
+    });
   };
 
   const closePhotoPreview = () => setPhotoPreview(null);
+
+  const confirmDeleteSavedPhoto = async () => {
+    if (!deleteConfirm?.kind || photoActionBusy) return;
+    setPhotoActionBusy(true);
+    setError('');
+    setSuccess('');
+    try {
+      if (deleteConfirm.kind === 'check_in') {
+        await api.delete('/mobile-attendance/check-in/photo');
+        setSuccess('Foto In dihapus. Silakan absen masuk ulang.');
+      } else {
+        await api.delete('/mobile-attendance/check-out/photo');
+        setSuccess('Foto Out dihapus. Silakan absen pulang ulang.');
+      }
+      setDeleteConfirm(null);
+      closePhotoPreview();
+      await loadStatus();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Gagal menghapus foto absensi');
+    } finally {
+      setPhotoActionBusy(false);
+    }
+  };
+
+  const submitReplacePhoto = async (kind, file, meta) => {
+    if (!file || photoActionBusy) return;
+    setPhotoActionBusy(true);
+    setSubmitting(true);
+    setError('');
+    setSuccess('');
+    try {
+      const formData = new FormData();
+      if (kind === 'check_in') {
+        formData.append('check_in_photo', file);
+      } else {
+        formData.append('check_out_photo', file);
+      }
+      if (meta?.latitude != null) formData.append('latitude', String(meta.latitude));
+      if (meta?.longitude != null) formData.append('longitude', String(meta.longitude));
+      if (meta?.locationName) formData.append('location_name', meta.locationName);
+
+      const endpoint =
+        kind === 'check_in'
+          ? '/mobile-attendance/check-in/photo/replace'
+          : '/mobile-attendance/check-out/photo/replace';
+      const { data } = await api.post(endpoint, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setSuccess(
+        data?.message ||
+          (kind === 'check_in'
+            ? 'Foto In diganti. Waktu absen masuk diperbarui.'
+            : 'Foto Out diganti. Waktu absen pulang diperbarui.')
+      );
+      await loadStatus();
+    } catch (err) {
+      const info = resolvePhotoUploadError(
+        err,
+        kind === 'check_in' ? 'attendance-check-in' : 'attendance-check-out'
+      );
+      setUploadFailAlert(info);
+      setError(info.description);
+    } finally {
+      setPhotoActionBusy(false);
+      setSubmitting(false);
+    }
+  };
 
   const handleCheckIn = async (e) => {
     e.preventDefault();
@@ -406,7 +480,14 @@ export default function MobileWorkerAttendancePage() {
                     {attendance?.check_in_location_name || 'Lokasi belum tercatat'}
                   </p>
                   {attendance?.check_in_at && savedCheckInPhotoUrl ? (
-                    <LihatFotoButton onClick={() => openPhotoPreview(savedCheckInPhotoUrl, 'Foto In')} />
+                    <LihatFotoButton
+                      onClick={() =>
+                        openPhotoPreview(savedCheckInPhotoUrl, 'Foto In', {
+                          kind: 'check_in',
+                          saved: true,
+                        })
+                      }
+                    />
                   ) : null}
                 </div>
                 <div className="rounded-[14px] border border-slate-100 bg-[#FAFBFC] p-3">
@@ -416,7 +497,14 @@ export default function MobileWorkerAttendancePage() {
                     {attendance?.check_out_location_name || 'Lokasi belum tercatat'}
                   </p>
                   {attendance?.check_out_at && savedCheckOutPhotoUrl ? (
-                    <LihatFotoButton onClick={() => openPhotoPreview(savedCheckOutPhotoUrl, 'Foto Out')} />
+                    <LihatFotoButton
+                      onClick={() =>
+                        openPhotoPreview(savedCheckOutPhotoUrl, 'Foto Out', {
+                          kind: 'check_out',
+                          saved: true,
+                        })
+                      }
+                    />
                   ) : null}
                 </div>
               </div>
@@ -585,7 +673,16 @@ export default function MobileWorkerAttendancePage() {
         onClose={() => setCameraTarget(null)}
         onCapture={(file, meta) => {
           const key = cameraTarget?.key;
+          const mode = cameraTarget?.mode;
           setCameraTarget(null);
+          if (mode === 'replace_check_in') {
+            submitReplacePhoto('check_in', file, meta);
+            return;
+          }
+          if (mode === 'replace_check_out') {
+            submitReplacePhoto('check_out', file, meta);
+            return;
+          }
           if (key === 'check_out_photo') {
             setCheckOutMeta(meta || null);
             handleCheckoutProofChange(file);
@@ -622,18 +719,75 @@ export default function MobileWorkerAttendancePage() {
                 </svg>
               </button>
             </div>
-            <div className="p-3 sm:p-4 overflow-y-auto">
+            <div className="p-3 sm:p-4 overflow-y-auto space-y-3">
               <div className="rounded-[16px] overflow-hidden bg-slate-100 border border-slate-200">
                 <img
                   src={photoPreview.url}
                   alt={photoPreview.title || 'Foto absensi'}
-                  className="w-full h-auto max-h-[72dvh] object-contain"
+                  className="w-full h-auto max-h-[60dvh] object-contain"
                 />
               </div>
+              {photoPreview.saved && photoPreview.kind ? (
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    disabled={photoActionBusy || submitting}
+                    onClick={() => {
+                      const kind = photoPreview.kind;
+                      closePhotoPreview();
+                      setCameraTarget({
+                        key: kind === 'check_in' ? 'check_in_photo' : 'check_out_photo',
+                        label: kind === 'check_in' ? 'Foto In (Ulang)' : 'Foto Out (Ulang)',
+                        mode: kind === 'check_in' ? 'replace_check_in' : 'replace_check_out',
+                      });
+                    }}
+                    className="inline-flex h-[40px] items-center justify-center gap-1.5 rounded-[12px] border-2 border-dashed border-slate-300 bg-white px-3 text-[12px] font-bold text-slate-700 disabled:opacity-60"
+                  >
+                    <Camera className="w-4 h-4" />
+                    Ambil Ulang
+                  </button>
+                  <button
+                    type="button"
+                    disabled={photoActionBusy || submitting}
+                    onClick={() =>
+                      setDeleteConfirm({
+                        kind: photoPreview.kind,
+                        title:
+                          photoPreview.kind === 'check_in'
+                            ? 'Hapus Foto In?'
+                            : 'Hapus Foto Out?',
+                      })
+                    }
+                    className="inline-flex h-[40px] items-center justify-center gap-1.5 rounded-[12px] border border-rose-200 bg-rose-50 px-3 text-[12px] font-bold text-rose-700 disabled:opacity-60"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Hapus
+                  </button>
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
       ) : null}
+
+      <MobileConfirmDialog
+        open={Boolean(deleteConfirm)}
+        title={deleteConfirm?.title || 'Hapus Foto?'}
+        description={
+          deleteConfirm?.kind === 'check_in'
+            ? 'Foto In dan waktu absen masuk akan dihapus dari database dan file. Foto grooming juga dihapus. Anda harus absen masuk ulang.'
+            : deleteConfirm?.kind === 'check_out'
+              ? 'Foto Out dan waktu absen pulang akan dihapus dari database dan file. Anda harus absen pulang ulang.'
+              : ''
+        }
+        variant="danger"
+        confirmLabel={photoActionBusy ? 'Menghapus...' : 'Ya, Hapus'}
+        cancelLabel="Batal"
+        busy={photoActionBusy}
+        onConfirm={confirmDeleteSavedPhoto}
+        onCancel={() => !photoActionBusy && setDeleteConfirm(null)}
+        onClose={() => !photoActionBusy && setDeleteConfirm(null)}
+      />
 
       <MobileConfirmDialog
         open={photoRequirementAlertOpen}

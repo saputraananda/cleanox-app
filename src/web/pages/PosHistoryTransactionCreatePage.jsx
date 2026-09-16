@@ -555,11 +555,15 @@ export default function PosHistoryTransactionCreatePage() {
       setError(gcCrewInfo.error || 'Paket General Cleaning tidak valid');
       return;
     }
-    if (form.worker_ids.length < 1) {
+    if (form.service_mode !== 'take_home' && form.worker_ids.length < 1) {
       setError('Pilih minimal 1 pekerja');
       return;
     }
-    if (gcCrewInfo.hasGc && form.worker_ids.length !== Number(form.total_people || 1)) {
+    if (
+      form.service_mode !== 'take_home' &&
+      gcCrewInfo.hasGc &&
+      form.worker_ids.length !== Number(form.total_people || 1)
+    ) {
       setError(`Pilih tepat ${form.total_people} pekerja sesuai paket General Cleaning`);
       return;
     }
@@ -594,7 +598,7 @@ export default function PosHistoryTransactionCreatePage() {
             : undefined,
         transport_fee:
           form.service_mode === 'home_service' ? Number(form.transport_fee || 0) || 0 : 0,
-        worker_ids: form.worker_ids,
+        worker_ids: form.service_mode === 'take_home' ? [] : form.worker_ids,
         items: form.items.map((item) => ({
           service_id: Number(item.service_id),
           qty: Number(item.qty || 1),
@@ -719,6 +723,7 @@ export default function PosHistoryTransactionCreatePage() {
                       ...prev,
                       service_mode: option.value,
                       transport_fee: option.value === 'home_service' ? prev.transport_fee : '',
+                      worker_ids: option.value === 'take_home' ? [] : prev.worker_ids,
                     }))
                   }
                   className={`rounded-[12px] border px-3 py-2 text-[12.5px] font-semibold ${
@@ -898,9 +903,11 @@ export default function PosHistoryTransactionCreatePage() {
             <div>
               <p className={labelEyebrowClass}>4 Pekerja</p>
               <h2 className="text-[14px] font-bold text-slate-900">
-                Pilih {form.total_people} pekerja
+                {form.service_mode === 'take_home'
+                  ? 'Shared pool Take Home'
+                  : `Pilih ${form.total_people} pekerja`}
               </h2>
-              {!gcCrewInfo.hasGc && (
+              {form.service_mode !== 'take_home' && !gcCrewInfo.hasGc && (
                 <div className="mt-2 flex items-center gap-2">
                   <span className="text-[12px] text-slate-500">Jumlah orang</span>
                   <button
@@ -925,29 +932,35 @@ export default function PosHistoryTransactionCreatePage() {
               )}
             </div>
           </div>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {workers.map((worker) => {
-              const selected = form.worker_ids.includes(Number(worker.employee_id));
-              return (
-                <button
-                  key={worker.employee_id}
-                  type="button"
-                  onClick={() => toggleWorker(worker.employee_id)}
-                  className={`rounded-[14px] border px-3 py-3 text-left transition ${
-                    selected
-                      ? 'border-emerald-300 bg-emerald-50'
-                      : 'border-slate-200 bg-white hover:border-blue-200'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-[13px] font-semibold text-slate-900">{worker.full_name}</p>
-                    {selected && <Check className="w-4 h-4 text-emerald-600" />}
-                  </div>
-                  <p className="text-[11.5px] text-slate-500">{worker.phone_number || '-'}</p>
-                </button>
-              );
-            })}
-          </div>
+          {form.service_mode === 'take_home' ? (
+            <p className="rounded-[12px] border border-emerald-100 bg-emerald-50 px-3 py-2.5 text-[12.5px] text-emerald-800">
+              History Take Home tidak memakai penugasan individu (shared pool).
+            </p>
+          ) : (
+            <div className="grid gap-2 sm:grid-cols-2">
+              {workers.map((worker) => {
+                const selected = form.worker_ids.includes(Number(worker.employee_id));
+                return (
+                  <button
+                    key={worker.employee_id}
+                    type="button"
+                    onClick={() => toggleWorker(worker.employee_id)}
+                    className={`rounded-[14px] border px-3 py-3 text-left transition ${
+                      selected
+                        ? 'border-emerald-300 bg-emerald-50'
+                        : 'border-slate-200 bg-white hover:border-blue-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[13px] font-semibold text-slate-900">{worker.full_name}</p>
+                      {selected && <Check className="w-4 h-4 text-emerald-600" />}
+                    </div>
+                    <p className="text-[11.5px] text-slate-500">{worker.phone_number || '-'}</p>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </section>
 
         <section className={sectionCardClass}>

@@ -1,3 +1,4 @@
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { defineConfig } from 'vite';
@@ -5,6 +6,22 @@ import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+function writeBuildVersionPlugin() {
+  return {
+    name: 'write-build-version',
+    closeBundle() {
+      const buildId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      const payload = {
+        buildId,
+        builtAt: new Date().toISOString(),
+      };
+      const outPath = path.join(__dirname, 'dist', 'version.json');
+      fs.mkdirSync(path.dirname(outPath), { recursive: true });
+      fs.writeFileSync(outPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+    },
+  };
+}
 
 export default defineConfig({
   plugins: [
@@ -53,6 +70,7 @@ export default defineConfig({
         type: 'module',
       },
     }),
+    writeBuildVersionPlugin(),
   ],
   resolve: {
     alias: {
@@ -74,6 +92,11 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: 'http://localhost:6000',
+        changeOrigin: true,
+      },
+      '/socket.io': {
+        target: 'http://localhost:6000',
+        ws: true,
         changeOrigin: true,
       },
     },

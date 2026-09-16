@@ -3,7 +3,10 @@ import { authenticate } from '../../shared/middleware/auth.middleware.js';
 import {
   acceptTask,
   advanceTakehomeStage,
+  advanceTakehomeStageByTransaction,
+  ambilTakehomeTask,
   completeTask,
+  completeTakehomeTaskByTransaction,
   deleteAssignmentPhoto,
   getMyTaskDetail,
   listMyTasks,
@@ -18,6 +21,8 @@ import {
   startTask,
   submitSurvey,
   submitSurveyExternal,
+  submitTakehomeSurveyByTransaction,
+  submitTakehomeSurveyExternalByTransaction,
   taskEvidenceUploadMiddleware,
   takehomeStageUploadMiddleware,
   uploadAfterPhoto,
@@ -69,6 +74,18 @@ router.get('/', listMyTasks);
 router.get('/calendar', getMyCalendar);
 router.get('/notices', listScheduleNotices);
 router.post('/notices/:noticeId/dismiss', dismissScheduleNotice);
+
+// Take-home shared pool (must be before /:assignmentId)
+router.post('/takehome/:transactionId/ambil', ambilTakehomeTask);
+router.post(
+  '/takehome/:transactionId/stages/:stage',
+  handleTakehomeStageUpload,
+  advanceTakehomeStageByTransaction
+);
+router.post('/takehome/:transactionId/survey', submitTakehomeSurveyByTransaction);
+router.post('/takehome/:transactionId/survey-external', submitTakehomeSurveyExternalByTransaction);
+router.post('/takehome/:transactionId/complete', completeTakehomeTaskByTransaction);
+
 router.get('/:assignmentId/replacement-candidates', listReplacementCandidates);
 router.get('/:assignmentId', getMyTaskDetail);
 router.post('/:assignmentId/accept', acceptTask);

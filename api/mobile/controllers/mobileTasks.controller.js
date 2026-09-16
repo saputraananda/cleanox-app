@@ -31,6 +31,12 @@ import {
   stageColumns,
 } from '../../shared/utils/posTakehomeStages.js';
 import {
+  deriveTakehomeMobileStatus,
+  ensureTakehomeParticipation,
+  hasTakehomeStarted,
+  isTakeHomeServiceMode,
+} from '../../shared/utils/posTakehomeParticipation.js';
+import {
   csatLabelFromScore,
   joinSurveyList,
   normalizeFeedbackText,
@@ -497,21 +503,25 @@ function mapTaskRow(
   takehomeProgress = null,
   serviceLabel = null,
   shared = null,
-  itemEvidenceContext = null
+  itemEvidenceContext = null,
+  options = {}
 ) {
   const evidence = mapEvidence(row, photos, takehomeProgress, shared, itemEvidenceContext);
+  const status = options.statusOverride || row.assignment_status;
   return {
-    assignment_id: row.id,
-    assignment_status: row.assignment_status,
-    assigned_at: row.assigned_at,
-    responded_at: row.responded_at,
-    started_at: row.started_at,
-    completed_at: row.completed_at,
-    assignment_note: row.assignment_note,
-    recommended_employee_id: row.recommended_employee_id,
-    recommended_employee_name: row.recommended_employee_name,
+    assignment_id: row.id != null ? row.id : null,
+    assignment_status: status,
+    assigned_at: row.assigned_at || null,
+    responded_at: row.responded_at || null,
+    started_at: row.started_at || null,
+    completed_at: row.completed_at || null,
+    assignment_note: row.assignment_note || null,
+    recommended_employee_id: row.recommended_employee_id || null,
+    recommended_employee_name: row.recommended_employee_name || null,
     service_mode: row.service_mode || 'home_service',
     service_label: serviceLabel || null,
+    task_kind: options.taskKind || (isTakeHomeServiceMode(row.service_mode) ? 'take_home' : 'pos'),
+    can_ambil: Boolean(options.canAmbil),
     evidence,
     takehome: evidence.takehome,
     customer_photos: customerPhotos,
@@ -628,22 +638,12 @@ export const listMyTasks = async (req, res) => {
   const onDateRaw = req.query.on_date != null ? String(req.query.on_date).trim() : '';
 
   try {
-    const params = [employeeId];
-    let statusSql = '';
-    let dateSql = '';
-
-    if (statusFilter !== 'all') {
-      if (!VALID_LIST_STATUSES.includes(statusFilter)) {
-        return res.status(400).json({ message: 'Filter status tidak valid' });
-      }
-      statusSql = ' AND a.assignment_status = ?';
-      params.push(statusFilter);
-    } else {
-      statusSql = " AND a.assignment_status <> 'Cancelled'";
+    if (statusFilter !== 'all' && !VALID_LIST_STATUSES.includes(statusFilter)) {
+      return res.status(400).json({ message: 'Filter status tidak valid' });
     }
 
+    let onDate = null;
     if (onDateRaw) {
-      let onDate = null;
       if (onDateRaw.toLowerCase() === 'today') {
         onDate = todayDateStringJakarta();
       } else if (/^\d{4}-\d{2}-\d{2}$/.test(onDateRaw)) {
@@ -651,11 +651,24 @@ export const listMyTasks = async (req, res) => {
       } else {
         return res.status(400).json({ message: 'Parameter on_date tidak valid' });
       }
-      dateSql = ' AND DATE(t.service_date) = ?';
-      params.push(onDate);
     }
 
-    const [rows] = await cleanoxPool.query(
+    // Home-service (and other non-take-home) assignments owned by this worker.
+    const homeParams = [employeeId];
+    let homeStatusSql = '';
+    let homeDateSql = '';
+    if (statusFilter !== 'all') {
+      homeStatusSql = ' AND a.assignment_status = ?';
+      homeParams.push(statusFilter);
+    } else {
+      homeStatusSql = " AND a.assignment_status <> 'Cancelled'";
+    }
+    if (onDate) {
+      homeDateSql = ' AND DATE(t.service_date) = ?';
+      homeParams.push(onDate);
+    }
+
+    const [homeRows] = await cleanoxPool.query(
       `SELECT
         a.*,
         t.transaction_no,
@@ -671,74 +684,210 @@ export const listMyTasks = async (req, res) => {
        INNER JOIN tr_transactions t ON t.id = a.transaction_id
        WHERE a.employee_id = ?
        AND COALESCE(t.is_history_entry, 0) = 0
-       ${statusSql}
-       ${dateSql}
+       AND COALESCE(t.service_mode, 'home_service') <> 'take_home'
+       ${homeStatusSql}
+       ${homeDateSql}
        ORDER BY t.service_date ASC, a.id DESC`,
-      params
+      homeParams
     );
 
-    const photosMap = await listAssignmentPhotos(rows.map((row) => row.id));
-    const customerPhotosMap = await listCustomerPhotosByTransactionIds(
-      rows.map((row) => row.transaction_id)
-    );
-    const serviceLabelMap = await buildServiceLabelMap(rows.map((row) => row.transaction_id));
-    const sharedMap = await loadSharedEvidenceByTransactionIds(
-      cleanoxPool,
-      rows.map((row) => row.transaction_id)
-    );
+    // Shared take-home pool (visible to all mobile workers).
+    const takehomeParams = [];
+    let takehomeDateSql = '';
+    if (onDate) {
+      takehomeDateSql = ' AND DATE(t.service_date) = ?';
+      takehomeParams.push(onDate);
+    }
 
-    const takehomeTxIds = [
-      ...new Set(
-        rows
-          .filter((row) => String(row.service_mode) === 'take_home')
-          .map((row) => Number(row.transaction_id))
-          .filter(Boolean)
-      ),
-    ];
+    const [takehomeTxRows] =
+      statusFilter === 'Assigned' || statusFilter === 'Rejected'
+        ? [[]]
+        : await cleanoxPool.query(
+            `SELECT
+              t.id AS transaction_id,
+              t.transaction_no,
+              t.customer_name,
+              t.customer_phone,
+              t.customer_address,
+              t.service_date,
+              t.total_people,
+              t.status AS transaction_status,
+              t.notes AS transaction_notes,
+              t.service_mode
+             FROM tr_transactions t
+             WHERE t.service_mode = 'take_home'
+               AND COALESCE(t.is_history_entry, 0) = 0
+               AND t.status <> 'Cancelled'
+               ${takehomeDateSql}
+             ORDER BY t.service_date ASC, t.id DESC`,
+            takehomeParams
+          );
+
+    const takehomeTxIds = takehomeTxRows.map((r) => Number(r.transaction_id)).filter(Boolean);
+    const takehomeAssignmentsByTx = new Map();
     const takehomeMap = new Map();
+
     if (takehomeTxIds.length > 0) {
+      const [assignmentRows] = await cleanoxPool.query(
+        `SELECT * FROM tr_worker_assignments WHERE transaction_id IN (?)`,
+        [takehomeTxIds]
+      );
+      for (const row of assignmentRows || []) {
+        const txId = Number(row.transaction_id);
+        if (!takehomeAssignmentsByTx.has(txId)) takehomeAssignmentsByTx.set(txId, []);
+        takehomeAssignmentsByTx.get(txId).push(row);
+      }
+
       const [progressRows] = await cleanoxPool.query(
         `SELECT * FROM tr_takehome_progress WHERE transaction_id IN (?)`,
         [takehomeTxIds]
       );
-      for (const progress of progressRows) {
+      for (const progress of progressRows || []) {
         takehomeMap.set(Number(progress.transaction_id), progress);
       }
     }
 
-    return res.json({
-      tasks: rows.map((row) => {
-        const txId = Number(row.transaction_id);
-        const shared = sharedMap.get(txId) || null;
-        const itemEvidenceContext =
-          String(row.service_mode) !== 'take_home' && shared
-            ? {
-                grouped: shared.grouped,
-                workNotesMap: new Map(),
-                itemCompletion: shared.itemCompletion,
-                generalBefore: (shared.grouped?.general?.before || []).map((p) => mapPhotoDto(p)),
-                generalAfter: (shared.grouped?.general?.after || []).map((p) => mapPhotoDto(p)),
-                itemsEvidence: (shared.items || []).map((item) => ({
-                  transaction_item_id: Number(item.id),
-                  service_name: item.service_name || null,
-                  qty: item.qty,
-                  unit_label: item.unit_label || null,
-                  category_name: item.category_name || null,
-                  evidence: mapItemEvidenceDto(item, shared.grouped, new Map()),
-                })),
-              }
-            : null;
-        return mapTaskRow(
-          row,
-          photosMap.get(Number(row.id)) || [],
-          customerPhotosMap.get(Number(row.transaction_id)) || [],
-          takehomeMap.get(Number(row.transaction_id)) || null,
-          serviceLabelMap.get(Number(row.transaction_id)) || null,
-          shared,
-          itemEvidenceContext
-        );
-      }),
+    const sharedMap = await loadSharedEvidenceByTransactionIds(cleanoxPool, [
+      ...homeRows.map((row) => row.transaction_id),
+      ...takehomeTxIds,
+    ]);
+
+    const takehomePoolTasks = [];
+    for (const tx of takehomeTxRows) {
+      const txId = Number(tx.transaction_id);
+      const assignments = takehomeAssignmentsByTx.get(txId) || [];
+      const progress = takehomeMap.get(txId) || null;
+      const shared = sharedMap.get(txId) || null;
+      const hasSurvey = Boolean(shared?.survey?.hasSurvey);
+      const derived = deriveTakehomeMobileStatus({
+        transaction: tx,
+        assignments,
+        progress,
+        hasSurvey,
+      });
+      if (derived === 'Cancelled') continue;
+      if (statusFilter !== 'all' && derived !== statusFilter) continue;
+
+      const mine = assignments.find((a) => Number(a.employee_id) === Number(employeeId)) || null;
+      const started = hasTakehomeStarted({
+        transaction: tx,
+        assignments,
+        progress,
+      });
+
+      const syntheticRow = {
+        id: mine?.id ?? null,
+        assignment_status: derived,
+        assigned_at: mine?.assigned_at || null,
+        responded_at: mine?.responded_at || null,
+        started_at: mine?.started_at || null,
+        completed_at: mine?.completed_at || null,
+        assignment_note: mine?.assignment_note || null,
+        recommended_employee_id: mine?.recommended_employee_id || null,
+        recommended_employee_name: mine?.recommended_employee_name || null,
+        employee_id: employeeId,
+        employee_name: mine?.employee_name || req.user?.name || null,
+        survey_rating: mine?.survey_rating ?? null,
+        survey_note: mine?.survey_note ?? null,
+        survey_answers: mine?.survey_answers ?? null,
+        survey_at: mine?.survey_at ?? null,
+        before_photo_path: mine?.before_photo_path ?? null,
+        after_photo_path: mine?.after_photo_path ?? null,
+        before_photo_at: mine?.before_photo_at ?? null,
+        after_photo_at: mine?.after_photo_at ?? null,
+        arrival_photo_path: null,
+        arrival_latitude: null,
+        arrival_longitude: null,
+        arrival_location_name: null,
+        arrival_at: null,
+        transaction_id: txId,
+        transaction_no: tx.transaction_no,
+        customer_name: tx.customer_name,
+        customer_phone: tx.customer_phone,
+        customer_address: tx.customer_address,
+        service_date: tx.service_date,
+        total_people: tx.total_people,
+        transaction_status: tx.transaction_status,
+        transaction_notes: tx.transaction_notes,
+        service_mode: 'take_home',
+      };
+
+      takehomePoolTasks.push({
+        row: syntheticRow,
+        progress,
+        shared,
+        derived,
+        canAmbil: derived === 'In_Schedule' && !started,
+      });
+    }
+
+    const allAssignmentIds = [
+      ...homeRows.map((row) => row.id),
+      ...takehomePoolTasks.map((item) => item.row.id).filter(Boolean),
+    ];
+    const photosMap = await listAssignmentPhotos(allAssignmentIds);
+    const allTxIds = [
+      ...homeRows.map((row) => row.transaction_id),
+      ...takehomeTxIds,
+    ];
+    const customerPhotosMap = await listCustomerPhotosByTransactionIds(allTxIds);
+    const serviceLabelMap = await buildServiceLabelMap(allTxIds);
+
+    const homeTasks = homeRows.map((row) => {
+      const txId = Number(row.transaction_id);
+      const shared = sharedMap.get(txId) || null;
+      const itemEvidenceContext = shared
+        ? {
+            grouped: shared.grouped,
+            workNotesMap: new Map(),
+            itemCompletion: shared.itemCompletion,
+            generalBefore: (shared.grouped?.general?.before || []).map((p) => mapPhotoDto(p)),
+            generalAfter: (shared.grouped?.general?.after || []).map((p) => mapPhotoDto(p)),
+            itemsEvidence: (shared.items || []).map((item) => ({
+              transaction_item_id: Number(item.id),
+              service_name: item.service_name || null,
+              qty: item.qty,
+              unit_label: item.unit_label || null,
+              category_name: item.category_name || null,
+              evidence: mapItemEvidenceDto(item, shared.grouped, new Map()),
+            })),
+          }
+        : null;
+      return mapTaskRow(
+        row,
+        photosMap.get(Number(row.id)) || [],
+        customerPhotosMap.get(txId) || [],
+        null,
+        serviceLabelMap.get(txId) || null,
+        shared,
+        itemEvidenceContext
+      );
     });
+
+    const takehomeTasks = takehomePoolTasks.map(({ row, progress, shared, derived, canAmbil }) =>
+      mapTaskRow(
+        row,
+        row.id ? photosMap.get(Number(row.id)) || [] : [],
+        customerPhotosMap.get(Number(row.transaction_id)) || [],
+        progress,
+        serviceLabelMap.get(Number(row.transaction_id)) || null,
+        shared,
+        null,
+        {
+          statusOverride: derived,
+          canAmbil,
+          taskKind: 'take_home',
+        }
+      )
+    );
+
+    const tasks = [...homeTasks, ...takehomeTasks].sort((a, b) => {
+      const da = new Date(a.transaction?.service_date || 0).getTime();
+      const db = new Date(b.transaction?.service_date || 0).getTime();
+      return da - db;
+    });
+
+    return res.json({ tasks });
   } catch (error) {
     console.error('[mobileTasks/listMyTasks]', error.message);
     return res.status(500).json({ message: 'Gagal mengambil daftar task' });
@@ -2085,6 +2234,551 @@ export const dismissScheduleNotice = async (req, res) => {
   }
 };
 
+async function loadTakehomeTransactionForMobile(transactionId, connection = cleanoxPool) {
+  const [[tx]] = await connection.query(
+    `SELECT
+      t.id AS transaction_id,
+      t.transaction_no,
+      t.customer_name,
+      t.customer_phone,
+      t.customer_address,
+      t.service_date,
+      t.total_people,
+      t.status AS transaction_status,
+      t.notes AS transaction_notes,
+      t.service_mode
+     FROM tr_transactions t
+     WHERE t.id = ?
+       AND t.service_mode = 'take_home'
+       AND COALESCE(t.is_history_entry, 0) = 0
+     LIMIT 1`,
+    [transactionId]
+  );
+  return tx || null;
+}
+
+async function buildTakehomeTaskResponse(tx, assignmentRow, employeeId) {
+  const txId = Number(tx.transaction_id);
+  const [assignmentRows] = await cleanoxPool.query(
+    `SELECT * FROM tr_worker_assignments WHERE transaction_id = ?`,
+    [txId]
+  );
+  const progress = await getTakehomeProgressByTransactionId(txId);
+  const shared = await buildSharedContextForRow({
+    transaction_id: txId,
+    ...assignmentRow,
+    service_mode: 'take_home',
+  });
+  const hasSurvey = Boolean(shared?.survey?.hasSurvey);
+  const derived = deriveTakehomeMobileStatus({
+    transaction: tx,
+    assignments: assignmentRows,
+    progress,
+    hasSurvey,
+  });
+  const started = hasTakehomeStarted({
+    transaction: tx,
+    assignments: assignmentRows,
+    progress,
+  });
+  const row = {
+    ...(assignmentRow || {}),
+    id: assignmentRow?.id ?? null,
+    assignment_status: derived,
+    transaction_id: txId,
+    transaction_no: tx.transaction_no,
+    customer_name: tx.customer_name,
+    customer_phone: tx.customer_phone,
+    customer_address: tx.customer_address,
+    service_date: tx.service_date,
+    total_people: tx.total_people,
+    transaction_status: tx.transaction_status,
+    transaction_notes: tx.transaction_notes,
+    service_mode: 'take_home',
+    employee_id: employeeId,
+  };
+  const photosMap = assignmentRow?.id
+    ? await listAssignmentPhotos([assignmentRow.id])
+    : new Map();
+  const customerPhotosMap = await listCustomerPhotosByTransactionIds([txId]);
+  const serviceLabelMap = await buildServiceLabelMap([txId]);
+  return mapTaskRow(
+    row,
+    assignmentRow?.id ? photosMap.get(Number(assignmentRow.id)) || [] : [],
+    customerPhotosMap.get(txId) || [],
+    progress,
+    serviceLabelMap.get(txId) || null,
+    shared,
+    null,
+    {
+      statusOverride: derived,
+      canAmbil: derived === 'In_Schedule' && !started,
+      taskKind: 'take_home',
+    }
+  );
+}
+
+export const ambilTakehomeTask = async (req, res) => {
+  const employeeId = req.user?.id;
+  const employeeName = req.user?.name || `Pekerja #${employeeId}`;
+  const transactionId = Number(req.params.transactionId);
+
+  if (!transactionId) {
+    return res.status(400).json({ message: 'ID transaksi tidak valid' });
+  }
+
+  const connection = await cleanoxPool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const tx = await loadTakehomeTransactionForMobile(transactionId, connection);
+    if (!tx) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Order take-home tidak ditemukan' });
+    }
+    if (String(tx.transaction_status) === 'Cancelled') {
+      await connection.rollback();
+      return res.status(409).json({ message: 'Order take-home sudah dibatalkan' });
+    }
+    if (String(tx.transaction_status) === 'Completed') {
+      await connection.rollback();
+      return res.status(409).json({ message: 'Order take-home sudah selesai' });
+    }
+
+    const [assignmentRows] = await connection.query(
+      `SELECT * FROM tr_worker_assignments WHERE transaction_id = ? FOR UPDATE`,
+      [transactionId]
+    );
+    const progress = await ensureTakehomeProgress(connection, transactionId);
+    const alreadyStarted = hasTakehomeStarted({
+      transaction: tx,
+      assignments: assignmentRows,
+      progress,
+    });
+
+    const participation = await ensureTakehomeParticipation(connection, {
+      transactionId,
+      employeeId,
+      employeeName,
+      preferStatus: 'On_Progress',
+    });
+
+    if (!alreadyStarted) {
+      await createPosTracking(
+        connection,
+        transactionId,
+        'In_Progress',
+        'Task On Progress',
+        `${participation.employee_name || employeeName} mengambil order take-home untuk ${tx.customer_name}`,
+        employeeId
+      );
+      await cascadePeersToOnProgress(connection, transactionId, participation.id);
+      await syncTransactionStatusFromAssignments(connection, transactionId);
+    }
+
+    await connection.commit();
+
+    const task = await buildTakehomeTaskResponse(tx, participation, employeeId);
+    return res.json({
+      message: alreadyStarted
+        ? 'Order sudah berjalan — Anda bergabung On Progress'
+        : 'Order diambil — On Progress',
+      task,
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[mobileTasks/ambilTakehomeTask]', error.message);
+    return res.status(500).json({ message: 'Gagal mengambil order take-home' });
+  } finally {
+    connection.release();
+  }
+};
+
+export const advanceTakehomeStageByTransaction = async (req, res) => {
+  const employeeId = req.user?.id;
+  const employeeName = req.user?.name || `Pekerja #${employeeId}`;
+  const transactionId = Number(req.params.transactionId);
+  const stage = String(req.params.stage || '').trim();
+
+  if (!transactionId) {
+    return res.status(400).json({ message: 'ID transaksi tidak valid' });
+  }
+  if (!isValidTakehomeStage(stage)) {
+    return res.status(400).json({ message: 'Stage take-home tidak valid' });
+  }
+  if (!req.file) {
+    return res.status(400).json({ message: 'Foto stage wajib diambil' });
+  }
+
+  const connection = await cleanoxPool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const tx = await loadTakehomeTransactionForMobile(transactionId, connection);
+    if (!tx) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Order take-home tidak ditemukan' });
+    }
+
+    const [assignmentRows] = await connection.query(
+      `SELECT * FROM tr_worker_assignments WHERE transaction_id = ? FOR UPDATE`,
+      [transactionId]
+    );
+    let progress = await ensureTakehomeProgress(connection, transactionId);
+    const started = hasTakehomeStarted({
+      transaction: tx,
+      assignments: assignmentRows,
+      progress,
+    });
+    if (!started) {
+      await connection.rollback();
+      return res.status(409).json({ message: 'Ambil order terlebih dahulu sebelum mengisi stage' });
+    }
+
+    const participation = await ensureTakehomeParticipation(connection, {
+      transactionId,
+      employeeId,
+      employeeName,
+      preferStatus: 'On_Progress',
+    });
+
+    const nextStage = getNextTakehomeStage(progress);
+    if (nextStage !== stage) {
+      await connection.rollback();
+      return res.status(400).json({
+        message: nextStage
+          ? `Stage berikutnya adalah ${TAKEHOME_STAGE_LABELS[nextStage]}`
+          : 'Semua stage take-home sudah lengkap',
+      });
+    }
+
+    const cols = stageColumns(stage);
+    const saved = await saveTakehomeStagePhoto(transactionId, stage, req.file);
+    const merged = mergeWorkers(progress[cols.by], [
+      {
+        employee_id: Number(employeeId),
+        employee_name: participation.employee_name || employeeName,
+      },
+    ]);
+
+    await connection.query(
+      `UPDATE tr_takehome_progress
+       SET ${cols.by} = ?,
+           ${cols.at} = NOW(),
+           ${cols.file} = ?,
+           ${cols.path} = ?,
+           status = ?,
+           updated_at = NOW()
+       WHERE transaction_id = ?`,
+      [JSON.stringify(merged), saved.file, saved.path, stage, transactionId]
+    );
+
+    await createPosTracking(
+      connection,
+      transactionId,
+      'In_Progress',
+      `Take Home: ${TAKEHOME_STAGE_LABELS[stage]}`,
+      `${participation.employee_name || employeeName} menyelesaikan stage ${TAKEHOME_STAGE_LABELS[stage]} untuk ${tx.customer_name}`,
+      employeeId
+    );
+
+    await connection.commit();
+
+    const task = await buildTakehomeTaskResponse(tx, participation, employeeId);
+    return res.json({
+      message: `Stage ${TAKEHOME_STAGE_LABELS[stage]} tersimpan`,
+      takehome: task.takehome,
+      evidence: task.evidence,
+      task,
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[mobileTasks/advanceTakehomeStageByTransaction]', error.message);
+    return res.status(500).json({ message: 'Gagal menyimpan stage take-home' });
+  } finally {
+    connection.release();
+  }
+};
+
+export const submitTakehomeSurveyByTransaction = async (req, res) => {
+  const employeeId = req.user?.id;
+  const employeeName = req.user?.name || `Pekerja #${employeeId}`;
+  const transactionId = Number(req.params.transactionId);
+  const layananList = normalizeLayananList(req.body?.layanan);
+  const csatScore = Number(req.body?.csat_score ?? req.body?.overall ?? req.body?.rating);
+  const npsScore = Number(req.body?.nps_score);
+  const tagsList = normalizeTagsList(req.body?.tags);
+  const feedbackText = normalizeFeedbackText(req.body?.feedback_text ?? req.body?.note);
+  const csatLabel = csatLabelFromScore(csatScore);
+  const npsCategory = npsCategoryFromScore(npsScore);
+
+  if (!transactionId) {
+    return res.status(400).json({ message: 'ID transaksi tidak valid' });
+  }
+  if (layananList.length === 0) {
+    return res.status(400).json({ message: 'Pilih minimal satu layanan' });
+  }
+  if (!Number.isInteger(csatScore) || csatScore < 1 || csatScore > 5 || !csatLabel) {
+    return res.status(400).json({ message: 'Skor CSAT wajib diisi (1–5)' });
+  }
+  if (!Number.isInteger(npsScore) || npsScore < 0 || npsScore > 10 || !npsCategory) {
+    return res.status(400).json({ message: 'Skor NPS wajib diisi (0–10)' });
+  }
+
+  const connection = await cleanoxPool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const tx = await loadTakehomeTransactionForMobile(transactionId, connection);
+    if (!tx) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Order take-home tidak ditemukan' });
+    }
+
+    const [assignmentRows] = await connection.query(
+      `SELECT * FROM tr_worker_assignments WHERE transaction_id = ? FOR UPDATE`,
+      [transactionId]
+    );
+    const progress = await ensureTakehomeProgress(connection, transactionId);
+    if (
+      !hasTakehomeStarted({ transaction: tx, assignments: assignmentRows, progress })
+    ) {
+      await connection.rollback();
+      return res.status(409).json({ message: 'Ambil order terlebih dahulu sebelum survey' });
+    }
+    if (!isAllTakehomeStagesComplete(progress)) {
+      await connection.rollback();
+      return res.status(400).json({
+        message: 'Lengkapi semua stage take-home (sampai Pengantaran) sebelum mengisi survey',
+      });
+    }
+
+    const participation = await ensureTakehomeParticipation(connection, {
+      transactionId,
+      employeeId,
+      employeeName,
+      preferStatus: 'On_Progress',
+    });
+
+    const surveyAnswers = {
+      source: 'app',
+      layanan: joinSurveyList(layananList),
+      csat_score: csatScore,
+      csat_label: csatLabel,
+      nps_score: npsScore,
+      nps_category: npsCategory,
+      feedback_tags: joinSurveyList(tagsList),
+      feedback_text: feedbackText,
+    };
+
+    await connection.query(
+      `UPDATE tr_worker_assignments
+       SET survey_rating = ?,
+           survey_note = ?,
+           survey_answers = ?,
+           survey_at = NOW(),
+           updated_at = NOW()
+       WHERE id = ?`,
+      [csatScore, feedbackText, JSON.stringify(surveyAnswers), participation.id]
+    );
+
+    await connection.commit();
+
+    try {
+      await upsertCleanoxSatisfactionByNota({
+        no_nota: tx.transaction_no,
+        nama: tx.customer_name || null,
+        csat_score: csatScore,
+        csat_label: csatLabel,
+        nps_score: npsScore,
+        nps_category: npsCategory,
+        feedback_tags: surveyAnswers.feedback_tags,
+        feedback_text: feedbackText,
+        layanan: surveyAnswers.layanan,
+        user_agent: 'mobile-worker',
+        ip_address: null,
+      });
+    } catch (syncErr) {
+      console.error(
+        '[mobileTasks/submitTakehomeSurveyByTransaction] CSAT sync failed:',
+        syncErr.message
+      );
+    }
+
+    const task = await buildTakehomeTaskResponse(tx, participation, employeeId);
+    return res.json({
+      message: 'Survey kepuasan tersimpan',
+      survey_rating: csatScore,
+      survey_answers: surveyAnswers,
+      evidence: task.evidence,
+      task,
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[mobileTasks/submitTakehomeSurveyByTransaction]', error.message);
+    return res.status(500).json({ message: 'Gagal menyimpan survey' });
+  } finally {
+    connection.release();
+  }
+};
+
+export const submitTakehomeSurveyExternalByTransaction = async (req, res) => {
+  const employeeId = req.user?.id;
+  const employeeName = req.user?.name || `Pekerja #${employeeId}`;
+  const transactionId = Number(req.params.transactionId);
+
+  if (!transactionId) {
+    return res.status(400).json({ message: 'ID transaksi tidak valid' });
+  }
+
+  const connection = await cleanoxPool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const tx = await loadTakehomeTransactionForMobile(transactionId, connection);
+    if (!tx) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Order take-home tidak ditemukan' });
+    }
+
+    const [assignmentRows] = await connection.query(
+      `SELECT * FROM tr_worker_assignments WHERE transaction_id = ? FOR UPDATE`,
+      [transactionId]
+    );
+    const progress = await ensureTakehomeProgress(connection, transactionId);
+    if (
+      !hasTakehomeStarted({ transaction: tx, assignments: assignmentRows, progress })
+    ) {
+      await connection.rollback();
+      return res.status(409).json({ message: 'Ambil order terlebih dahulu sebelum survey' });
+    }
+    if (!isAllTakehomeStagesComplete(progress)) {
+      await connection.rollback();
+      return res.status(400).json({
+        message: 'Lengkapi semua stage take-home (sampai Pengantaran) sebelum menandai survey eksternal',
+      });
+    }
+
+    const participation = await ensureTakehomeParticipation(connection, {
+      transactionId,
+      employeeId,
+      employeeName,
+      preferStatus: 'On_Progress',
+    });
+
+    const surveyAnswers = { source: 'external' };
+    await connection.query(
+      `UPDATE tr_worker_assignments
+       SET survey_rating = NULL,
+           survey_note = NULL,
+           survey_answers = ?,
+           survey_at = NOW(),
+           updated_at = NOW()
+       WHERE id = ?`,
+      [JSON.stringify(surveyAnswers), participation.id]
+    );
+
+    await connection.commit();
+    const task = await buildTakehomeTaskResponse(tx, participation, employeeId);
+    return res.json({
+      message: 'Survey eksternal ditandai lengkap',
+      evidence: task.evidence,
+      task,
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[mobileTasks/submitTakehomeSurveyExternalByTransaction]', error.message);
+    return res.status(500).json({ message: 'Gagal menandai survey eksternal' });
+  } finally {
+    connection.release();
+  }
+};
+
+export const completeTakehomeTaskByTransaction = async (req, res) => {
+  const employeeId = req.user?.id;
+  const employeeName = req.user?.name || `Pekerja #${employeeId}`;
+  const transactionId = Number(req.params.transactionId);
+
+  if (!transactionId) {
+    return res.status(400).json({ message: 'ID transaksi tidak valid' });
+  }
+
+  const connection = await cleanoxPool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const tx = await loadTakehomeTransactionForMobile(transactionId, connection);
+    if (!tx) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Order take-home tidak ditemukan' });
+    }
+
+    const [assignmentRows] = await connection.query(
+      `SELECT * FROM tr_worker_assignments WHERE transaction_id = ? FOR UPDATE`,
+      [transactionId]
+    );
+    const progress = await ensureTakehomeProgress(connection, transactionId);
+    if (
+      !hasTakehomeStarted({ transaction: tx, assignments: assignmentRows, progress })
+    ) {
+      await connection.rollback();
+      return res.status(409).json({ message: 'Ambil order terlebih dahulu sebelum menyelesaikan' });
+    }
+
+    const participation = await ensureTakehomeParticipation(connection, {
+      transactionId,
+      employeeId,
+      employeeName,
+      preferStatus: 'On_Progress',
+    });
+
+    const shared = await buildSharedContextForRow({
+      ...participation,
+      transaction_id: transactionId,
+      service_mode: 'take_home',
+    });
+    const evidence = mapEvidence(participation, [], progress, shared);
+    if (!evidence.can_complete) {
+      await connection.rollback();
+      const missing = [];
+      if (!evidence.has_takehome_complete) missing.push('semua stage take-home');
+      if (!evidence.has_survey) missing.push('survey kepuasan');
+      return res.status(400).json({
+        message: `Lengkapi dulu ${missing.join(', ')} sebelum menyelesaikan tugas`,
+      });
+    }
+
+    await connection.query(
+      `UPDATE tr_worker_assignments
+       SET assignment_status = 'Done',
+           completed_at = NOW(),
+           updated_at = NOW()
+       WHERE id = ?`,
+      [participation.id]
+    );
+
+    await cascadePeersToDone(connection, transactionId, participation.id);
+    await createPosTracking(
+      connection,
+      transactionId,
+      'Completed',
+      'Task Done',
+      `${participation.employee_name || employeeName} menyelesaikan order take-home untuk ${tx.customer_name}`,
+      employeeId
+    );
+    await syncTransactionStatusFromAssignments(connection, transactionId);
+
+    await connection.commit();
+    return res.json({ message: 'Order take-home selesai' });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[mobileTasks/completeTakehomeTaskByTransaction]', error.message);
+    return res.status(500).json({ message: 'Gagal menyelesaikan order take-home' });
+  } finally {
+    connection.release();
+  }
+};
+
 const CALENDAR_STATUSES = ['Assigned', 'In_Schedule', 'On_Progress', 'Done'];
 
 export const getMyCalendar = async (req, res) => {
@@ -2143,6 +2837,7 @@ export const getMyCalendar = async (req, res) => {
        INNER JOIN tr_transactions t ON t.id = a.transaction_id
        WHERE a.employee_id IN (${employeeIds.map(() => '?').join(',')})
          AND a.assignment_status IN (?)
+         AND COALESCE(t.service_mode, 'home_service') <> 'take_home'
          AND DATE(t.service_date) BETWEEN ? AND ?
        ORDER BY t.service_date ASC, t.id ASC, a.id ASC`,
       [...employeeIds, CALENDAR_STATUSES, dateStart, dateEnd]
@@ -2168,6 +2863,7 @@ export const getMyCalendar = async (req, res) => {
           service_date_key: formatServiceDateKey(row.service_date),
           service_date_keys: [formatServiceDateKey(row.service_date)].filter(Boolean),
           transaction_status: row.transaction_status,
+          service_mode: 'home_service',
           workers: [],
           is_mine: false,
           my_assignment_id: null,
@@ -2192,6 +2888,50 @@ export const getMyCalendar = async (req, res) => {
         job.my_assignment_id = Number(row.assignment_id);
         job.my_assignment_status = row.assignment_status;
       }
+    }
+
+    const [takehomeCalendarRows] = await cleanoxPool.query(
+      `SELECT
+        t.id AS transaction_id,
+        t.transaction_no,
+        t.customer_name,
+        t.customer_address,
+        t.service_date,
+        t.status AS transaction_status,
+        t.service_mode
+       FROM tr_transactions t
+       WHERE t.service_mode = 'take_home'
+         AND COALESCE(t.is_history_entry, 0) = 0
+         AND t.status <> 'Cancelled'
+         AND DATE(t.service_date) BETWEEN ? AND ?
+       ORDER BY t.service_date ASC, t.id ASC`,
+      [dateStart, dateEnd]
+    );
+
+    for (const row of takehomeCalendarRows || []) {
+      const txId = Number(row.transaction_id);
+      if (jobsMap.has(txId)) continue;
+      jobsMap.set(txId, {
+        job_kind: 'pos',
+        transaction_id: txId,
+        agenda_id: null,
+        content_type: null,
+        agenda_status: null,
+        day_label: null,
+        agenda_time: null,
+        transaction_no: row.transaction_no,
+        customer_name: row.customer_name,
+        customer_address: row.customer_address || null,
+        service_date: row.service_date,
+        service_date_key: formatServiceDateKey(row.service_date),
+        service_date_keys: [formatServiceDateKey(row.service_date)].filter(Boolean),
+        transaction_status: row.transaction_status,
+        service_mode: 'take_home',
+        workers: [],
+        is_mine: true,
+        my_assignment_id: null,
+        my_assignment_status: null,
+      });
     }
 
     const placeholders = employeeIds.map(() => '?').join(',');

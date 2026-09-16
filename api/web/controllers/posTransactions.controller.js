@@ -23,6 +23,12 @@ import {
   todayDateStringJakarta,
   addDaysToDateKey,
 } from '../../shared/utils/posWorkerBusy.js';
+import {
+  eachDateKeyInclusive,
+  formatAgendaTime,
+  resolveAgendaCompletion,
+  toDateKey,
+} from '../../shared/utils/agendaHelpers.js';
 import { syncTransactionStatusFromAssignments } from '../../shared/utils/posTransactionStatusSync.js';
 import { resolveEffectiveBasePrice } from '../../shared/utils/posServicePrice.js';
 import { computeTransactionPromoDiscount } from '../../shared/utils/posTransactionPromo.js';
@@ -1765,10 +1771,14 @@ export const createPosTransaction = async (req, res) => {
       });
     }
 
-    const uniqueWorkerIds = Array.isArray(worker_ids)
-      ? [...new Set(worker_ids.map((id) => Number(id)).filter(Boolean))]
-      : [];
-    if (hasGc && uniqueWorkerIds.length !== totalPeopleCount) {
+    // Take-home is a shared pool: no per-worker assignment at create time.
+    const uniqueWorkerIds =
+      service_mode === 'take_home'
+        ? []
+        : Array.isArray(worker_ids)
+          ? [...new Set(worker_ids.map((id) => Number(id)).filter(Boolean))]
+          : [];
+    if (service_mode !== 'take_home' && hasGc && uniqueWorkerIds.length !== totalPeopleCount) {
       await connection.rollback();
       return res.status(400).json({
         message: `Pilih tepat ${totalPeopleCount} pekerja sesuai paket General Cleaning`,
@@ -3312,6 +3322,21 @@ export const updatePosAssignments = async (req, res) => {
   try {
     await connection.beginTransaction();
 
+    const [[txMeta]] = await connection.query(
+      `SELECT id, service_mode FROM tr_transactions WHERE id = ? LIMIT 1`,
+      [transactionId]
+    );
+    if (!txMeta) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Transaksi POS tidak ditemukan' });
+    }
+    if (String(txMeta.service_mode) === 'take_home') {
+      await connection.rollback();
+      return res.status(400).json({
+        message: 'Take Home memakai shared pool — penugasan individu tidak digunakan',
+      });
+    }
+
     const [existingRows] = await connection.query(
       `SELECT id, employee_id, assignment_status
        FROM tr_worker_assignments
@@ -3626,11 +3651,18 @@ export const getPosCalendar = async (req, res) => {
 
       if (!jobsMap.has(row.id)) {
         jobsMap.set(row.id, {
+          job_kind: 'pos',
           id: row.id,
+          agenda_id: null,
+          content_type: null,
+          agenda_status: null,
+          day_label: null,
+          agenda_time: null,
           transaction_no: row.transaction_no,
           customer_name: row.customer_name,
           customer_phone: row.customer_phone,
           service_date: dateKey,
+          service_date_keys: [dateKey],
           total_people: Number(row.total_people || 0),
           final_amount: Number(row.final_amount || 0),
           status: row.status,
@@ -3670,6 +3702,114 @@ export const getPosCalendar = async (req, res) => {
       const dateKey = job.service_date;
       if (!days[dateKey]) days[dateKey] = { jobs: [], workers: [] };
       days[dateKey].jobs.push(job);
+    }
+
+    const [agendaRows] = await cleanoxPool.query(
+      `SELECT
+         a.id AS agenda_id,
+         a.name,
+         a.location,
+         a.start_date,
+         a.end_date,
+         a.agenda_time,
+         a.day_label,
+         a.content_type,
+         a.status AS agenda_status,
+         w.id AS assignment_id,
+         w.employee_id,
+         w.employee_name,
+         w.assignment_status
+       FROM tr_agendas a
+       LEFT JOIN tr_agenda_workers w ON w.agenda_id = a.id
+       WHERE a.status IN ('scheduled', 'completed')
+         AND a.start_date <= ?
+         AND a.end_date >= ?
+       ORDER BY a.start_date ASC, a.id ASC, w.id ASC`,
+      [date_end, date_start]
+    );
+
+    const agendaMap = new Map();
+    const resolvedStatusByAgendaId = new Map();
+
+    for (const row of agendaRows || []) {
+      const agendaId = Number(row.agenda_id);
+      if (!Number.isFinite(agendaId) || agendaId <= 0) continue;
+
+      if (!resolvedStatusByAgendaId.has(agendaId)) {
+        const nextStatus = await resolveAgendaCompletion(cleanoxPool, agendaId);
+        resolvedStatusByAgendaId.set(
+          agendaId,
+          nextStatus || String(row.agenda_status || 'scheduled')
+        );
+      }
+
+      if (!agendaMap.has(agendaId)) {
+        const startKey = toDateKey(row.start_date);
+        const endKey = toDateKey(row.end_date) || startKey;
+        const dateKeys = eachDateKeyInclusive(startKey, endKey).filter(
+          (key) => key >= date_start && key <= date_end
+        );
+        agendaMap.set(agendaId, {
+          job_kind: 'agenda',
+          id: agendaId,
+          agenda_id: agendaId,
+          content_type: row.content_type || null,
+          agenda_status: resolvedStatusByAgendaId.get(agendaId),
+          day_label: row.day_label || null,
+          agenda_time: formatAgendaTime(row.agenda_time),
+          transaction_no: `AGD-${agendaId}`,
+          customer_name: row.name || 'Agenda',
+          customer_phone: null,
+          service_date: startKey,
+          service_date_keys: dateKeys,
+          total_people: 0,
+          final_amount: 0,
+          status: resolvedStatusByAgendaId.get(agendaId),
+          payment_status: null,
+          customer_address: row.location || null,
+          workers: [],
+        });
+      }
+
+      const job = agendaMap.get(agendaId);
+      if (row.employee_id != null || row.employee_name) {
+        const name = row.employee_name || `Pekerja #${row.employee_id}`;
+        const colorKey = row.employee_id == null ? name : String(row.employee_id);
+        if (!legendMap.has(colorKey)) {
+          legendMap.set(colorKey, {
+            employee_id: row.employee_id == null ? null : Number(row.employee_id),
+            name,
+            color: hashPosWorkerColor(colorKey),
+          });
+        }
+        const already = job.workers.some(
+          (w) =>
+            (row.employee_id != null && Number(w.employee_id) === Number(row.employee_id)) ||
+            w.name === name
+        );
+        if (!already) {
+          job.workers.push({
+            employee_id: row.employee_id == null ? null : Number(row.employee_id),
+            name,
+            color: legendMap.get(colorKey).color,
+          });
+        }
+      }
+    }
+
+    for (const job of agendaMap.values()) {
+      job.total_people = job.workers.length;
+      const keys =
+        Array.isArray(job.service_date_keys) && job.service_date_keys.length > 0
+          ? job.service_date_keys
+          : job.service_date
+            ? [job.service_date]
+            : [];
+      for (const dateKey of keys) {
+        if (!dateKey) continue;
+        if (!days[dateKey]) days[dateKey] = { jobs: [], workers: [] };
+        days[dateKey].jobs.push(job);
+      }
     }
 
     for (const dateKey of Object.keys(days)) {

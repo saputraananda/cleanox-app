@@ -31,19 +31,49 @@ const CALENDAR_STATUS_STYLE = {
     pillText: '#065F46',
     dot: '#059669',
   },
+  'Agenda Terjadwal': {
+    bg: 'bg-violet-100',
+    text: 'text-violet-800',
+    border: 'border-violet-200',
+    pillBg: '#EDE9FE',
+    pillText: '#5B21B6',
+    dot: '#7C3AED',
+  },
+  Selesai: {
+    bg: 'bg-emerald-100',
+    text: 'text-emerald-800',
+    border: 'border-emerald-200',
+    pillBg: '#D1FAE5',
+    pillText: '#065F46',
+    dot: '#059669',
+  },
 };
+
+const LEGEND_ITEMS = ['Terjadwal', 'Lunas', 'Agenda Terjadwal'];
 
 const WEEKDAYS = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
 const MAX_PILLS_PER_DAY = 3;
 
 function resolveCalendarStatus(job) {
-  if (!job || job.status === 'Cancelled') return null;
+  if (!job) return null;
+  if (job.job_kind === 'agenda') {
+    const status = String(job.agenda_status || job.status || '');
+    if (status === 'scheduled') return 'Agenda Terjadwal';
+    if (status === 'completed') return 'Selesai';
+    return null;
+  }
+  if (job.status === 'Cancelled') return null;
   if (String(job.payment_status || '').toLowerCase() === 'lunas') return 'Lunas';
   return 'Terjadwal';
 }
 
 function jobsForCalendar(jobs) {
   return (jobs || []).filter((job) => resolveCalendarStatus(job) != null);
+}
+
+function jobListKey(job) {
+  if (job?.job_kind === 'agenda') return `agenda-${job.agenda_id || job.id}`;
+  return `pos-${job.id}`;
 }
 
 function toMonthKey(date) {
@@ -192,7 +222,8 @@ export default function CleanoxOnlyCalendarPage() {
             </p>
             <h1 className="mt-2 text-[22px] font-extrabold tracking-[-0.01em]">Calendar</h1>
             <p className="mt-2 max-w-xl text-[13px] text-blue-100/90">
-              Jadwal transaksi POS per tanggal layanan. Blok biru = Terjadwal, hijau = Lunas.
+              Jadwal transaksi POS dan agenda per tanggal. Biru = Terjadwal, hijau = Lunas/Selesai,
+              ungu = Agenda Terjadwal.
             </p>
           </div>
           <button
@@ -307,11 +338,15 @@ export default function CleanoxOnlyCalendarPage() {
                     <div className="space-y-0.5">
                       {visiblePills.map((job) => {
                         const displayStatus = resolveCalendarStatus(job);
-                        const style = CALENDAR_STATUS_STYLE[displayStatus] || CALENDAR_STATUS_STYLE.Terjadwal;
-                        const label = job.customer_name || job.transaction_no || 'Transaksi';
+                        const style =
+                          CALENDAR_STATUS_STYLE[displayStatus] || CALENDAR_STATUS_STYLE.Terjadwal;
+                        const label =
+                          job.customer_name ||
+                          job.transaction_no ||
+                          (job.job_kind === 'agenda' ? 'Agenda' : 'Transaksi');
                         return (
                           <div
-                            key={job.id}
+                            key={jobListKey(job)}
                             className="truncate rounded-[4px] px-1 py-0.5 text-[10px] font-semibold leading-tight"
                             style={{ background: style.pillBg, color: style.pillText }}
                             title={`${label} · ${displayStatus}`}
@@ -333,16 +368,22 @@ export default function CleanoxOnlyCalendarPage() {
           )}
 
           <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-3">
-            {Object.entries(CALENDAR_STATUS_STYLE).map(([status, style]) => (
-              <span
-                key={status}
-                className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600"
-              >
-                <span className="h-2 w-2 rounded-full" style={{ background: style.dot }} />
-                {status}
-              </span>
-            ))}
+            {LEGEND_ITEMS.map((status) => {
+              const style = CALENDAR_STATUS_STYLE[status];
+              return (
+                <span
+                  key={status}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-600"
+                >
+                  <span className="h-2 w-2 rounded-full" style={{ background: style.dot }} />
+                  {status}
+                </span>
+              );
+            })}
           </div>
+          <p className="text-[10.5px] text-slate-400">
+            Hijau Lunas/Selesai = transaksi lunas atau agenda selesai.
+          </p>
         </section>
 
         <aside className="space-y-3">
@@ -390,7 +431,7 @@ export default function CleanoxOnlyCalendarPage() {
             <div>
               <div className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold text-slate-800">
                 <Package className="h-4 w-4 text-slate-500" />
-                Transaksi
+                Jadwal
                 <span className="ml-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
                   {selectedJobs.length}
                 </span>
@@ -398,9 +439,9 @@ export default function CleanoxOnlyCalendarPage() {
 
               {selectedJobs.length === 0 ? (
                 <div className="rounded-[16px] border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center">
-                  <p className="text-[13px] font-semibold text-slate-700">Tidak ada transaksi</p>
+                  <p className="text-[13px] font-semibold text-slate-700">Tidak ada transaksi/agenda</p>
                   <p className="mt-1 text-[11.5px] text-slate-500">
-                    Tidak ada jadwal layanan pada tanggal ini.
+                    Tidak ada jadwal layanan atau agenda pada tanggal ini.
                   </p>
                   <button
                     type="button"
@@ -414,45 +455,64 @@ export default function CleanoxOnlyCalendarPage() {
                 </div>
               ) : (
                 <div className="max-h-[420px] space-y-2.5 overflow-y-auto pr-1">
-                  {selectedJobs.map((job) => (
-                    <button
-                      key={job.id}
-                      type="button"
-                      onClick={() => navigate(`/cleanox-only/transactions/${job.id}`)}
-                      className="w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3.5 text-left transition duration-150 hover:-translate-y-0.5 hover:border-blue-200 hover:bg-white active:scale-[.98]"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="font-mono text-[11px] font-semibold text-slate-500">
-                            {job.transaction_no || '—'}
-                          </p>
-                          <p className="mt-0.5 truncate text-[13px] font-bold tracking-[-0.01em] text-slate-900">
-                            {job.customer_name || 'Tanpa nama'}
-                          </p>
-                          <p className="mt-1 text-[11.5px] text-slate-500">
-                            {job.total_people || 0} orang · Rp{' '}
-                            {Number(job.final_amount || 0).toLocaleString('id-ID')}
-                          </p>
+                  {selectedJobs.map((job) => {
+                    const isAgenda = job.job_kind === 'agenda';
+                    return (
+                      <button
+                        key={jobListKey(job)}
+                        type="button"
+                        onClick={() => {
+                          if (isAgenda) {
+                            navigate(`/cleanox-only/agenda/${job.agenda_id || job.id}`);
+                            return;
+                          }
+                          navigate(`/cleanox-only/transactions/${job.id}`);
+                        }}
+                        className={`w-full rounded-[16px] border bg-slate-50 px-4 py-3.5 text-left transition duration-150 hover:-translate-y-0.5 hover:bg-white active:scale-[.98] ${
+                          isAgenda
+                            ? 'border-violet-200 hover:border-violet-300'
+                            : 'border-slate-200 hover:border-blue-200'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="font-mono text-[11px] font-semibold text-slate-500">
+                              {job.transaction_no || '—'}
+                            </p>
+                            <p className="mt-0.5 truncate text-[13px] font-bold tracking-[-0.01em] text-slate-900">
+                              {job.customer_name || (isAgenda ? 'Agenda' : 'Tanpa nama')}
+                            </p>
+                            <p className="mt-1 text-[11.5px] text-slate-500">
+                              {isAgenda
+                                ? `${job.total_people || 0} orang · ${job.customer_address || job.day_label || '—'}`
+                                : `${job.total_people || 0} orang · Rp ${Number(job.final_amount || 0).toLocaleString('id-ID')}`}
+                            </p>
+                          </div>
+                          <ExternalLink className="mt-0.5 h-[14px] w-[14px] shrink-0 text-slate-400" />
                         </div>
-                        <ExternalLink className="mt-0.5 h-[14px] w-[14px] shrink-0 text-slate-400" />
-                      </div>
-                      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                        <StatusBadge displayStatus={resolveCalendarStatus(job)} />
-                        {job.workers.map((worker) => (
-                          <span
-                            key={`${job.id}-${worker.employee_id || worker.name}`}
-                            className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600"
-                          >
+                        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                          {isAgenda && (
+                            <span className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-semibold text-violet-700">
+                              Agenda
+                            </span>
+                          )}
+                          <StatusBadge displayStatus={resolveCalendarStatus(job)} />
+                          {(job.workers || []).map((worker) => (
                             <span
-                              className="h-1.5 w-1.5 rounded-full"
-                              style={{ background: worker.color }}
-                            />
-                            {worker.name}
-                          </span>
-                        ))}
-                      </div>
-                    </button>
-                  ))}
+                              key={`${jobListKey(job)}-${worker.employee_id || worker.name}`}
+                              className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600"
+                            >
+                              <span
+                                className="h-1.5 w-1.5 rounded-full"
+                                style={{ background: worker.color }}
+                              />
+                              {worker.name}
+                            </span>
+                          ))}
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>

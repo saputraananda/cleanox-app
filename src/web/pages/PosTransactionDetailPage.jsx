@@ -1826,13 +1826,23 @@ export default function PosTransactionDetailPage() {
       <div className="grid gap-6">
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
           <div className="flex items-center justify-between gap-3">
-            <h2 className="text-lg font-semibold text-slate-900">Assignment Worker</h2>
-            {(assignments || []).some((item) => item.assignment_status === 'Rejected') && (
+            <h2 className="text-lg font-semibold text-slate-900">
+              {isTakeHome ? 'Take Home — Shared Pool' : 'Assignment Worker'}
+            </h2>
+            {!isTakeHome &&
+              (assignments || []).some((item) => item.assignment_status === 'Rejected') && (
               <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-bold text-amber-700 border border-amber-200">
                 Ada reject menunggu plotting
               </span>
             )}
           </div>
+          {isTakeHome ? (
+            <p className="rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-800">
+              Take Home tidak memakai penugasan individu. Semua Mobile Worker melihat order ini;
+              progress stage diisi bersama (Diambil → Pengantaran).
+            </p>
+          ) : (
+            <>
           {!isHistoryEntry && (
           <form onSubmit={handleAssignmentSubmit} className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">
@@ -1879,6 +1889,8 @@ export default function PosTransactionDetailPage() {
               Simpan Assignment
             </button>
           </form>
+          )}
+            </>
           )}
 
           <div className="rounded-xl border border-slate-200 p-4">

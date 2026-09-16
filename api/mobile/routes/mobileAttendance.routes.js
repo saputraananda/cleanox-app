@@ -6,6 +6,10 @@ import {
   checkOutAttendance,
   submitGroomingPhotos,
   deleteGroomingPhoto,
+  deleteCheckInPhoto,
+  replaceCheckInPhoto,
+  deleteCheckOutPhoto,
+  replaceCheckOutPhoto,
   getTodayAttendanceStatus,
   getAbsenLocation,
   serveAttendanceFile,
@@ -44,8 +48,12 @@ router.get('/absen-location', getAbsenLocation);
 router.get('/rekap', getRekapMonth);
 router.get('/rekap/day', getRekapDay);
 router.post('/check-in', handleUpload, checkInAttendance);
+router.delete('/check-in/photo', deleteCheckInPhoto);
+router.post('/check-in/photo/replace', handleUpload, replaceCheckInPhoto);
 router.post('/grooming', handleUpload, submitGroomingPhotos);
 router.delete('/grooming/photo', deleteGroomingPhoto);
 router.post('/check-out', handleUpload, checkOutAttendance);
+router.delete('/check-out/photo', deleteCheckOutPhoto);
+router.post('/check-out/photo/replace', handleUpload, replaceCheckOutPhoto);
 
 export default router;

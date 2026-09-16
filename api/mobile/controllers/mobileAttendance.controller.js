@@ -464,6 +464,320 @@ export const deleteGroomingPhoto = async (req, res) => {
   }
 };
 
+function collectGroomingDiskFiles(row) {
+  if (!row) return [];
+  return PHOTO_TYPE_META.map((meta) => row[meta.fileCol]).filter(Boolean);
+}
+
+async function clearAttendancePhotoReviews(attendanceId, photoTypes = null) {
+  if (!attendanceId) return;
+  if (Array.isArray(photoTypes) && photoTypes.length > 0) {
+    await cleanoxPool.query(
+      `DELETE FROM tr_worker_attendance_photo_reviews
+       WHERE attendance_id = ? AND photo_type IN (?)`,
+      [attendanceId, photoTypes]
+    );
+    return;
+  }
+  await cleanoxPool.query(
+    `DELETE FROM tr_worker_attendance_photo_reviews WHERE attendance_id = ?`,
+    [attendanceId]
+  );
+}
+
+export const deleteCheckInPhoto = async (req, res) => {
+  const workerId = req.user?.id;
+  const today = todayDateString();
+
+  try {
+    const [[existing]] = await cleanoxPool.query(
+      `SELECT * FROM tr_worker_attendance
+       WHERE worker_id = ? AND attendance_date = ?`,
+      [workerId, today]
+    );
+
+    if (!existing?.check_in_at) {
+      return res.status(404).json({ message: 'Foto In / check-in hari ini tidak ditemukan' });
+    }
+    if (existing.check_out_at) {
+      return res.status(409).json({
+        message: 'Hapus atau ambil ulang Foto Out terlebih dahulu sebelum menghapus Foto In',
+      });
+    }
+
+    const filesToDelete = [
+      existing.check_in_photo_file,
+      ...collectGroomingDiskFiles(existing),
+    ].filter(Boolean);
+
+    await cleanoxPool.query(
+      `UPDATE tr_worker_attendance
+       SET check_in_at = NULL,
+           check_in_latitude = NULL,
+           check_in_longitude = NULL,
+           check_in_location_name = NULL,
+           check_in_photo_file = NULL,
+           check_in_photo_path = NULL,
+           full_body_photo_file = NULL,
+           full_body_photo_path = NULL,
+           side_photo_file = NULL,
+           side_photo_path = NULL,
+           back_photo_file = NULL,
+           back_photo_path = NULL,
+           hand_photo_file = NULL,
+           hand_photo_path = NULL,
+           updated_at = NOW()
+       WHERE id = ?`,
+      [existing.id]
+    );
+
+    await clearAttendancePhotoReviews(existing.id);
+    for (const fileName of filesToDelete) {
+      deleteAttendanceDiskFile(fileName);
+    }
+
+    return res.json({
+      message: 'Foto In dihapus. Absen masuk dan grooming perlu diisi ulang.',
+    });
+  } catch (error) {
+    console.error('[mobileAttendance/deleteCheckInPhoto]', error.message);
+    return res.status(500).json({ message: 'Gagal menghapus Foto In' });
+  }
+};
+
+export const replaceCheckInPhoto = async (req, res) => {
+  const workerId = req.user?.id;
+  const today = todayDateString();
+  const files = req.files || {};
+
+  if (!files.check_in_photo?.[0]) {
+    return res.status(400).json({ message: 'Foto In wajib diunggah' });
+  }
+
+  if (await isWorkerOffDay(workerId, today)) {
+    return res.status(403).json({ message: 'Hari ini libur — absensi tidak diperlukan' });
+  }
+
+  const connection = await cleanoxPool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const [[existing]] = await connection.query(
+      `SELECT * FROM tr_worker_attendance
+       WHERE worker_id = ? AND attendance_date = ?
+       FOR UPDATE`,
+      [workerId, today]
+    );
+
+    if (!existing?.check_in_at) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Check-in hari ini belum ada untuk diganti' });
+    }
+    if (existing.check_out_at) {
+      await connection.rollback();
+      return res.status(409).json({
+        message: 'Hapus atau ambil ulang Foto Out terlebih dahulu sebelum mengganti Foto In',
+      });
+    }
+
+    const latitude = parseCoordinate(req.body.latitude);
+    const longitude = parseCoordinate(req.body.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      await connection.rollback();
+      return res.status(400).json({ message: 'GPS absensi wajib aktif untuk ambil ulang Foto In' });
+    }
+
+    const locationName = await resolveAttendanceLocationName(connection, latitude, longitude);
+    const oldFiles = [
+      existing.check_in_photo_file,
+      ...collectGroomingDiskFiles(existing),
+    ].filter(Boolean);
+
+    const checkInPhoto = await savePhoto(workerId, today, 'check_in', files.check_in_photo[0]);
+
+    await connection.query(
+      `UPDATE tr_worker_attendance
+       SET check_in_at = NOW(),
+           check_in_latitude = ?,
+           check_in_longitude = ?,
+           check_in_location_name = ?,
+           check_in_photo_file = ?,
+           check_in_photo_path = ?,
+           full_body_photo_file = NULL,
+           full_body_photo_path = NULL,
+           side_photo_file = NULL,
+           side_photo_path = NULL,
+           back_photo_file = NULL,
+           back_photo_path = NULL,
+           hand_photo_file = NULL,
+           hand_photo_path = NULL,
+           updated_at = NOW()
+       WHERE id = ?`,
+      [
+        latitude,
+        longitude,
+        locationName,
+        checkInPhoto.file,
+        checkInPhoto.path,
+        existing.id,
+      ]
+    );
+
+    await connection.query(
+      `DELETE FROM tr_worker_attendance_photo_reviews WHERE attendance_id = ?`,
+      [existing.id]
+    );
+
+    await connection.commit();
+
+    for (const fileName of oldFiles) {
+      if (fileName && fileName !== checkInPhoto.file) {
+        deleteAttendanceDiskFile(fileName);
+      }
+    }
+
+    return res.json({
+      message: 'Foto In diganti. Waktu absen masuk diperbarui; grooming perlu diisi ulang.',
+      check_in_photo: { file: checkInPhoto.file, path: checkInPhoto.path },
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[mobileAttendance/replaceCheckInPhoto]', error.message);
+    return res.status(error.statusCode || 500).json({
+      message: error.message || 'Gagal mengganti Foto In',
+    });
+  } finally {
+    connection.release();
+  }
+};
+
+export const deleteCheckOutPhoto = async (req, res) => {
+  const workerId = req.user?.id;
+  const today = todayDateString();
+
+  try {
+    const [[existing]] = await cleanoxPool.query(
+      `SELECT * FROM tr_worker_attendance
+       WHERE worker_id = ? AND attendance_date = ?`,
+      [workerId, today]
+    );
+
+    if (!existing?.check_out_at) {
+      return res.status(404).json({ message: 'Foto Out / check-out hari ini tidak ditemukan' });
+    }
+
+    const oldFile = existing.check_out_photo_file || null;
+
+    await cleanoxPool.query(
+      `UPDATE tr_worker_attendance
+       SET check_out_at = NULL,
+           check_out_latitude = NULL,
+           check_out_longitude = NULL,
+           check_out_location_name = NULL,
+           check_out_photo_file = NULL,
+           check_out_photo_path = NULL,
+           updated_at = NOW()
+       WHERE id = ?`,
+      [existing.id]
+    );
+
+    await clearAttendancePhotoReviews(existing.id, ['check_out', 'check_out_photo']);
+    deleteAttendanceDiskFile(oldFile);
+
+    return res.json({ message: 'Foto Out dihapus. Absen pulang perlu diisi ulang.' });
+  } catch (error) {
+    console.error('[mobileAttendance/deleteCheckOutPhoto]', error.message);
+    return res.status(500).json({ message: 'Gagal menghapus Foto Out' });
+  }
+};
+
+export const replaceCheckOutPhoto = async (req, res) => {
+  const workerId = req.user?.id;
+  const today = todayDateString();
+  const files = req.files || {};
+
+  if (!files.check_out_photo?.[0]) {
+    return res.status(400).json({ message: 'Foto Out wajib diunggah' });
+  }
+
+  const connection = await cleanoxPool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const [[existing]] = await connection.query(
+      `SELECT * FROM tr_worker_attendance
+       WHERE worker_id = ? AND attendance_date = ?
+       FOR UPDATE`,
+      [workerId, today]
+    );
+
+    if (!existing?.check_in_at) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Check-in hari ini belum ditemukan' });
+    }
+    if (!existing?.check_out_at) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Check-out hari ini belum ada untuk diganti' });
+    }
+
+    const latitude = parseCoordinate(req.body.latitude);
+    const longitude = parseCoordinate(req.body.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      await connection.rollback();
+      return res.status(400).json({ message: 'GPS absensi wajib aktif untuk ambil ulang Foto Out' });
+    }
+
+    const locationName = await resolveAttendanceLocationName(connection, latitude, longitude);
+    const oldFile = existing.check_out_photo_file || null;
+    const checkoutPhoto = await savePhoto(workerId, today, 'check_out', files.check_out_photo[0]);
+
+    await connection.query(
+      `UPDATE tr_worker_attendance
+       SET check_out_at = NOW(),
+           check_out_latitude = ?,
+           check_out_longitude = ?,
+           check_out_location_name = ?,
+           check_out_photo_file = ?,
+           check_out_photo_path = ?,
+           updated_at = NOW()
+       WHERE id = ?`,
+      [
+        latitude,
+        longitude,
+        locationName,
+        checkoutPhoto.file,
+        checkoutPhoto.path,
+        existing.id,
+      ]
+    );
+
+    await connection.query(
+      `DELETE FROM tr_worker_attendance_photo_reviews
+       WHERE attendance_id = ? AND photo_type IN (?)`,
+      [existing.id, ['check_out', 'check_out_photo']]
+    );
+
+    await connection.commit();
+
+    if (oldFile && oldFile !== checkoutPhoto.file) {
+      deleteAttendanceDiskFile(oldFile);
+    }
+
+    return res.json({
+      message: 'Foto Out diganti. Waktu absen pulang diperbarui.',
+      check_out_photo: { file: checkoutPhoto.file, path: checkoutPhoto.path },
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[mobileAttendance/replaceCheckOutPhoto]', error.message);
+    return res.status(error.statusCode || 500).json({
+      message: error.message || 'Gagal mengganti Foto Out',
+    });
+  } finally {
+    connection.release();
+  }
+};
+
 export const checkOutAttendance = async (req, res) => {
   const workerId = req.user?.id;
   const today = todayDateString();
