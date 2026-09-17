@@ -17,20 +17,6 @@ const TABS = [
   { key: 'Rejected', label: 'Ditolak' },
 ];
 
-const DATE_PRESETS = [
-  { key: 'today', label: 'Hari Ini' },
-  { key: 'all', label: 'Semua Tanggal' },
-];
-
-const TYPE_FILTERS = [
-  { key: 'all', label: 'Semua' },
-  { key: 'home_service', label: 'Rumah' },
-  { key: 'take_home', label: 'Bawa Pulang' },
-  { key: 'agenda', label: 'Agenda' },
-];
-
-const TYPE_FILTER_KEYS = new Set(TYPE_FILTERS.map((item) => item.key));
-
 const STATUS_LABEL = {
   Assigned: 'Perlu Konfirmasi',
   In_Schedule: 'Terjadwal',
@@ -73,11 +59,6 @@ const CONFIRM_COPY = {
   },
 };
 
-const jakartaTodayYmd = () =>
-  new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
-
-const isValidYmd = (value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || '').trim());
-
 const formatDateTime = (value) => {
   if (!value) return '-';
   return new Date(value).toLocaleString('id-ID', {
@@ -86,16 +67,6 @@ const formatDateTime = (value) => {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  });
-};
-
-const formatFilterDateLabel = (ymd) => {
-  if (!isValidYmd(ymd)) return ymd || '';
-  return new Date(`${ymd}T12:00:00`).toLocaleDateString('id-ID', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    timeZone: 'Asia/Jakarta',
   });
 };
 
@@ -206,13 +177,6 @@ export default function MobileWorkerTasksPage() {
   const location = useLocation();
   const initialState = location.state || {};
   const [tab, setTab] = useState(initialState.tab || 'Assigned');
-  const [datePreset, setDatePreset] = useState(initialState.datePreset === 'all' ? 'all' : 'today');
-  const [customDate, setCustomDate] = useState(
-    isValidYmd(initialState.onDate) ? String(initialState.onDate).trim() : ''
-  );
-  const [typeFilter, setTypeFilter] = useState(
-    TYPE_FILTER_KEYS.has(initialState.typeFilter) ? initialState.typeFilter : 'all'
-  );
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -231,22 +195,6 @@ export default function MobileWorkerTasksPage() {
   const [photoPreview, setPhotoPreview] = useState(null);
   const [workNoteDrafts, setWorkNoteDrafts] = useState({});
   const photoPreviewMapRef = useRef({});
-
-  const effectiveOnDate = customDate
-    ? customDate
-    : datePreset === 'today'
-      ? 'today'
-      : null;
-
-  const filterSummaryLabel = (() => {
-    const dateLabel = customDate
-      ? formatFilterDateLabel(customDate)
-      : datePreset === 'today'
-        ? 'Hari Ini'
-        : 'Semua Tanggal';
-    const typeLabel = TYPE_FILTERS.find((item) => item.key === typeFilter)?.label || 'Semua';
-    return `${dateLabel} · ${typeLabel}`;
-  })();
 
   const resetListUi = () => {
     setRejectingId(null);
@@ -281,19 +229,11 @@ export default function MobileWorkerTasksPage() {
     setLoading(true);
     setError('');
     try {
-      const listParams = { status };
-      if (effectiveOnDate) listParams.on_date = effectiveOnDate;
-
-      const fetchPos = typeFilter !== 'agenda';
-      const fetchAgenda = typeFilter !== 'home_service' && typeFilter !== 'take_home';
+      const listParams = { status, on_date: 'today' };
 
       const [posRes, agendaRes] = await Promise.all([
-        fetchPos
-          ? api.get('/mobile-tasks', { params: listParams })
-          : Promise.resolve({ data: { tasks: [] } }),
-        fetchAgenda
-          ? api.get('/mobile-agenda', { params: listParams }).catch(() => ({ data: { tasks: [] } }))
-          : Promise.resolve({ data: { tasks: [] } }),
+        api.get('/mobile-tasks', { params: listParams }),
+        api.get('/mobile-agenda', { params: listParams }).catch(() => ({ data: { tasks: [] } })),
       ]);
       const posTasks = posRes.data.tasks || [];
       const agendaTasks = (agendaRes.data.tasks || []).map((row) => ({
@@ -312,17 +252,7 @@ export default function MobileWorkerTasksPage() {
           service_mode: 'home_service',
         },
       }));
-      let nextTasks = [...agendaTasks, ...posTasks];
-      if (typeFilter === 'agenda') {
-        nextTasks = nextTasks.filter((task) => task.task_source === 'agenda');
-      } else if (typeFilter === 'take_home') {
-        nextTasks = nextTasks.filter((task) => isTakeHomeTask(task));
-      } else if (typeFilter === 'home_service') {
-        nextTasks = nextTasks.filter(
-          (task) => task.task_source !== 'agenda' && !isTakeHomeTask(task)
-        );
-      }
-      setTasks(nextTasks);
+      setTasks([...agendaTasks, ...posTasks]);
       await refreshPhotoPreviews(posTasks);
     } catch (err) {
       setError(err.response?.data?.message || 'Gagal memuat daftar task');
@@ -334,13 +264,7 @@ export default function MobileWorkerTasksPage() {
   };
 
   useEffect(() => {
-    if (
-      location.state?.tab ||
-      location.state?.surveySaved ||
-      location.state?.datePreset ||
-      location.state?.onDate ||
-      location.state?.typeFilter
-    ) {
+    if (location.state?.tab || location.state?.surveySaved) {
       navigate(location.pathname, { replace: true, state: null });
     }
   }, []);
@@ -356,7 +280,7 @@ export default function MobileWorkerTasksPage() {
         if (typeof url === 'string' && url.startsWith('blob:')) URL.revokeObjectURL(url);
       });
     };
-  }, [tab, datePreset, customDate, typeFilter]);
+  }, [tab]);
 
   const loadDetail = async (assignmentId, force = false) => {
     if (!force && detailMap[assignmentId]) return;
@@ -917,77 +841,6 @@ export default function MobileWorkerTasksPage() {
             ))}
           </div>
 
-          <div className="rounded-[14px] bg-white border border-slate-200 p-2 space-y-2">
-            <div className="flex gap-1 overflow-x-auto">
-              {DATE_PRESETS.map((item) => {
-                const active = !customDate && datePreset === item.key;
-                return (
-                  <button
-                    key={item.key}
-                    type="button"
-                    onClick={() => {
-                      setDatePreset(item.key);
-                      setCustomDate('');
-                      resetListUi();
-                    }}
-                    className={`flex-shrink-0 rounded-[10px] px-2.5 py-1.5 text-[10px] font-bold transition whitespace-nowrap ${
-                      active
-                        ? 'bg-[#163A22] text-white'
-                        : 'text-slate-500 border border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    {item.label}
-                  </button>
-                );
-              })}
-              <label className="flex-shrink-0 inline-flex items-center gap-1.5 rounded-[10px] border border-slate-200 px-2 py-1.5 text-[10px] font-bold text-slate-500">
-                <span className="whitespace-nowrap">Pilih tanggal</span>
-                <input
-                  type="date"
-                  value={customDate}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    if (!value) {
-                      setCustomDate('');
-                      setDatePreset('today');
-                    } else if (value === jakartaTodayYmd()) {
-                      setCustomDate('');
-                      setDatePreset('today');
-                    } else {
-                      setCustomDate(value);
-                    }
-                    resetListUi();
-                  }}
-                  className="max-w-[120px] border-0 bg-transparent p-0 text-[10px] font-bold text-slate-700 outline-none"
-                />
-              </label>
-            </div>
-
-            <div className="flex gap-1 overflow-x-auto">
-              {TYPE_FILTERS.map((item) => (
-                <button
-                  key={item.key}
-                  type="button"
-                  onClick={() => {
-                    setTypeFilter(item.key);
-                    resetListUi();
-                  }}
-                  className={`flex-shrink-0 rounded-[10px] px-2.5 py-1.5 text-[10px] font-bold transition whitespace-nowrap ${
-                    typeFilter === item.key
-                      ? 'bg-[#163A22] text-white'
-                      : 'text-slate-500 border border-slate-200 hover:bg-slate-50'
-                  }`}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-
-            <p className="px-0.5 text-[10px] font-semibold text-slate-500">
-              Menampilkan: {filterSummaryLabel}
-            </p>
-          </div>
-
           {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</div>}
           {success && (
             <div className="rounded-2xl border border-[#163A22] bg-[#163A22] p-3 text-sm text-white">{success}</div>
@@ -998,9 +851,7 @@ export default function MobileWorkerTasksPage() {
           ) : tasks.length === 0 ? (
             <div className="rounded-[22px] border border-slate-100 bg-white p-6 text-center shadow-[0_10px_28px_rgba(15,23,42,.05)]">
               <p className="text-[13px] font-extrabold text-slate-900">Tidak ada tugas</p>
-              <p className="mt-1 text-[11px] text-slate-500">
-                Tidak ada tugas untuk filter ini. Coba ubah tanggal atau jenis.
-              </p>
+              <p className="mt-1 text-[11px] text-slate-500">Belum ada tugas untuk hari ini.</p>
             </div>
           ) : (
             tasks.map((task) => {
