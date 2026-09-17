@@ -154,17 +154,38 @@ async function buildAgendaTaskDto(row) {
   };
 }
 
+function todayDateStringJakarta() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
+}
+
 export const listMyAgendaTasks = async (req, res) => {
   const employeeId = Number(req.user?.id);
   const status = String(req.query.status || '').trim();
+  const onDateRaw = req.query.on_date != null ? String(req.query.on_date).trim() : '';
   if (!employeeId) return res.status(401).json({ message: 'Unauthorized' });
 
   try {
+    let onDate = null;
+    if (onDateRaw) {
+      if (onDateRaw.toLowerCase() === 'today') {
+        onDate = todayDateStringJakarta();
+      } else if (/^\d{4}-\d{2}-\d{2}$/.test(onDateRaw)) {
+        onDate = onDateRaw;
+      } else {
+        return res.status(400).json({ message: 'Parameter on_date tidak valid' });
+      }
+    }
+
     const params = [employeeId];
     let statusSql = '';
+    let dateSql = '';
     if (status) {
       statusSql = ' AND w.assignment_status = ?';
       params.push(status);
+    }
+    if (onDate) {
+      dateSql = ' AND DATE(a.start_date) = ?';
+      params.push(onDate);
     }
 
     const [rows] = await cleanoxPool.query(
@@ -189,6 +210,7 @@ export const listMyAgendaTasks = async (req, res) => {
          AND a.status IN ('scheduled', 'completed')
          AND a.content_type = 'item_service'
          ${statusSql}
+         ${dateSql}
        ORDER BY a.start_date ASC, w.id DESC`,
       params
     );

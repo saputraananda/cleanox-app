@@ -11,6 +11,97 @@ function formatCoord(value) {
   return Number(value).toFixed(5);
 }
 
+function stopStreamTracks(stream) {
+  stream?.getTracks?.().forEach((track) => track.stop());
+}
+
+async function getMediaStream(constraints) {
+  return navigator.mediaDevices.getUserMedia(constraints);
+}
+
+function isFrontFacingTrack(track) {
+  const facing = String(track?.getSettings?.()?.facingMode || '').toLowerCase();
+  return facing === 'user' || facing.includes('user');
+}
+
+async function pickCameraDeviceId(preferredFacing) {
+  if (!navigator.mediaDevices?.enumerateDevices) return null;
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const cameras = devices.filter((device) => device.kind === 'videoinput');
+  if (cameras.length === 0) return null;
+
+  const preferRear = preferredFacing === 'environment';
+  const rearRe = /back|rear|environment|belakang|world/i;
+  const frontRe = /front|user|facing|depan|selfie/i;
+
+  if (preferRear) {
+    const byLabel = cameras.find((device) => rearRe.test(device.label || ''));
+    if (byLabel?.deviceId) return byLabel.deviceId;
+    const notFront = cameras.find((device) => !frontRe.test(device.label || ''));
+    if (cameras.length >= 2) {
+      const second = cameras[1];
+      if (second?.deviceId && !frontRe.test(second.label || '')) return second.deviceId;
+      if (notFront?.deviceId && notFront !== cameras[0]) return notFront.deviceId;
+      if (second?.deviceId) return second.deviceId;
+    }
+    if (notFront?.deviceId) return notFront.deviceId;
+    return null;
+  }
+
+  const byLabel = cameras.find((device) => frontRe.test(device.label || ''));
+  if (byLabel?.deviceId) return byLabel.deviceId;
+  return cameras[0]?.deviceId || null;
+}
+
+async function openCameraStream(preferredFacing) {
+  const facing = preferredFacing === 'user' ? 'user' : 'environment';
+  let lastError = null;
+
+  const tryConstraints = async (constraints, { rejectFront = false } = {}) => {
+    const stream = await getMediaStream(constraints);
+    if (rejectFront && facing === 'environment') {
+      const track = stream.getVideoTracks?.()[0];
+      if (track && isFrontFacingTrack(track)) {
+        stopStreamTracks(stream);
+        throw new Error('Opened front camera while rear was preferred');
+      }
+    }
+    return stream;
+  };
+
+  try {
+    return await tryConstraints({ video: { facingMode: { exact: facing } }, audio: false });
+  } catch (err) {
+    lastError = err;
+  }
+
+  try {
+    return await tryConstraints(
+      { video: { facingMode: { ideal: facing } }, audio: false },
+      { rejectFront: facing === 'environment' }
+    );
+  } catch (err) {
+    lastError = err;
+  }
+
+  try {
+    const deviceId = await pickCameraDeviceId(facing);
+    if (deviceId) {
+      return await tryConstraints({ video: { deviceId: { exact: deviceId } }, audio: false });
+    }
+  } catch (err) {
+    lastError = err;
+  }
+
+  try {
+    return await tryConstraints({ video: true, audio: false });
+  } catch (err) {
+    lastError = err;
+  }
+
+  throw lastError || new Error('Tidak dapat mengakses kamera');
+}
+
 function LiveTimestamp({ align = 'right' }) {
   const [ts, setTs] = useState(() => formatStamp(new Date()));
 
@@ -39,6 +130,7 @@ function LiveTimestamp({ align = 'right' }) {
 
 /**
  * In-browser take-photo modal with burned-in timestamp.
+ * Default open uses rear camera (environment); flip button still switches to front.
  * variant="ikm" → white portrait sheet (Absensi); default → dark 4/3 shutter UI.
  * Optional GPS via includeLocation → onCapture(file, meta?).
  * locationDisplayMode="label" → overlay/burn uses resolveLocationLabel instead of coords.
@@ -140,7 +232,7 @@ export default function MobileCameraCapture({
     if (!open) return undefined;
 
     let cancelled = false;
-    streamRef.current?.getTracks().forEach((t) => t.stop());
+    stopStreamTracks(streamRef.current);
     streamRef.current = null;
     setReady(false);
 
@@ -149,11 +241,10 @@ export default function MobileCameraCapture({
       return undefined;
     }
 
-    navigator.mediaDevices
-      .getUserMedia({ video: { facingMode: { ideal: facingMode } }, audio: false })
+    openCameraStream(facingMode)
       .then((stream) => {
         if (cancelled) {
-          stream.getTracks().forEach((t) => t.stop());
+          stopStreamTracks(stream);
           return;
         }
         streamRef.current = stream;
@@ -182,7 +273,7 @@ export default function MobileCameraCapture({
 
     return () => {
       cancelled = true;
-      streamRef.current?.getTracks().forEach((t) => t.stop());
+      stopStreamTracks(streamRef.current);
       streamRef.current = null;
     };
   }, [open, facingMode]);

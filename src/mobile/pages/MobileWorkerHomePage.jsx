@@ -213,6 +213,7 @@ function buildTodayActivityCards({
         task.transaction?.service_date
       )}`,
       to: '/mobile-worker/tasks',
+      state: { tab: 'Assigned', datePreset: 'today' },
     })),
     ...progressList.map((task) => ({
       id: `task-progress-${task.assignment_id}`,
@@ -221,6 +222,7 @@ function buildTodayActivityCards({
       title: 'Sedang dikerjakan',
       description: `${formatTaskServiceLabel(task)} · ${formatTaskCustomer(task)}`,
       to: '/mobile-worker/tasks',
+      state: { tab: 'On_Progress', datePreset: 'today' },
     })),
     ...scheduleList.map((task) => ({
       id: `task-schedule-${task.assignment_id}`,
@@ -229,6 +231,7 @@ function buildTodayActivityCards({
       title: 'Siap dimulai',
       description: `${formatTaskServiceLabel(task)} · ${formatTaskCustomer(task)}`,
       to: '/mobile-worker/tasks',
+      state: { tab: 'In_Schedule', datePreset: 'today' },
     })),
   ];
 
@@ -657,6 +660,7 @@ export default function MobileWorkerHomePage() {
                         ) : (
                           <Link
                             to={item.to}
+                            state={item.state || undefined}
                             className="w-9 h-9 rounded-full bg-[#EEF8E3] text-[#163A22] grid place-items-center flex-shrink-0"
                           >
                             <ArrowRight className="w-4 h-4" />

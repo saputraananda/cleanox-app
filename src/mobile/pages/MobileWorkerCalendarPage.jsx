@@ -367,7 +367,26 @@ export default function MobileWorkerCalendarPage() {
                         navigate(`/mobile-worker/agenda/${job.agenda_id}`);
                         return;
                       }
-                      if (canOpenPos) navigate('/mobile-worker/tasks');
+                      if (canOpenPos) {
+                        const statusTab = [
+                          'Assigned',
+                          'In_Schedule',
+                          'On_Progress',
+                          'Done',
+                          'Rejected',
+                        ].includes(job.my_assignment_status)
+                          ? job.my_assignment_status
+                          : 'In_Schedule';
+                        const todayKey = new Date().toLocaleDateString('en-CA', {
+                          timeZone: 'Asia/Jakarta',
+                        });
+                        navigate('/mobile-worker/tasks', {
+                          state:
+                            selectedDate === todayKey
+                              ? { tab: statusTab, datePreset: 'today' }
+                              : { tab: statusTab, onDate: selectedDate },
+                        });
+                      }
                     }}
                     disabled={!canOpen}
                     aria-disabled={!canOpen}

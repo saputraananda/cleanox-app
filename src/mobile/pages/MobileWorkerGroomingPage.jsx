@@ -439,7 +439,7 @@ export default function MobileWorkerGroomingPage() {
         open={Boolean(cameraTarget)}
         title={cameraTarget ? `Ambil ${cameraTarget.label}` : 'Ambil Foto'}
         variant="ikm"
-        initialFacingMode="user"
+        initialFacingMode="environment"
         confirmLabel="Ambil Foto"
         includeLocation={false}
         onClose={() => setCameraTarget(null)}
