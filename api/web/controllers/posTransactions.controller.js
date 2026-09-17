@@ -1051,10 +1051,6 @@ export const updatePosTransactionPayment = async (req, res) => {
 
   const hasMethod = Object.prototype.hasOwnProperty.call(req.body || {}, 'payment_method_id');
   const hasStatus = Object.prototype.hasOwnProperty.call(req.body || {}, 'payment_status');
-  const hasSettledDate = Object.prototype.hasOwnProperty.call(
-    req.body || {},
-    'payment_settled_date'
-  );
   if (!hasMethod && !hasStatus) {
     return res.status(400).json({ message: 'payment_method_id atau payment_status wajib diisi' });
   }
@@ -1118,18 +1114,13 @@ export const updatePosTransactionPayment = async (req, res) => {
     if (nextPaymentStatus === 'belum_lunas') {
       nextSettledDate = null;
     } else if (nextPaymentStatus === 'lunas') {
-      const rawSettled = hasSettledDate
-        ? req.body.payment_settled_date
-        : nextSettledDate;
-      const parsedSettled = formatPaymentSettledDateKey(rawSettled);
-      const datePattern = /^\d{4}-\d{2}-\d{2}$/;
-      if (!parsedSettled || !datePattern.test(parsedSettled)) {
-        await connection.rollback();
-        return res.status(400).json({
-          message: 'Tanggal pelunasan wajib diisi (YYYY-MM-DD) saat status lunas',
-        });
+      const existing = formatPaymentSettledDateKey(transaction.payment_settled_date);
+      const prevStatus = String(transaction.payment_status || 'belum_lunas');
+      if (prevStatus === 'lunas' && existing) {
+        nextSettledDate = existing;
+      } else {
+        nextSettledDate = todayDateStringJakarta();
       }
-      nextSettledDate = parsedSettled;
     }
 
     if (nextPaymentStatus === 'lunas') {

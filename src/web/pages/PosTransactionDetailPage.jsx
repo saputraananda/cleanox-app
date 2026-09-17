@@ -177,7 +177,6 @@ export default function PosTransactionDetailPage() {
     payment_method_id: '',
     payment_status: 'belum_lunas',
     payment_group: '',
-    payment_settled_date: '',
   });
   const [paymentSaving, setPaymentSaving] = useState(false);
   const [meterDrafts, setMeterDrafts] = useState({});
@@ -371,7 +370,6 @@ export default function PosTransactionDetailPage() {
         payment_method_id: tx.payment_method_id ? String(tx.payment_method_id) : '',
         payment_status: tx.payment_status || 'belum_lunas',
         payment_group: tx.payment_method?.method_group || '',
-        payment_settled_date: toPaymentSettledDateKey(tx.payment_settled_date) || '',
       });
       setOfferForm({
         promo_id: tx.promo_id ? String(tx.promo_id) : '',
@@ -785,18 +783,12 @@ export default function PosTransactionDetailPage() {
       setError('Unggah bukti pembayaran terlebih dahulu sebelum menandai lunas');
       return;
     }
-    if (paymentForm.payment_status === 'lunas' && !paymentForm.payment_settled_date) {
-      setError('Tanggal pelunasan wajib diisi saat status lunas');
-      return;
-    }
     setPaymentSaving(true);
     setError('');
     try {
       await api.patch(`/pos-transactions/${id}/payment`, {
         payment_method_id: Number(paymentForm.payment_method_id),
         payment_status: paymentForm.payment_status,
-        payment_settled_date:
-          paymentForm.payment_status === 'lunas' ? paymentForm.payment_settled_date : null,
       });
       await loadData();
     } catch (err) {
@@ -1399,6 +1391,7 @@ export default function PosTransactionDetailPage() {
                 <p className="text-sm font-semibold text-slate-900">Ubah Pembayaran</p>
                 <p className="mt-1 text-xs text-slate-500">
                   Metode dan status dapat diubah. Status lunas wajib punya minimal 1 bukti.
+                  Tanggal pelunasan diisi otomatis saat ditandai lunas.
                 </p>
               </div>
               <div className="grid gap-4 lg:grid-cols-2">
@@ -1475,32 +1468,12 @@ export default function PosTransactionDetailPage() {
                       <p className="text-xs text-amber-700">Unggah bukti dulu sebelum menandai lunas.</p>
                     )}
                   </label>
-                  <label className="block space-y-1.5">
-                    <span className="text-xs font-semibold text-slate-600">Tanggal pelunasan</span>
-                    <input
-                      type="date"
-                      value={paymentForm.payment_settled_date}
-                      onChange={(e) =>
-                        setPaymentForm((prev) => ({
-                          ...prev,
-                          payment_settled_date: e.target.value,
-                        }))
-                      }
-                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
-                    />
-                    {paymentForm.payment_status === 'lunas' && !paymentForm.payment_settled_date && (
-                      <p className="text-xs text-amber-700">
-                        Tanggal pelunasan wajib diisi saat status lunas.
-                      </p>
-                    )}
-                  </label>
                   <button
                     type="button"
                     disabled={
                       paymentSaving ||
                       !paymentForm.payment_method_id ||
-                      (paymentForm.payment_status === 'lunas' && paymentProofs.length < 1) ||
-                      (paymentForm.payment_status === 'lunas' && !paymentForm.payment_settled_date)
+                      (paymentForm.payment_status === 'lunas' && paymentProofs.length < 1)
                     }
                     onClick={handleSavePayment}
                     className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
