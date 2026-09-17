@@ -4,6 +4,7 @@ import multer from 'multer';
 import sharp from 'sharp';
 import { fileURLToPath } from 'url';
 import cleanoxPool from '../../shared/db/cleanox.js';
+import { formatCalendarDateKey } from '../../shared/utils/posWorkerBusy.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,21 +33,11 @@ const ALLOWED_LEAVE_TYPES = new Set(['izin', 'sakit', 'cuti']);
 const ALLOWED_DURATION_TYPES = new Set(['full_day', 'half_day_morning', 'half_day_afternoon']);
 
 function todayDateString() {
-  const now = new Date();
-  const utc = now.getTime() + now.getTimezoneOffset() * 60000;
-  const jakarta = new Date(utc + 7 * 60 * 60000);
-  return jakarta.toISOString().slice(0, 10);
+  return formatCalendarDateKey(new Date());
 }
 
 function toDateOnly(value) {
-  if (!value) return null;
-  if (value instanceof Date) {
-    const y = value.getFullYear();
-    const m = String(value.getMonth() + 1).padStart(2, '0');
-    const d = String(value.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
-  return String(value).slice(0, 10);
+  return formatCalendarDateKey(value);
 }
 
 function sanitizeName(value) {

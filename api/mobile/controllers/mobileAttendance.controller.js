@@ -5,6 +5,7 @@ import sharp from 'sharp';
 import { fileURLToPath } from 'url';
 import cleanoxPool from '../../shared/db/cleanox.js';
 import { isWorkerOffDay } from './mobileOffDay.controller.js';
+import { formatCalendarDateKey } from '../../shared/utils/posWorkerBusy.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -48,10 +49,7 @@ const PHOTO_TYPE_META = [
 ];
 
 function todayDateString() {
-  const now = new Date();
-  const utc = now.getTime() + now.getTimezoneOffset() * 60000;
-  const jakarta = new Date(utc + 7 * 60 * 60000);
-  return jakarta.toISOString().slice(0, 10);
+  return formatCalendarDateKey(new Date());
 }
 
 function sanitizeName(value) {
@@ -827,14 +825,7 @@ export const checkOutAttendance = async (req, res) => {
 };
 
 function toDateOnly(value) {
-  if (!value) return null;
-  if (value instanceof Date) {
-    const y = value.getFullYear();
-    const m = String(value.getMonth() + 1).padStart(2, '0');
-    const d = String(value.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
-  return String(value).slice(0, 10);
+  return formatCalendarDateKey(value);
 }
 
 function isValidMonthKey(value) {

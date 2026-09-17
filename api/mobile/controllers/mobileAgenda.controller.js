@@ -9,6 +9,7 @@ import {
   resolveAgendaCompletion,
   toDateKey,
 } from '../../shared/utils/agendaHelpers.js';
+import { todayDateStringJakarta } from '../../shared/utils/posWorkerBusy.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -152,10 +153,6 @@ async function buildAgendaTaskDto(row) {
       at: row.arrival_at || null,
     },
   };
-}
-
-function todayDateStringJakarta() {
-  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
 }
 
 export const listMyAgendaTasks = async (req, res) => {

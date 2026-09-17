@@ -1,3 +1,5 @@
+import { formatCalendarDateKey } from './posWorkerBusy.js';
+
 export const AGENDA_KINDS = new Set(['special_collaboration', 'other']);
 export const OTHER_TYPES = new Set([
   'meeting',
@@ -18,17 +20,9 @@ export const AGENDA_WORKER_STATUSES = new Set([
 
 const DAY_NAMES_ID = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
+/** Normalize agenda DATE / date strings to YYYY-MM-DD (Asia/Jakarta; no H−1). */
 export function toDateKey(value) {
-  if (!value) return null;
-  const match = String(value).match(/^(\d{4}-\d{2}-\d{2})/);
-  if (match) return match[1];
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    const y = value.getFullYear();
-    const m = String(value.getMonth() + 1).padStart(2, '0');
-    const d = String(value.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
-  return null;
+  return formatCalendarDateKey(value);
 }
 
 export function toTimeHm(value) {

@@ -1,4 +1,5 @@
 import cleanoxPool from '../../shared/db/cleanox.js';
+import { formatCalendarDateKey } from '../../shared/utils/posWorkerBusy.js';
 
 function jakartaNowParts(date = new Date()) {
   const utc = date.getTime() + date.getTimezoneOffset() * 60000;
@@ -15,19 +16,11 @@ function jakartaNowParts(date = new Date()) {
 }
 
 function todayDateString(date = new Date()) {
-  const p = jakartaNowParts(date);
-  return `${p.y}-${String(p.m).padStart(2, '0')}-${String(p.d).padStart(2, '0')}`;
+  return formatCalendarDateKey(date);
 }
 
 function toDateOnly(value) {
-  if (!value) return null;
-  if (value instanceof Date) {
-    const y = value.getFullYear();
-    const m = String(value.getMonth() + 1).padStart(2, '0');
-    const d = String(value.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
-  return String(value).slice(0, 10);
+  return formatCalendarDateKey(value);
 }
 
 function isValidDateOnly(value) {

@@ -4,6 +4,7 @@ import multer from 'multer';
 import sharp from 'sharp';
 import { fileURLToPath } from 'url';
 import cleanoxPool, { aloraPool } from '../../shared/db/cleanox.js';
+import { formatCalendarDateKey } from '../../shared/utils/posWorkerBusy.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -42,7 +43,7 @@ function jakartaNow() {
 }
 
 function todayDateString() {
-  return jakartaNow().toISOString().slice(0, 10);
+  return formatCalendarDateKey(new Date());
 }
 
 function jakartaMinuteOfDay() {
@@ -547,14 +548,7 @@ export const deleteKebersihanPhoto = async (req, res) => {
 };
 
 function toDateOnly(value) {
-  if (!value) return null;
-  if (value instanceof Date) {
-    const y = value.getFullYear();
-    const m = String(value.getMonth() + 1).padStart(2, '0');
-    const d = String(value.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
-  return String(value).slice(0, 10);
+  return formatCalendarDateKey(value);
 }
 
 function isValidMonthKey(value) {

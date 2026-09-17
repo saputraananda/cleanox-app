@@ -8,6 +8,7 @@ import { createPosTracking } from '../../shared/utils/posTracking.js';
 import {
   formatServiceDateKey,
   getBusyEmployeeIdsOnServiceDate,
+  todayDateStringJakarta,
 } from '../../shared/utils/posWorkerBusy.js';
 import {
   eachDateKeyInclusive,
@@ -305,13 +306,6 @@ function enrichItemsWithEvidence(items = [], itemEvidenceContext = null) {
     ...item,
     evidence: evidenceByItemId.get(Number(item.id)) || mapItemEvidenceDto(item, itemEvidenceContext.grouped, itemEvidenceContext.workNotesMap),
   }));
-}
-
-function todayDateStringJakarta() {
-  const now = new Date();
-  const utc = now.getTime() + now.getTimezoneOffset() * 60000;
-  const jakarta = new Date(utc + 7 * 60 * 60000);
-  return jakarta.toISOString().slice(0, 10);
 }
 
 async function getBusyEmployeeIdsOnDate(connection, serviceDateTime, excludeTransactionId = null) {

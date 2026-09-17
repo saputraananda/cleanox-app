@@ -1,34 +1,18 @@
 const BUSY_STATUSES = ['Assigned', 'In_Schedule', 'On_Progress'];
 
 /**
- * Normalize service date to YYYY-MM-DD.
- * Prefer leading YYYY-MM-DD from string (avoids TZ shift on datetime-local).
+ * Normalize a calendar date to YYYY-MM-DD in Asia/Jakarta (avoids mysql2 +07 DATE H−1).
+ * - Exact YYYY-MM-DD passthrough
+ * - Date / ISO with time or Z/offset → calendar day in Asia/Jakarta
+ * - Local datetime string without Z/offset → leading date part
  */
-export function formatServiceDateKey(value) {
-  if (!value) return null;
-  const match = String(value).match(/^(\d{4}-\d{2}-\d{2})/);
-  if (match) return match[1];
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    const y = value.getFullYear();
-    const m = String(value.getMonth() + 1).padStart(2, '0');
-    const d = String(value.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
-  return null;
-}
-
-/**
- * Normalize payment_settled_date to YYYY-MM-DD without UTC off-by-one.
- * - Exact YYYY-MM-DD passthrough (from <input type="date">)
- * - Date / ISO with time → calendar day in Asia/Jakarta
- * - Local datetime string without Z/offset → take date part
- */
-export function formatPaymentSettledDateKey(value) {
+export function formatCalendarDateKey(value) {
   if (!value) return null;
   const raw = String(value).trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
 
-  const hasTimeOrZone = value instanceof Date || /[T\s]\d{2}:\d{2}|Z|[+-]\d{2}:?\d{2}$/.test(raw);
+  const hasTimeOrZone =
+    value instanceof Date || /[T\s]\d{2}:\d{2}|Z|[+-]\d{2}:?\d{2}$/.test(raw);
   if (hasTimeOrZone) {
     const date = value instanceof Date ? value : new Date(value);
     if (Number.isNaN(date.getTime())) return null;
@@ -43,46 +27,58 @@ export function formatPaymentSettledDateKey(value) {
   const localMatch = raw.match(/^(\d{4}-\d{2}-\d{2})[ T]\d{2}:\d{2}/);
   if (localMatch) return localMatch[1];
 
-  return null;
+  const leading = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  return leading ? leading[1] : null;
 }
 
 /**
- * Normalize service datetime to YYYY-MM-DD HH:mm (minute precision).
+ * Normalize service date to YYYY-MM-DD without UTC/local off-by-one.
+ */
+export function formatServiceDateKey(value) {
+  return formatCalendarDateKey(value);
+}
+
+/**
+ * Normalize payment_settled_date to YYYY-MM-DD without UTC off-by-one.
+ */
+export function formatPaymentSettledDateKey(value) {
+  return formatCalendarDateKey(value);
+}
+
+/**
+ * Normalize service datetime to YYYY-MM-DD HH:mm (minute precision, Asia/Jakarta).
  */
 export function formatServiceDateTimeKey(value) {
   if (!value) return null;
   const raw = String(value).trim();
   const match = raw.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})/);
-  if (match) return `${match[1]} ${match[2]}:${match[3]}`;
-
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    const y = value.getFullYear();
-    const m = String(value.getMonth() + 1).padStart(2, '0');
-    const d = String(value.getDate()).padStart(2, '0');
-    const hh = String(value.getHours()).padStart(2, '0');
-    const mm = String(value.getMinutes()).padStart(2, '0');
-    return `${y}-${m}-${d} ${hh}:${mm}`;
+  if (match && !/[Z]|[+-]\d{2}:?\d{2}$/.test(raw)) {
+    return `${match[1]} ${match[2]}:${match[3]}`;
   }
 
-  const date = new Date(value);
-  if (!Number.isNaN(date.getTime())) {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    const hh = String(date.getHours()).padStart(2, '0');
-    const mm = String(date.getMinutes()).padStart(2, '0');
-    return `${y}-${m}-${d} ${hh}:${mm}`;
-  }
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
 
-  return null;
+  const dateKey = formatCalendarDateKey(date);
+  const timeParts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Jakarta',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const hh = timeParts.find((p) => p.type === 'hour')?.value || '00';
+  const mm = timeParts.find((p) => p.type === 'minute')?.value || '00';
+  return dateKey ? `${dateKey} ${hh}:${mm}` : null;
 }
 
 /** Today's date YYYY-MM-DD in Asia/Jakarta. */
 export function todayDateStringJakarta() {
-  const now = new Date();
-  const utc = now.getTime() + now.getTimezoneOffset() * 60000;
-  const jakarta = new Date(utc + 7 * 60 * 60000);
-  return jakarta.toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
 }
 
 /** Add days to YYYY-MM-DD key; returns YYYY-MM-DD. */

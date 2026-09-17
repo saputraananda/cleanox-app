@@ -4,6 +4,7 @@ import multer from 'multer';
 import sharp from 'sharp';
 import { fileURLToPath } from 'url';
 import cleanoxPool from '../../shared/db/cleanox.js';
+import { formatCalendarDateKey } from '../../shared/utils/posWorkerBusy.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -34,14 +35,7 @@ export const proofUploadMiddleware = upload.single('proof_doc');
 const ALLOWED_TYPES = new Set(['kasbon', 'pinjaman']);
 
 function toDateOnly(value) {
-  if (!value) return null;
-  if (value instanceof Date) {
-    const y = value.getFullYear();
-    const m = String(value.getMonth() + 1).padStart(2, '0');
-    const d = String(value.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  }
-  return String(value).slice(0, 10);
+  return formatCalendarDateKey(value);
 }
 
 function sanitizeName(value) {
