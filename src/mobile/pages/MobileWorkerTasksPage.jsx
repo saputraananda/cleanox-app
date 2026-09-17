@@ -229,7 +229,10 @@ export default function MobileWorkerTasksPage() {
     setLoading(true);
     setError('');
     try {
-      const listParams = { status, on_date: 'today' };
+      const listParams = { status };
+      if (status !== 'Assigned') {
+        listParams.on_date = 'today';
+      }
 
       const [posRes, agendaRes] = await Promise.all([
         api.get('/mobile-tasks', { params: listParams }),
@@ -851,7 +854,11 @@ export default function MobileWorkerTasksPage() {
           ) : tasks.length === 0 ? (
             <div className="rounded-[22px] border border-slate-100 bg-white p-6 text-center shadow-[0_10px_28px_rgba(15,23,42,.05)]">
               <p className="text-[13px] font-extrabold text-slate-900">Tidak ada tugas</p>
-              <p className="mt-1 text-[11px] text-slate-500">Belum ada tugas untuk hari ini.</p>
+              <p className="mt-1 text-[11px] text-slate-500">
+                {tab === 'Assigned'
+                  ? 'Belum ada tugas yang perlu dikonfirmasi.'
+                  : 'Belum ada tugas untuk hari ini.'}
+              </p>
             </div>
           ) : (
             tasks.map((task) => {
