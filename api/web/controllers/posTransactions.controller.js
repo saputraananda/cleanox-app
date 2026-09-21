@@ -55,6 +55,7 @@ import {
   loadSharedPhotosGrouped,
   loadItemWorkNotesByTransactionId,
 } from '../../shared/utils/posSharedTaskEvidence.js';
+import { isCollaborationMethod } from '../../shared/utils/posCollaborationPayment.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -69,6 +70,23 @@ const TAKEHOME_EVIDENCE_BASE = path.join(STORAGE_BASE, 'worker-takehome-evidence
 const MAX_CUSTOMER_PHOTOS = 10;
 const MAX_PAYMENT_PROOFS = 10;
 const PAYMENT_STATUSES = new Set(['belum_lunas', 'lunas']);
+
+async function loadPaymentMethod(connection, methodId) {
+  const id = Number(methodId);
+  if (!id) return null;
+  const [[row]] = await connection.query(
+    `SELECT id, \`group\` AS method_group, code, name, label, is_active
+     FROM mst_payment_method
+     WHERE id = ?
+     LIMIT 1`,
+    [id]
+  );
+  return row || null;
+}
+
+function shouldSkipPaymentProof(method) {
+  return isCollaborationMethod(method);
+}
 
 if (!fs.existsSync(CUSTOMER_PHOTO_BASE)) fs.mkdirSync(CUSTOMER_PHOTO_BASE, { recursive: true });
 if (!fs.existsSync(PAYMENT_PROOF_BASE)) fs.mkdirSync(PAYMENT_PROOF_BASE, { recursive: true });
@@ -1078,10 +1096,16 @@ export const updatePosTransactionPayment = async (req, res) => {
       });
     }
 
+    const previousMethod = transaction.payment_method_id
+      ? await loadPaymentMethod(connection, transaction.payment_method_id)
+      : null;
+    const wasCollaboration = isCollaborationMethod(previousMethod);
+
     let nextMethodId =
       transaction.payment_method_id == null ? null : Number(transaction.payment_method_id);
     let nextPaymentStatus = String(transaction.payment_status || 'belum_lunas');
     let nextSettledDate = formatPaymentSettledDateKey(transaction.payment_settled_date);
+    let nextMethod = previousMethod;
 
     if (hasMethod) {
       const methodId = Number(req.body.payment_method_id);
@@ -1089,18 +1113,22 @@ export const updatePosTransactionPayment = async (req, res) => {
         await connection.rollback();
         return res.status(400).json({ message: 'Metode pembayaran tidak valid' });
       }
-      const [[methodRow]] = await connection.query(
-        `SELECT id FROM mst_payment_method WHERE id = ? AND is_active = 1 LIMIT 1`,
-        [methodId]
-      );
-      if (!methodRow) {
+      const methodRow = await loadPaymentMethod(connection, methodId);
+      if (!methodRow || !Number(methodRow.is_active)) {
         await connection.rollback();
         return res.status(400).json({ message: 'Metode pembayaran tidak valid atau nonaktif' });
       }
       nextMethodId = methodId;
+      nextMethod = methodRow;
+    } else if (nextMethodId) {
+      nextMethod = await loadPaymentMethod(connection, nextMethodId);
     }
 
-    if (hasStatus) {
+    const isCollab = isCollaborationMethod(nextMethod);
+
+    if (isCollab) {
+      nextPaymentStatus = 'lunas';
+    } else if (hasStatus) {
       const status = String(req.body.payment_status || '').trim();
       if (!PAYMENT_STATUSES.has(status)) {
         await connection.rollback();
@@ -1123,7 +1151,7 @@ export const updatePosTransactionPayment = async (req, res) => {
       }
     }
 
-    if (nextPaymentStatus === 'lunas') {
+    if (nextPaymentStatus === 'lunas' && !shouldSkipPaymentProof(nextMethod)) {
       const [[countRow]] = await connection.query(
         `SELECT COUNT(*) AS total FROM tr_transaction_payment_proofs WHERE transaction_id = ?`,
         [transactionId]
@@ -1143,20 +1171,20 @@ export const updatePosTransactionPayment = async (req, res) => {
       [nextMethodId, nextPaymentStatus, nextSettledDate, req.user?.id || null, transactionId]
     );
 
+    if (isCollab || wasCollaboration) {
+      await recalcPosTransactionMoney(connection, transactionId, {
+        actorId: req.user?.id || null,
+      });
+    }
+
     await syncTransactionStatusFromAssignments(connection, transactionId);
 
-    const [[method]] = nextMethodId
-      ? await connection.query(
-          `SELECT id, \`group\` AS method_group, code, name, label
-           FROM mst_payment_method
-           WHERE id = ?
-           LIMIT 1`,
-          [nextMethodId]
-        )
-      : [[]];
+    const method = nextMethodId
+      ? nextMethod || (await loadPaymentMethod(connection, nextMethodId))
+      : null;
 
     const [[freshTx]] = await connection.query(
-      `SELECT status, payment_status,
+      `SELECT status, payment_status, final_amount,
               DATE_FORMAT(payment_settled_date, '%Y-%m-%d') AS payment_settled_date
        FROM tr_transactions WHERE id = ? LIMIT 1`,
       [transactionId]
@@ -1169,8 +1197,17 @@ export const updatePosTransactionPayment = async (req, res) => {
       payment_method_id: nextMethodId,
       payment_status: nextPaymentStatus,
       payment_settled_date: formatPaymentSettledDateKey(freshTx?.payment_settled_date) || nextSettledDate,
-      payment_method: method || null,
+      payment_method: method
+        ? {
+            id: Number(method.id),
+            method_group: method.method_group,
+            code: method.code,
+            name: method.name,
+            label: method.label,
+          }
+        : null,
       status: freshTx?.status || transaction.status,
+      final_amount: Number(freshTx?.final_amount || 0),
     });
   } catch (error) {
     await connection.rollback();
@@ -1507,7 +1544,11 @@ export const deletePosPaymentProof = async (req, res) => {
 
   try {
     const [[transaction]] = await cleanoxPool.query(
-      `SELECT id, payment_status FROM tr_transactions WHERE id = ? LIMIT 1`,
+      `SELECT t.id, t.payment_status, t.payment_method_id, pm.\`group\` AS method_group
+       FROM tr_transactions t
+       LEFT JOIN mst_payment_method pm ON pm.id = t.payment_method_id
+       WHERE t.id = ?
+       LIMIT 1`,
       [transactionId]
     );
     if (!transaction) {
@@ -1530,7 +1571,8 @@ export const deletePosPaymentProof = async (req, res) => {
     );
     if (
       String(transaction.payment_status || '') === 'lunas' &&
-      Number(countRow?.total || 0) <= 1
+      Number(countRow?.total || 0) <= 1 &&
+      !shouldSkipPaymentProof(transaction)
     ) {
       return res.status(409).json({
         message: 'Ubah status menjadi belum lunas sebelum menghapus bukti terakhir',
@@ -1624,15 +1666,17 @@ export const createPosTransaction = async (req, res) => {
   try {
     await connection.beginTransaction();
 
+    let selectedPaymentMethod = null;
     if (paymentMethodId != null) {
       const [[paymentMethod]] = await connection.query(
-        `SELECT id FROM mst_payment_method WHERE id = ? AND is_active = 1 LIMIT 1`,
+        `SELECT id, \`group\` AS method_group FROM mst_payment_method WHERE id = ? AND is_active = 1 LIMIT 1`,
         [paymentMethodId]
       );
       if (!paymentMethod) {
         await connection.rollback();
         return res.status(400).json({ message: 'Metode pembayaran tidak valid atau nonaktif' });
       }
+      selectedPaymentMethod = paymentMethod;
     }
 
     const [customerRows] = await connection.query(
@@ -1891,7 +1935,12 @@ export const createPosTransaction = async (req, res) => {
         transportFee = toMoney(parsedTransport);
       }
     }
-    const finalAmount = toMoney(subtotal - discount + transportFee);
+    const isCollaborationPayment = isCollaborationMethod(selectedPaymentMethod);
+    const finalAmount = isCollaborationPayment
+      ? 0
+      : toMoney(subtotal - discount + transportFee);
+    const initialPaymentStatus = isCollaborationPayment ? 'lunas' : 'belum_lunas';
+    const initialPaymentSettledDate = isCollaborationPayment ? todayDateStringJakarta() : null;
     const transactionNo = buildTransactionNo();
     const resolvedServiceDate = isHistoryEntry ? historyStarted.mysql : service_date;
 
@@ -1991,8 +2040,8 @@ export const createPosTransaction = async (req, res) => {
          discount_id, discount_name_snapshot, discount_type_snapshot, discount_value_snapshot,
          final_amount, billing_hours, pricing_finalized_at, notes,
          group_message_template, customer_message_template, service_mode, is_history_entry,
-         payment_method_id, payment_status, status, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, 'belum_lunas', ?, ?, ?)`,
+         payment_method_id, payment_status, payment_settled_date, status, created_by, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         transactionNo,
         customer.id,
@@ -2019,6 +2068,8 @@ export const createPosTransaction = async (req, res) => {
         service_mode,
         isHistoryEntry ? 1 : 0,
         paymentMethodId,
+        initialPaymentStatus,
+        initialPaymentSettledDate,
         initialStatus,
         req.user?.id || null,
         req.user?.id || null,
@@ -2132,6 +2183,13 @@ export const createPosTransaction = async (req, res) => {
       }
     } else {
       await syncTransactionStatusFromAssignments(connection, transactionId);
+    }
+
+    if (isCollaborationPayment) {
+      const totals = await recalcPosTransactionMoney(connection, transactionId, {
+        actorId: req.user?.id || null,
+      });
+      finalizedAmount = toMoney(totals.finalAmount);
     }
 
     await connection.commit();

@@ -1,5 +1,6 @@
 import cleanoxPool from '../../shared/db/cleanox.js';
 import { normalizeCoretPrice } from '../../shared/utils/posServicePrice.js';
+import { paymentMethodGroupFieldSql } from '../../shared/utils/posCollaborationPayment.js';
 
 const DURATION_UNITS = new Set(['jam', 'hari', 'minggu', 'bulan']);
 const STATUS_VALUES = new Set(['Aktif', 'Nonaktif']);
@@ -584,7 +585,7 @@ export const listPaymentMethods = async (req, res) => {
       params.push(Number(isActiveRaw) ? 1 : 0);
     }
 
-    sql += ` ORDER BY FIELD(\`group\`, 'Tunai', 'BCA', 'EDC', 'QRIS'), id ASC`;
+    sql += ` ORDER BY ${paymentMethodGroupFieldSql('`group`')}, id ASC`;
 
     const [rows] = await cleanoxPool.query(sql, params);
     return res.json({

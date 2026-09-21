@@ -8,6 +8,7 @@ import {
   transactionHasMeterPending,
 } from './posMeterServices.js';
 import { computeTransactionPromoDiscount } from './posTransactionPromo.js';
+import { isCollaborationMethod } from './posCollaborationPayment.js';
 
 function toMoney(value) {
   return Number(Number(value || 0).toFixed(2));
@@ -95,7 +96,23 @@ export async function recalcPosTransactionMoney(connection, transactionId, { act
   const discount = toMoney(Math.min(subtotal, Math.max(0, promoPart) + Math.max(0, diskonPart)));
   const isHomeService = String(transaction.service_mode || '') === 'home_service';
   const transportFee = toMoney(isHomeService ? Number(transaction.transport_fee || 0) : 0);
-  const finalAmount = toMoney(subtotal - discount + transportFee);
+  let finalAmount = toMoney(subtotal - discount + transportFee);
+
+  let isCollaboration = false;
+  if (transaction.payment_method_id) {
+    const [[methodRow]] = await connection.query(
+      `SELECT \`group\` AS method_group
+       FROM mst_payment_method
+       WHERE id = ?
+       LIMIT 1`,
+      [transaction.payment_method_id]
+    );
+    isCollaboration = isCollaborationMethod(methodRow);
+  }
+  if (isCollaboration) {
+    finalAmount = 0;
+  }
+
   const hasGcPending =
     !pricingFinalizedAt && items.some((row) => isGeneralCleaningCategory(row.category_name));
   const hasMeterPending = transactionHasMeterPending(items);

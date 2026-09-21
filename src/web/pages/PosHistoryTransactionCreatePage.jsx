@@ -966,10 +966,11 @@ export default function PosHistoryTransactionCreatePage() {
         <section className={sectionCardClass}>
           <p className="text-[13px] font-semibold text-slate-800">Pembayaran</p>
           <p className="mt-1 text-[11.5px] text-slate-400">
-            Status default belum lunas — bukti diunggah di detail transaksi
+            Status default belum lunas — bukti diunggah di detail transaksi. Collaboration otomatis
+            lunas · total Rp 0 · tanpa bukti.
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
-            {['Tunai', 'BCA', 'EDC', 'QRIS'].map((group) => {
+            {['Tunai', 'BCA', 'EDC', 'QRIS', 'Collaboration'].map((group) => {
               const selectedMethod = paymentMethods.find(
                 (m) => Number(m.id) === Number(form.payment_method_id)
               );
@@ -1024,6 +1025,13 @@ export default function PosHistoryTransactionCreatePage() {
               return (
                 <p className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
                   {selectedMethod.label}
+                </p>
+              );
+            }
+            if (group === 'Collaboration' && selectedMethod) {
+              return (
+                <p className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                  Otomatis lunas · total Rp 0 · tanpa bukti
                 </p>
               );
             }
@@ -1162,8 +1170,21 @@ export default function PosHistoryTransactionCreatePage() {
             <p className="mt-1 text-[22px] font-bold text-slate-900">
               {pricingPreview.needsHours && !pricingPreview.hoursOk
                 ? '—'
-                : formatCurrency(pricingPreview.finalAmount)}
+                : formatCurrency(
+                    (paymentGroup ||
+                      paymentMethods.find((m) => Number(m.id) === Number(form.payment_method_id))
+                        ?.method_group) === 'Collaboration'
+                      ? 0
+                      : pricingPreview.finalAmount
+                  )}
             </p>
+            {(paymentGroup ||
+              paymentMethods.find((m) => Number(m.id) === Number(form.payment_method_id))
+                ?.method_group) === 'Collaboration' && (
+              <p className="text-[12px] text-emerald-700">
+                Collaboration: total bayar Rp 0 (pencatatan saja)
+              </p>
+            )}
             <p className="text-[12px] text-slate-500">
               Diskon promo {formatCurrency(pricingPreview.promoPart || 0)} · Diskon tambahan{' '}
               {formatCurrency(pricingPreview.diskonPart || 0)} · Total{' '}

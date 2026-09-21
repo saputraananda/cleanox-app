@@ -751,6 +751,9 @@ export default function PosTransactionDetailPage() {
     paymentMethods.find((m) => Number(m.id) === Number(paymentForm.payment_method_id)) ||
     transaction.payment_method ||
     null;
+  const activePaymentGroup =
+    paymentForm.payment_group || selectedPaymentMethod?.method_group || '';
+  const isCollaborationPayment = activePaymentGroup === 'Collaboration';
 
   const handlePaymentGroupChange = (group) => {
     setPaymentForm((prev) => {
@@ -762,6 +765,8 @@ export default function PosTransactionDetailPage() {
           ...prev,
           payment_group: group,
           payment_method_id: stillEdc ? prev.payment_method_id : '',
+          payment_status:
+            prev.payment_group === 'Collaboration' ? 'belum_lunas' : prev.payment_status,
         };
       }
       const method = paymentMethods.find((m) => m.method_group === group);
@@ -769,6 +774,12 @@ export default function PosTransactionDetailPage() {
         ...prev,
         payment_group: group,
         payment_method_id: method ? String(method.id) : '',
+        payment_status:
+          group === 'Collaboration'
+            ? 'lunas'
+            : prev.payment_group === 'Collaboration'
+              ? 'belum_lunas'
+              : prev.payment_status,
       };
     });
   };
@@ -779,7 +790,14 @@ export default function PosTransactionDetailPage() {
       setError('Metode pembayaran wajib dipilih');
       return;
     }
-    if (paymentForm.payment_status === 'lunas' && paymentProofs.length < 1) {
+    const savingAsCollaboration =
+      (paymentMethods.find((m) => Number(m.id) === Number(paymentForm.payment_method_id))
+        ?.method_group || '') === 'Collaboration';
+    if (
+      !savingAsCollaboration &&
+      paymentForm.payment_status === 'lunas' &&
+      paymentProofs.length < 1
+    ) {
       setError('Unggah bukti pembayaran terlebih dahulu sebelum menandai lunas');
       return;
     }
@@ -788,7 +806,7 @@ export default function PosTransactionDetailPage() {
     try {
       await api.patch(`/pos-transactions/${id}/payment`, {
         payment_method_id: Number(paymentForm.payment_method_id),
-        payment_status: paymentForm.payment_status,
+        payment_status: savingAsCollaboration ? 'lunas' : paymentForm.payment_status,
       });
       await loadData();
     } catch (err) {
@@ -1390,14 +1408,15 @@ export default function PosTransactionDetailPage() {
               <div>
                 <p className="text-sm font-semibold text-slate-900">Ubah Pembayaran</p>
                 <p className="mt-1 text-xs text-slate-500">
-                  Metode dan status dapat diubah. Status lunas wajib punya minimal 1 bukti.
-                  Tanggal pelunasan diisi otomatis saat ditandai lunas.
+                  Metode dan status dapat diubah. Status lunas wajib punya minimal 1 bukti, kecuali
+                  Collaboration (otomatis lunas · total Rp 0 · tanpa bukti). Tanggal pelunasan diisi
+                  otomatis saat ditandai lunas.
                 </p>
               </div>
               <div className="grid gap-4 lg:grid-cols-2">
                 <div className="space-y-4">
                   <div className="flex flex-wrap gap-2">
-                    {['Tunai', 'BCA', 'EDC', 'QRIS'].map((group) => {
+                    {['Tunai', 'BCA', 'EDC', 'QRIS', 'Collaboration'].map((group) => {
                       const active =
                         (paymentForm.payment_group || selectedPaymentMethod?.method_group || '') ===
                         group;
@@ -1429,6 +1448,13 @@ export default function PosTransactionDetailPage() {
                         {selectedPaymentMethod.label}
                       </p>
                     )}
+                  {(paymentForm.payment_group || selectedPaymentMethod?.method_group) ===
+                    'Collaboration' &&
+                    selectedPaymentMethod && (
+                      <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                        Collaboration · pencatatan saja · total Rp 0 · otomatis lunas tanpa bukti
+                      </p>
+                    )}
                   {(paymentForm.payment_group || selectedPaymentMethod?.method_group) === 'EDC' && (
                     <label className="block space-y-1.5">
                       <span className="text-xs font-semibold text-slate-600">Jenis kartu EDC BCA</span>
@@ -1454,26 +1480,38 @@ export default function PosTransactionDetailPage() {
                   )}
                   <label className="block space-y-1.5">
                     <span className="text-xs font-semibold text-slate-600">Status pembayaran</span>
-                    <select
-                      value={paymentForm.payment_status}
-                      onChange={(e) =>
-                        setPaymentForm((prev) => ({ ...prev, payment_status: e.target.value }))
-                      }
-                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
-                    >
-                      <option value="belum_lunas">Belum lunas</option>
-                      <option value="lunas">Lunas</option>
-                    </select>
-                    {paymentForm.payment_status === 'lunas' && paymentProofs.length < 1 && (
-                      <p className="text-xs text-amber-700">Unggah bukti dulu sebelum menandai lunas.</p>
+                    {isCollaborationPayment ? (
+                      <p className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700">
+                        Otomatis lunas (Collaboration)
+                      </p>
+                    ) : (
+                      <select
+                        value={paymentForm.payment_status}
+                        onChange={(e) =>
+                          setPaymentForm((prev) => ({ ...prev, payment_status: e.target.value }))
+                        }
+                        className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
+                      >
+                        <option value="belum_lunas">Belum lunas</option>
+                        <option value="lunas">Lunas</option>
+                      </select>
                     )}
+                    {!isCollaborationPayment &&
+                      paymentForm.payment_status === 'lunas' &&
+                      paymentProofs.length < 1 && (
+                        <p className="text-xs text-amber-700">
+                          Unggah bukti dulu sebelum menandai lunas.
+                        </p>
+                      )}
                   </label>
                   <button
                     type="button"
                     disabled={
                       paymentSaving ||
                       !paymentForm.payment_method_id ||
-                      (paymentForm.payment_status === 'lunas' && paymentProofs.length < 1)
+                      (!isCollaborationPayment &&
+                        paymentForm.payment_status === 'lunas' &&
+                        paymentProofs.length < 1)
                     }
                     onClick={handleSavePayment}
                     className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"

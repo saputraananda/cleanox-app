@@ -24,6 +24,34 @@ const formatDateTime = (value) => {
   });
 };
 
+/** Date-only label for payment_settled_date — avoid UTC off-by-one. */
+const formatPaymentSettledDate = (value) => {
+  if (!value) return '-';
+  const raw = String(value).trim();
+  const key = /^\d{4}-\d{2}-\d{2}$/.test(raw)
+    ? raw
+    : (() => {
+        const date = value instanceof Date ? value : new Date(value);
+        if (Number.isNaN(date.getTime())) {
+          const m = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+          return m ? m[1] : null;
+        }
+        return new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'Asia/Jakarta',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        }).format(date);
+      })();
+  if (!key) return '-';
+  return new Date(`${key}T12:00:00+07:00`).toLocaleDateString('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+};
+
 export default function PosTransactionsPage() {
   const [summary, setSummary] = useState(null);
   const [transactions, setTransactions] = useState([]);
@@ -258,7 +286,7 @@ export default function PosTransactionsPage() {
                     <th className="px-3 py-3">No Transaksi</th>
                     <th className="px-3 py-3">Customer</th>
                     <th className="px-3 py-3">Tanggal Layanan</th>
-                    <th className="px-3 py-3">Orang</th>
+                    <th className="px-3 py-3">Tanggal Pelunasan</th>
                     <th className="px-3 py-3">Item</th>
                     <th className="px-3 py-3">Worker</th>
                     <th className="px-3 py-3">Status</th>
@@ -306,7 +334,9 @@ export default function PosTransactionsPage() {
                           ) : null}
                         </td>
                         <td className="px-3 py-3 text-slate-600">{formatDateTime(row.service_date)}</td>
-                        <td className="px-3 py-3 text-slate-600">{row.total_people ?? '-'}</td>
+                        <td className="px-3 py-3 text-slate-600">
+                          {formatPaymentSettledDate(row.payment_settled_date)}
+                        </td>
                         <td className="px-3 py-3 text-slate-600">{row.total_items}</td>
                         <td className="px-3 py-3 text-slate-600">{row.total_workers ?? '-'}</td>
                         <td className="px-3 py-3">
