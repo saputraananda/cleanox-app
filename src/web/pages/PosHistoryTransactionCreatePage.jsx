@@ -32,6 +32,11 @@ import {
 } from '@web/utils/posMeterServices.js';
 import { isBlankAddress } from '@web/utils/posCustomerAddress.js';
 import { computeTransactionPromoDiscount } from '@web/utils/posTransactionPromo.js';
+import {
+  getMethodsInGroup,
+  getPaymentMethodGroups,
+  groupNeedsMethodSelect,
+} from '@web/utils/posPaymentMethods.js';
 
 const inputClass =
   'w-full rounded-[12px] border border-slate-200 bg-slate-50 px-3 py-2.5 text-[13px] text-slate-800 transition duration-150 focus:bg-white focus:border-blue-400 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,.12)]';
@@ -970,7 +975,7 @@ export default function PosHistoryTransactionCreatePage() {
             lunas · total Rp 0 · tanpa bukti.
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
-            {['Tunai', 'BCA', 'EDC', 'QRIS', 'Collaboration'].map((group) => {
+            {getPaymentMethodGroups(paymentMethods).map((group) => {
               const selectedMethod = paymentMethods.find(
                 (m) => Number(m.id) === Number(form.payment_method_id)
               );
@@ -981,18 +986,18 @@ export default function PosHistoryTransactionCreatePage() {
                   type="button"
                   onClick={() => {
                     setPaymentGroup(group);
-                    if (group === 'EDC') {
-                      const stillEdc = paymentMethods.some(
-                        (m) =>
-                          m.method_group === 'EDC' &&
-                          Number(m.id) === Number(form.payment_method_id)
-                      );
-                      if (!stillEdc) {
+                    const methodsInGroup = getMethodsInGroup(paymentMethods, group);
+                    const needsSelect = methodsInGroup.length > 1;
+                    const stillInGroup = methodsInGroup.some(
+                      (m) => Number(m.id) === Number(form.payment_method_id)
+                    );
+                    if (needsSelect) {
+                      if (!stillInGroup) {
                         setForm((prev) => ({ ...prev, payment_method_id: '' }));
                       }
                       return;
                     }
-                    const method = paymentMethods.find((m) => m.method_group === group);
+                    const method = methodsInGroup[0];
                     setForm((prev) => ({
                       ...prev,
                       payment_method_id: method ? String(method.id) : '',
@@ -1014,20 +1019,7 @@ export default function PosHistoryTransactionCreatePage() {
               (m) => Number(m.id) === Number(form.payment_method_id)
             );
             const group = paymentGroup || selectedMethod?.method_group || '';
-            if (group === 'BCA' && selectedMethod) {
-              return (
-                <p className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-                  {selectedMethod.label}
-                </p>
-              );
-            }
-            if (group === 'QRIS' && selectedMethod) {
-              return (
-                <p className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-                  {selectedMethod.label}
-                </p>
-              );
-            }
+            if (!group) return null;
             if (group === 'Collaboration' && selectedMethod) {
               return (
                 <p className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
@@ -1035,10 +1027,12 @@ export default function PosHistoryTransactionCreatePage() {
                 </p>
               );
             }
-            if (group === 'EDC') {
+            if (groupNeedsMethodSelect(paymentMethods, group)) {
               return (
                 <label className="mt-3 block space-y-1.5">
-                  <span className="text-[12px] font-semibold text-slate-600">Jenis kartu EDC BCA</span>
+                  <span className="text-[12px] font-semibold text-slate-600">
+                    {group === 'EDC' ? 'Jenis kartu EDC BCA' : `Pilih ${group}`}
+                  </span>
                   <select
                     value={form.payment_method_id}
                     onChange={(e) =>
@@ -1046,16 +1040,21 @@ export default function PosHistoryTransactionCreatePage() {
                     }
                     className={inputClass}
                   >
-                    <option value="">Pilih jenis kartu</option>
-                    {paymentMethods
-                      .filter((m) => m.method_group === 'EDC')
-                      .map((method) => (
-                        <option key={method.id} value={method.id}>
-                          {method.name}
-                        </option>
-                      ))}
+                    <option value="">Pilih metode</option>
+                    {getMethodsInGroup(paymentMethods, group).map((method) => (
+                      <option key={method.id} value={method.id}>
+                        {method.name}
+                      </option>
+                    ))}
                   </select>
                 </label>
+              );
+            }
+            if (selectedMethod) {
+              return (
+                <p className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                  {selectedMethod.label || selectedMethod.name}
+                </p>
               );
             }
             return null;

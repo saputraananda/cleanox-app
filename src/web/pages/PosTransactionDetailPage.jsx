@@ -19,6 +19,11 @@ import { downloadPosEReceiptPdf, loadEReceiptKopAsDataUrl, loadImageAsDataUrl } 
 import { downloadPosInternalInvoicePdf } from '@web/utils/posInternalInvoicePdf.js';
 import { downloadPosOrderFormPdf } from '@web/utils/posOrderFormPdf.js';
 import PosTakehomeStageTimeline from '@web/components/PosTakehomeStageTimeline.jsx';
+import {
+  getMethodsInGroup,
+  getPaymentMethodGroups,
+  groupNeedsMethodSelect,
+} from '@web/utils/posPaymentMethods.js';
 import cleanoxLogo from '../../assets/cleanox.png';
 
 const emptyAddItemDraft = () => ({
@@ -746,7 +751,7 @@ export default function PosTransactionDetailPage() {
   const canEditPayment = transaction.status !== 'Cancelled';
   const canUploadPaymentProofs =
     canEditPayment && paymentProofs.length < 10;
-  const edcPaymentMethods = paymentMethods.filter((m) => m.method_group === 'EDC');
+  const paymentMethodGroups = getPaymentMethodGroups(paymentMethods);
   const selectedPaymentMethod =
     paymentMethods.find((m) => Number(m.id) === Number(paymentForm.payment_method_id)) ||
     transaction.payment_method ||
@@ -754,26 +759,28 @@ export default function PosTransactionDetailPage() {
   const activePaymentGroup =
     paymentForm.payment_group || selectedPaymentMethod?.method_group || '';
   const isCollaborationPayment = activePaymentGroup === 'Collaboration';
+  const activeGroupNeedsSelect = groupNeedsMethodSelect(paymentMethods, activePaymentGroup);
+  const activeGroupMethods = getMethodsInGroup(paymentMethods, activePaymentGroup);
 
   const handlePaymentGroupChange = (group) => {
     setPaymentForm((prev) => {
-      if (group === 'EDC') {
-        const stillEdc = edcPaymentMethods.some(
-          (m) => Number(m.id) === Number(prev.payment_method_id)
-        );
-        return {
-          ...prev,
-          payment_group: group,
-          payment_method_id: stillEdc ? prev.payment_method_id : '',
-          payment_status:
-            prev.payment_group === 'Collaboration' ? 'belum_lunas' : prev.payment_status,
-        };
-      }
-      const method = paymentMethods.find((m) => m.method_group === group);
+      const methodsInGroup = getMethodsInGroup(paymentMethods, group);
+      const needsSelect = methodsInGroup.length > 1;
+      const stillInGroup = methodsInGroup.some(
+        (m) => Number(m.id) === Number(prev.payment_method_id)
+      );
+      const nextMethodId = needsSelect
+        ? stillInGroup
+          ? prev.payment_method_id
+          : ''
+        : methodsInGroup[0]
+          ? String(methodsInGroup[0].id)
+          : '';
+
       return {
         ...prev,
         payment_group: group,
-        payment_method_id: method ? String(method.id) : '',
+        payment_method_id: nextMethodId,
         payment_status:
           group === 'Collaboration'
             ? 'lunas'
@@ -1416,7 +1423,7 @@ export default function PosTransactionDetailPage() {
               <div className="grid gap-4 lg:grid-cols-2">
                 <div className="space-y-4">
                   <div className="flex flex-wrap gap-2">
-                    {['Tunai', 'BCA', 'EDC', 'QRIS', 'Collaboration'].map((group) => {
+                    {paymentMethodGroups.map((group) => {
                       const active =
                         (paymentForm.payment_group || selectedPaymentMethod?.method_group || '') ===
                         group;
@@ -1436,41 +1443,39 @@ export default function PosTransactionDetailPage() {
                       );
                     })}
                   </div>
-                  {(paymentForm.payment_group || selectedPaymentMethod?.method_group) === 'BCA' &&
+                  {activePaymentGroup === 'Collaboration' && selectedPaymentMethod && (
+                    <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                      Collaboration · pencatatan saja · total Rp 0 · otomatis lunas tanpa bukti
+                    </p>
+                  )}
+                  {activePaymentGroup &&
+                    activePaymentGroup !== 'Collaboration' &&
+                    !activeGroupNeedsSelect &&
                     selectedPaymentMethod && (
                       <p className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
-                        {selectedPaymentMethod.label}
+                        {selectedPaymentMethod.label || selectedPaymentMethod.name}
                       </p>
                     )}
-                  {(paymentForm.payment_group || selectedPaymentMethod?.method_group) === 'QRIS' &&
-                    selectedPaymentMethod && (
-                      <p className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
-                        {selectedPaymentMethod.label}
-                      </p>
-                    )}
-                  {(paymentForm.payment_group || selectedPaymentMethod?.method_group) ===
-                    'Collaboration' &&
-                    selectedPaymentMethod && (
-                      <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-                        Collaboration · pencatatan saja · total Rp 0 · otomatis lunas tanpa bukti
-                      </p>
-                    )}
-                  {(paymentForm.payment_group || selectedPaymentMethod?.method_group) === 'EDC' && (
+                  {activeGroupNeedsSelect && (
                     <label className="block space-y-1.5">
-                      <span className="text-xs font-semibold text-slate-600">Jenis kartu EDC BCA</span>
+                      <span className="text-xs font-semibold text-slate-600">
+                        {activePaymentGroup === 'EDC'
+                          ? 'Jenis kartu EDC BCA'
+                          : `Pilih ${activePaymentGroup}`}
+                      </span>
                       <select
                         value={paymentForm.payment_method_id}
                         onChange={(e) =>
                           setPaymentForm((prev) => ({
                             ...prev,
                             payment_method_id: e.target.value,
-                            payment_group: 'EDC',
+                            payment_group: activePaymentGroup,
                           }))
                         }
                         className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
                       >
-                        <option value="">Pilih jenis kartu</option>
-                        {edcPaymentMethods.map((method) => (
+                        <option value="">Pilih metode</option>
+                        {activeGroupMethods.map((method) => (
                           <option key={method.id} value={method.id}>
                             {method.name}
                           </option>

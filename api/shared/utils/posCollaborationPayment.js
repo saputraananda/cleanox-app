@@ -3,6 +3,7 @@ export const COLLABORATION_METHOD_GROUP = 'Collaboration';
 export const PAYMENT_METHOD_GROUP_ORDER = [
   'Tunai',
   'BCA',
+  'BSI',
   'EDC',
   'QRIS',
   'Collaboration',
@@ -20,7 +21,8 @@ export function isCollaborationMethod(rowOrGroup) {
   return group === COLLABORATION_METHOD_GROUP;
 }
 
+/** Prefer known groups; unknown DB groups sort after (by id). */
 export function paymentMethodGroupFieldSql(columnExpression = '`group`') {
   const placeholders = PAYMENT_METHOD_GROUP_ORDER.map((g) => `'${g}'`).join(', ');
-  return `FIELD(${columnExpression}, ${placeholders})`;
+  return `CASE WHEN FIELD(${columnExpression}, ${placeholders}) = 0 THEN 999 ELSE FIELD(${columnExpression}, ${placeholders}) END`;
 }
