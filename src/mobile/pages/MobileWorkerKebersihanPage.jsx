@@ -12,6 +12,19 @@ const SESSIONS = [
   { key: 'sore', label: 'Sore', hint: '09:01 – 19:00 WIB' },
 ];
 
+/** Foto contoh framing per area (static di /public) */
+const AREA_EXAMPLE_PHOTOS = {
+  GUDANG_BAWAH: '/area-gudang-bawah.jpeg',
+  CHEMICAL: '/area-chemical.jpeg',
+  PENCUCIAN: '/area-pencucian.jpeg',
+  PACKING: '/area-packing.jpeg',
+};
+
+function getAreaExampleUrl(code) {
+  if (!code) return null;
+  return AREA_EXAMPLE_PHOTOS[String(code).toUpperCase()] || null;
+}
+
 /** TEMP: bypass jam/grooming lock sesi pagi di UI — set false untuk lock kembali */
 const TEMP_BYPASS_KEBERSIHAN_PAGI_LOCK = true;
 
@@ -32,6 +45,22 @@ function LihatFotoButton({ onClick }) {
         <circle cx="10" cy="10" r="2.4" />
       </svg>
       Lihat Foto
+    </button>
+  );
+}
+
+function ContohFotoButton({ onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="mt-3 w-full h-[30px] rounded-[9px] border border-slate-200 bg-slate-50 text-slate-700 text-[10.5px] font-bold tracking-[.02em] flex items-center justify-center gap-1 transition hover:bg-slate-100 active:scale-[.98]"
+    >
+      <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M1.5 10s3.2-5 8.5-5 8.5 5 8.5 5-3.2 5-8.5 5-8.5-5-8.5-5z" />
+        <circle cx="10" cy="10" r="2.4" />
+      </svg>
+      Contoh
     </button>
   );
 }
@@ -353,6 +382,7 @@ export default function MobileWorkerKebersihanPage() {
               const done = Boolean(area.photo);
               const uploading = uploadingAreaId === area.area_id;
               const showSavedDelete = done && canCapture && !draftFile;
+              const exampleUrl = getAreaExampleUrl(area.code);
 
               return (
                 <div
@@ -378,6 +408,14 @@ export default function MobileWorkerKebersihanPage() {
                       <Camera className="w-5 h-5 text-slate-400 flex-shrink-0" />
                     )}
                   </div>
+
+                  {exampleUrl ? (
+                    <ContohFotoButton
+                      onClick={() =>
+                        openPhotoPreview(exampleUrl, `Contoh — ${area.name || 'Area'}`)
+                      }
+                    />
+                  ) : null}
 
                   {canCapture && (
                     <button

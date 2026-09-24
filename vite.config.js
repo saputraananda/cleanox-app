@@ -83,6 +83,8 @@ export default defineConfig({
     target: 'es2022',
   },
   optimizeDeps: {
+    // Avoid broken prebundle: engine.io-client becomes `(void 0).protocol`
+    exclude: ['socket.io-client', 'engine.io-client'],
     esbuildOptions: {
       target: 'es2022',
     },

@@ -182,6 +182,9 @@ export default function PosTransactionDetailPage() {
     payment_method_id: '',
     payment_status: 'belum_lunas',
     payment_group: '',
+    epayment_amount: '',
+    secondary_payment_group: '',
+    secondary_payment_method_id: '',
   });
   const [paymentSaving, setPaymentSaving] = useState(false);
   const [meterDrafts, setMeterDrafts] = useState({});
@@ -375,6 +378,14 @@ export default function PosTransactionDetailPage() {
         payment_method_id: tx.payment_method_id ? String(tx.payment_method_id) : '',
         payment_status: tx.payment_status || 'belum_lunas',
         payment_group: tx.payment_method?.method_group || '',
+        epayment_amount:
+          tx.epayment_amount == null || tx.epayment_amount === ''
+            ? ''
+            : String(Number(tx.epayment_amount)),
+        secondary_payment_group: tx.secondary_payment_method?.method_group || '',
+        secondary_payment_method_id: tx.secondary_payment_method_id
+          ? String(tx.secondary_payment_method_id)
+          : '',
       });
       setOfferForm({
         promo_id: tx.promo_id ? String(tx.promo_id) : '',
@@ -759,8 +770,29 @@ export default function PosTransactionDetailPage() {
   const activePaymentGroup =
     paymentForm.payment_group || selectedPaymentMethod?.method_group || '';
   const isCollaborationPayment = activePaymentGroup === 'Collaboration';
+  const isEpaymentPayment = activePaymentGroup === 'E-Payment';
   const activeGroupNeedsSelect = groupNeedsMethodSelect(paymentMethods, activePaymentGroup);
   const activeGroupMethods = getMethodsInGroup(paymentMethods, activePaymentGroup);
+  const secondaryPaymentGroups = paymentMethodGroups.filter(
+    (g) => g !== 'E-Payment' && g !== 'Collaboration'
+  );
+  const secondaryGroupNeedsSelect = groupNeedsMethodSelect(
+    paymentMethods,
+    paymentForm.secondary_payment_group
+  );
+  const secondaryGroupMethods = getMethodsInGroup(
+    paymentMethods,
+    paymentForm.secondary_payment_group
+  );
+  const finalAmountNum = Number(transaction.final_amount || 0);
+  const epaymentAmountNum =
+    paymentForm.epayment_amount === '' ? null : Number(paymentForm.epayment_amount);
+  const paymentRemainderNum =
+    isEpaymentPayment &&
+    epaymentAmountNum != null &&
+    Number.isFinite(epaymentAmountNum)
+      ? Math.max(0, finalAmountNum - epaymentAmountNum)
+      : null;
 
   const handlePaymentGroupChange = (group) => {
     setPaymentForm((prev) => {
@@ -777,6 +809,7 @@ export default function PosTransactionDetailPage() {
           ? String(methodsInGroup[0].id)
           : '';
 
+      const leavingEpayment = group !== 'E-Payment';
       return {
         ...prev,
         payment_group: group,
@@ -787,6 +820,31 @@ export default function PosTransactionDetailPage() {
             : prev.payment_group === 'Collaboration'
               ? 'belum_lunas'
               : prev.payment_status,
+        epayment_amount: leavingEpayment ? '' : prev.epayment_amount,
+        secondary_payment_group: leavingEpayment ? '' : prev.secondary_payment_group,
+        secondary_payment_method_id: leavingEpayment ? '' : prev.secondary_payment_method_id,
+      };
+    });
+  };
+
+  const handleSecondaryPaymentGroupChange = (group) => {
+    setPaymentForm((prev) => {
+      const methodsInGroup = getMethodsInGroup(paymentMethods, group);
+      const needsSelect = methodsInGroup.length > 1;
+      const stillInGroup = methodsInGroup.some(
+        (m) => Number(m.id) === Number(prev.secondary_payment_method_id)
+      );
+      const nextMethodId = needsSelect
+        ? stillInGroup
+          ? prev.secondary_payment_method_id
+          : ''
+        : methodsInGroup[0]
+          ? String(methodsInGroup[0].id)
+          : '';
+      return {
+        ...prev,
+        secondary_payment_group: group,
+        secondary_payment_method_id: nextMethodId,
       };
     });
   };
@@ -800,6 +858,39 @@ export default function PosTransactionDetailPage() {
     const savingAsCollaboration =
       (paymentMethods.find((m) => Number(m.id) === Number(paymentForm.payment_method_id))
         ?.method_group || '') === 'Collaboration';
+    const savingAsEpayment =
+      (paymentMethods.find((m) => Number(m.id) === Number(paymentForm.payment_method_id))
+        ?.method_group || '') === 'E-Payment';
+
+    let epaymentPayload = null;
+    let secondaryPayload = null;
+    if (savingAsEpayment) {
+      const amountRaw = String(paymentForm.epayment_amount || '').trim();
+      const amountNum = amountRaw === '' ? null : Number(amountRaw);
+      if (amountRaw !== '' && (!Number.isFinite(amountNum) || amountNum < 0)) {
+        setError('Nominal E-Payment tidak valid');
+        return;
+      }
+      const remainder =
+        amountNum == null ? 0 : Math.max(0, finalAmountNum - amountNum);
+      if (amountNum != null && amountNum > finalAmountNum) {
+        setError('Nominal E-Payment tidak boleh melebihi total tagihan');
+        return;
+      }
+      if (amountNum != null && amountNum > 0 && amountNum < finalAmountNum) {
+        if (!paymentForm.secondary_payment_method_id) {
+          setError('Sisa pembayaran wajib memilih metode lain');
+          return;
+        }
+        epaymentPayload = amountNum;
+        secondaryPayload = Number(paymentForm.secondary_payment_method_id);
+      } else {
+        epaymentPayload = null;
+        secondaryPayload = null;
+      }
+      void remainder;
+    }
+
     if (
       !savingAsCollaboration &&
       paymentForm.payment_status === 'lunas' &&
@@ -814,6 +905,8 @@ export default function PosTransactionDetailPage() {
       await api.patch(`/pos-transactions/${id}/payment`, {
         payment_method_id: Number(paymentForm.payment_method_id),
         payment_status: savingAsCollaboration ? 'lunas' : paymentForm.payment_status,
+        epayment_amount: savingAsEpayment ? epaymentPayload : null,
+        secondary_payment_method_id: savingAsEpayment ? secondaryPayload : null,
       });
       await loadData();
     } catch (err) {
@@ -1384,11 +1477,37 @@ export default function PosTransactionDetailPage() {
             </div>
             <div>
               <p className="text-xs uppercase tracking-wide text-slate-400">Pembayaran</p>
-              <p className="mt-1 font-semibold text-slate-900">
-                {transaction.payment_method?.label ||
-                  transaction.payment_method?.name ||
-                  'Belum dipilih'}
-              </p>
+              {transaction.secondary_payment_method_id &&
+              transaction.epayment_amount != null ? (
+                <div className="mt-1 space-y-1">
+                  <p className="font-semibold text-slate-900">
+                    E-Payment: {formatCurrency(Number(transaction.epayment_amount || 0))}
+                  </p>
+                  <p className="font-semibold text-slate-900">
+                    {transaction.secondary_payment_method?.label ||
+                      transaction.secondary_payment_method?.name ||
+                      'Metode sisa'}
+                    :{' '}
+                    {formatCurrency(
+                      Number(
+                        transaction.payment_remainder_amount != null
+                          ? transaction.payment_remainder_amount
+                          : Math.max(
+                              0,
+                              Number(transaction.final_amount || 0) -
+                                Number(transaction.epayment_amount || 0)
+                            )
+                      )
+                    )}
+                  </p>
+                </div>
+              ) : (
+                <p className="mt-1 font-semibold text-slate-900">
+                  {transaction.payment_method?.label ||
+                    transaction.payment_method?.name ||
+                    'Belum dipilih'}
+                </p>
+              )}
               <span
                 className={`mt-1 inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
                   transaction.payment_status === 'lunas'
@@ -1483,6 +1602,106 @@ export default function PosTransactionDetailPage() {
                       </select>
                     </label>
                   )}
+                  {isEpaymentPayment && (
+                    <div className="space-y-3 rounded-xl border border-indigo-100 bg-indigo-50/60 p-3">
+                      <p className="text-xs text-indigo-800">
+                        Isi nominal E-Payment; sisanya pilih metode lain (maks. 2 metode). Kosongkan
+                        atau isi penuh total untuk bayar 100% E-Payment.
+                      </p>
+                      <label className="block space-y-1.5">
+                        <span className="text-xs font-semibold text-slate-600">
+                          Nominal E-Payment
+                        </span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={paymentForm.epayment_amount}
+                          onChange={(e) =>
+                            setPaymentForm((prev) => ({
+                              ...prev,
+                              epayment_amount: e.target.value,
+                              ...(Number(e.target.value) >= finalAmountNum ||
+                              e.target.value === ''
+                                ? {
+                                    secondary_payment_group: '',
+                                    secondary_payment_method_id: '',
+                                  }
+                                : {}),
+                            }))
+                          }
+                          placeholder={String(finalAmountNum || 0)}
+                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
+                        />
+                      </label>
+                      <p className="text-xs text-slate-600">
+                        Sisa:{' '}
+                        <span className="font-bold text-slate-900">
+                          {formatCurrency(
+                            paymentRemainderNum == null ? finalAmountNum : paymentRemainderNum
+                          )}
+                        </span>
+                        {paymentForm.epayment_amount === '' ? ' (belum diisi → full E-Payment)' : ''}
+                      </p>
+                      {paymentRemainderNum != null && paymentRemainderNum > 0 && (
+                        <div className="space-y-2">
+                          <p className="text-xs font-semibold text-slate-600">Metode sisa</p>
+                          <div className="flex flex-wrap gap-2">
+                            {secondaryPaymentGroups.map((group) => {
+                              const active = paymentForm.secondary_payment_group === group;
+                              return (
+                                <button
+                                  key={group}
+                                  type="button"
+                                  onClick={() => handleSecondaryPaymentGroupChange(group)}
+                                  className={`rounded-xl border px-3 py-1.5 text-xs font-semibold transition ${
+                                    active
+                                      ? 'border-indigo-700 bg-indigo-700 text-white'
+                                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                                  }`}
+                                >
+                                  {group}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          {secondaryGroupNeedsSelect && (
+                            <select
+                              value={paymentForm.secondary_payment_method_id}
+                              onChange={(e) =>
+                                setPaymentForm((prev) => ({
+                                  ...prev,
+                                  secondary_payment_method_id: e.target.value,
+                                }))
+                              }
+                              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
+                            >
+                              <option value="">Pilih metode sisa</option>
+                              {secondaryGroupMethods.map((method) => (
+                                <option key={method.id} value={method.id}>
+                                  {method.name}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                          {paymentForm.secondary_payment_group &&
+                            !secondaryGroupNeedsSelect &&
+                            paymentForm.secondary_payment_method_id && (
+                              <p className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
+                                {getMethodsInGroup(
+                                  paymentMethods,
+                                  paymentForm.secondary_payment_group
+                                )[0]?.label ||
+                                  getMethodsInGroup(
+                                    paymentMethods,
+                                    paymentForm.secondary_payment_group
+                                  )[0]?.name}
+                              </p>
+                            )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <label className="block space-y-1.5">
                     <span className="text-xs font-semibold text-slate-600">Status pembayaran</span>
                     {isCollaborationPayment ? (
@@ -1516,7 +1735,11 @@ export default function PosTransactionDetailPage() {
                       !paymentForm.payment_method_id ||
                       (!isCollaborationPayment &&
                         paymentForm.payment_status === 'lunas' &&
-                        paymentProofs.length < 1)
+                        paymentProofs.length < 1) ||
+                      (isEpaymentPayment &&
+                        paymentRemainderNum != null &&
+                        paymentRemainderNum > 0 &&
+                        !paymentForm.secondary_payment_method_id)
                     }
                     onClick={handleSavePayment}
                     className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"

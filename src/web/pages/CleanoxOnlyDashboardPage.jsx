@@ -89,6 +89,37 @@ const QUICK_LINKS = [
   { to: '/cleanox-only/customers', label: 'Customer', icon: Users },
 ];
 
+/** Periode bulan X = 26 (X-1) s/d 25 X (sama SuperApp) */
+function cutoffStart(year, month) {
+  const y = Number(year);
+  const m = Number(month);
+  const prevMonth = m === 1 ? 12 : m - 1;
+  const prevYear = m === 1 ? y - 1 : y;
+  return `${prevYear}-${String(prevMonth).padStart(2, '0')}-26`;
+}
+
+function cutoffEnd(year, month) {
+  const y = Number(year);
+  const m = Number(month);
+  return `${y}-${String(m).padStart(2, '0')}-25`;
+}
+
+function getActiveCutoffPeriod(now = new Date()) {
+  const day = now.getDate();
+  const month = now.getMonth() + 1;
+  const year = now.getFullYear();
+  if (day >= 26) {
+    if (month === 12) return { yr: year + 1, mo: 1 };
+    return { yr: year, mo: month + 1 };
+  }
+  return { yr: year, mo: month };
+}
+
+function getDefaultCutoffDateRange(now = new Date()) {
+  const { yr, mo } = getActiveCutoffPeriod(now);
+  return { startDate: cutoffStart(yr, mo), endDate: cutoffEnd(yr, mo) };
+}
+
 const emptyDashboard = {
   period: {},
   summary: {
@@ -114,12 +145,7 @@ export default function CleanoxOnlyDashboardPage() {
   const [filterType, setFilterType] = useState('bulan');
   const [selectedPeriod, setSelectedPeriod] = useState({ yr: '', mo: '' });
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-  const [dateRange, setDateRange] = useState(() => {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    return { startDate: `${y}-${m}-01`, endDate: `${y}-${m}-${String(now.getDate()).padStart(2, '0')}` };
-  });
+  const [dateRange, setDateRange] = useState(() => getDefaultCutoffDateRange());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [dashboardData, setDashboardData] = useState(emptyDashboard);
@@ -143,10 +169,15 @@ export default function CleanoxOnlyDashboardPage() {
         const list = data.periods || [];
         setPeriods(list);
         if (list.length > 0) {
-          setSelectedPeriod({ yr: list[0].yr, mo: list[0].mo });
+          const active = getActiveCutoffPeriod();
+          const match = list.find(
+            (p) => Number(p.yr) === active.yr && Number(p.mo) === active.mo
+          );
+          setSelectedPeriod(match ? { yr: match.yr, mo: match.mo } : { yr: active.yr, mo: active.mo });
+          setFilterType('bulan');
         } else {
-          const now = new Date();
-          setSelectedPeriod({ yr: now.getFullYear(), mo: now.getMonth() + 1 });
+          setSelectedPeriod(getActiveCutoffPeriod());
+          setFilterType('bulan');
         }
       })
       .catch((err) => {
@@ -245,6 +276,26 @@ export default function CleanoxOnlyDashboardPage() {
       revenue: row.revenue,
       payment_status: row.payment_status,
     }));
+  }, [dashboardData.paymentStatusBreakdown]);
+
+  const paymentSummary = useMemo(() => {
+    const rows = dashboardData.paymentStatusBreakdown || [];
+    let lunasTotal = 0;
+    let lunasRevenue = 0;
+    let belumTotal = 0;
+    let belumRevenue = 0;
+    for (const row of rows) {
+      const total = Number(row.total || 0);
+      const revenue = Number(row.revenue || 0);
+      if (row.payment_status === 'lunas') {
+        lunasTotal += total;
+        lunasRevenue += revenue;
+      } else {
+        belumTotal += total;
+        belumRevenue += revenue;
+      }
+    }
+    return { lunasTotal, lunasRevenue, belumTotal, belumRevenue };
   }, [dashboardData.paymentStatusBreakdown]);
 
   const filteredDetails = useMemo(() => {
@@ -480,26 +531,50 @@ export default function CleanoxOnlyDashboardPage() {
 
           <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-700 p-6 shadow-lg">
             <div className="absolute -top-10 -right-10 w-40 h-40 rounded-full bg-white/10 blur-2xl" />
-            <div className="relative flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div>
-                <p className="text-indigo-200 text-[11px] font-semibold uppercase tracking-widest mb-1">Total Revenue</p>
-                <h2 className="text-2xl sm:text-3xl font-extrabold text-white">{formatRp(summary.total_revenue)}</h2>
-                <p className="text-indigo-200 text-xs mt-1">
-                  {summary.total_transactions} transaksi dalam periode
-                </p>
+            <div className="relative space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                  <p className="text-indigo-200 text-[11px] font-semibold uppercase tracking-widest mb-1">Total Revenue</p>
+                  <h2 className="text-2xl sm:text-3xl font-extrabold text-white">{formatRp(summary.total_revenue)}</h2>
+                  <p className="text-indigo-200 text-xs mt-1">
+                    {summary.total_transactions} transaksi dalam periode · omzet = lunas + belum lunas
+                  </p>
+                </div>
+                <div className="flex gap-3">
+                  <div className="bg-white/15 backdrop-blur rounded-xl px-4 py-3 text-center min-w-[100px]">
+                    <p className="text-indigo-200 text-[10px] font-semibold uppercase">Incoming</p>
+                    <p className="text-white font-extrabold text-base mt-1">{summary.incoming_transactions}</p>
+                  </div>
+                  <div className="bg-white/15 backdrop-blur rounded-xl px-4 py-3 text-center min-w-[100px]">
+                    <p className="text-indigo-200 text-[10px] font-semibold uppercase">Active</p>
+                    <p className="text-white font-extrabold text-base mt-1">{summary.active_transactions}</p>
+                  </div>
+                  <div className="bg-white/15 backdrop-blur rounded-xl px-4 py-3 text-center min-w-[100px]">
+                    <p className="text-indigo-200 text-[10px] font-semibold uppercase">Completed</p>
+                    <p className="text-white font-extrabold text-base mt-1">{summary.completed_transactions}</p>
+                  </div>
+                </div>
               </div>
-              <div className="flex gap-3">
-                <div className="bg-white/15 backdrop-blur rounded-xl px-4 py-3 text-center min-w-[100px]">
-                  <p className="text-indigo-200 text-[10px] font-semibold uppercase">Incoming</p>
-                  <p className="text-white font-extrabold text-base mt-1">{summary.incoming_transactions}</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="bg-emerald-500/20 border border-emerald-300/30 backdrop-blur rounded-xl px-4 py-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="w-2 h-2 rounded-full bg-emerald-300" />
+                    <p className="text-emerald-100 text-[10px] font-semibold uppercase tracking-wider">Sudah Lunas</p>
+                  </div>
+                  <p className="text-white font-extrabold text-lg leading-tight">{formatRp(paymentSummary.lunasRevenue)}</p>
+                  <p className="text-emerald-100/90 text-[11px] mt-0.5">
+                    {paymentSummary.lunasTotal.toLocaleString('id-ID')} transaksi
+                  </p>
                 </div>
-                <div className="bg-white/15 backdrop-blur rounded-xl px-4 py-3 text-center min-w-[100px]">
-                  <p className="text-indigo-200 text-[10px] font-semibold uppercase">Active</p>
-                  <p className="text-white font-extrabold text-base mt-1">{summary.active_transactions}</p>
-                </div>
-                <div className="bg-white/15 backdrop-blur rounded-xl px-4 py-3 text-center min-w-[100px]">
-                  <p className="text-indigo-200 text-[10px] font-semibold uppercase">Completed</p>
-                  <p className="text-white font-extrabold text-base mt-1">{summary.completed_transactions}</p>
+                <div className="bg-amber-500/20 border border-amber-300/30 backdrop-blur rounded-xl px-4 py-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="w-2 h-2 rounded-full bg-amber-300" />
+                    <p className="text-amber-100 text-[10px] font-semibold uppercase tracking-wider">Belum Lunas</p>
+                  </div>
+                  <p className="text-white font-extrabold text-lg leading-tight">{formatRp(paymentSummary.belumRevenue)}</p>
+                  <p className="text-amber-100/90 text-[11px] mt-0.5">
+                    {paymentSummary.belumTotal.toLocaleString('id-ID')} transaksi
+                  </p>
                 </div>
               </div>
             </div>
@@ -528,10 +603,12 @@ export default function CleanoxOnlyDashboardPage() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
             <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
               <h3 className="text-sm font-bold text-slate-800">Trend Omzet Harian</h3>
-              <p className="text-[11px] text-slate-400 mt-0.5 mb-4">Omzet berdasarkan tanggal layanan</p>
+              <p className="text-[11px] text-slate-400 mt-0.5 mb-4">
+                Omzet harian yang sudah lunas saja (per tanggal layanan, exclude cancelled)
+              </p>
               <div className="h-64">
                 {trendChartData.length === 0 ? (
-                  <div className="h-full flex items-center justify-center text-xs text-slate-400">Tidak ada data trend.</div>
+                  <div className="h-full flex items-center justify-center text-xs text-slate-400">Tidak ada data trend lunas.</div>
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={trendChartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
@@ -539,7 +616,7 @@ export default function CleanoxOnlyDashboardPage() {
                       <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
                       <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
                       <Tooltip formatter={(v) => formatRp(v)} />
-                      <Line type="monotone" dataKey="sales" name="Omzet" stroke="#6366f1" strokeWidth={2.5} dot={{ r: 3 }} />
+                      <Line type="monotone" dataKey="sales" name="Omzet lunas" stroke="#10b981" strokeWidth={2.5} dot={{ r: 3 }} />
                     </LineChart>
                   </ResponsiveContainer>
                 )}
@@ -548,21 +625,40 @@ export default function CleanoxOnlyDashboardPage() {
 
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
               <h3 className="text-sm font-bold text-slate-800">Status Transaksi</h3>
-              <p className="text-[11px] text-slate-400 mt-0.5 mb-4">Distribusi per status</p>
-              <div className="h-64 flex items-center justify-center">
+              <p className="text-[11px] text-slate-400 mt-0.5 mb-4">Distribusi status proses (bukan status bayar)</p>
+              <div className="h-52 flex items-center justify-center">
                 {statusChartData.length === 0 ? (
                   <p className="text-xs text-slate-400">Tidak ada data status.</p>
                 ) : (
-                  <PieChart width={220} height={220}>
-                    <Pie data={statusChartData} cx={110} cy={110} innerRadius={50} outerRadius={80} dataKey="value" paddingAngle={2}>
+                  <PieChart width={220} height={200}>
+                    <Pie data={statusChartData} cx={110} cy={95} innerRadius={45} outerRadius={72} dataKey="value" paddingAngle={2}>
                       {statusChartData.map((_, i) => (
                         <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
                       ))}
                     </Pie>
-                    <Tooltip />
+                    <Tooltip
+                      formatter={(v, _name, item) => [
+                        `${v} trx · ${formatRp(item?.payload?.revenue || 0)}`,
+                        item?.payload?.name || '',
+                      ]}
+                    />
                   </PieChart>
                 )}
               </div>
+              {statusChartData.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1.5 justify-center">
+                  {statusChartData.map((row, i) => (
+                    <div key={row.name} className="flex items-center gap-1.5 text-[10px] text-slate-600">
+                      <span
+                        className="w-2 h-2 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }}
+                      />
+                      <span className="font-semibold">{row.name}</span>
+                      <span className="text-slate-400">({row.value})</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -611,18 +707,18 @@ export default function CleanoxOnlyDashboardPage() {
 
             <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
               <h3 className="text-sm font-bold text-slate-800">Status Pembayaran</h3>
-              <p className="text-[11px] text-slate-400 mt-0.5 mb-4">Lunas vs belum lunas</p>
-              <div className="h-56 flex items-center justify-center">
+              <p className="text-[11px] text-slate-400 mt-0.5 mb-4">Lunas vs belum lunas (exclude cancelled)</p>
+              <div className="h-44 flex items-center justify-center">
                 {paymentStatusChartData.length === 0 ? (
                   <p className="text-xs text-slate-400">Tidak ada data status pembayaran.</p>
                 ) : (
-                  <PieChart width={220} height={220}>
+                  <PieChart width={220} height={180}>
                     <Pie
                       data={paymentStatusChartData}
                       cx={110}
-                      cy={110}
-                      innerRadius={50}
-                      outerRadius={80}
+                      cy={85}
+                      innerRadius={45}
+                      outerRadius={72}
                       dataKey="value"
                       paddingAngle={2}
                     >
@@ -642,6 +738,30 @@ export default function CleanoxOnlyDashboardPage() {
                   </PieChart>
                 )}
               </div>
+              {paymentStatusChartData.length > 0 && (
+                <div className="mt-1 space-y-2">
+                  {paymentStatusChartData.map((row) => (
+                    <div
+                      key={row.payment_status}
+                      className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 border border-slate-100 px-3 py-2"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                          style={{
+                            backgroundColor: row.payment_status === 'lunas' ? '#10b981' : '#f59e0b',
+                          }}
+                        />
+                        <span className="text-xs font-bold text-slate-700 truncate">{row.name}</span>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-xs font-extrabold text-slate-800">{formatRp(row.revenue)}</p>
+                        <p className="text-[10px] text-slate-400">{row.value} trx</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 

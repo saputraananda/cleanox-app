@@ -55,7 +55,7 @@ import {
   loadSharedPhotosGrouped,
   loadItemWorkNotesByTransactionId,
 } from '../../shared/utils/posSharedTaskEvidence.js';
-import { isCollaborationMethod } from '../../shared/utils/posCollaborationPayment.js';
+import { isCollaborationMethod, isEpaymentMethod, normalizeEpaymentSplit } from '../../shared/utils/posCollaborationPayment.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -770,6 +770,28 @@ export const getPosTransactionDetail = async (req, res) => {
       if (methodRow) payment_method = methodRow;
     }
 
+    let secondary_payment_method = null;
+    if (transaction.secondary_payment_method_id) {
+      const [[secondaryRow]] = await cleanoxPool.query(
+        `SELECT id, \`group\` AS method_group, code, name, label
+         FROM mst_payment_method
+         WHERE id = ?
+         LIMIT 1`,
+        [transaction.secondary_payment_method_id]
+      );
+      if (secondaryRow) secondary_payment_method = secondaryRow;
+    }
+
+    const epaymentAmount =
+      transaction.epayment_amount == null ? null : Number(transaction.epayment_amount);
+    const finalAmountNum = Number(transaction.final_amount || 0);
+    const payment_remainder_amount =
+      epaymentAmount != null &&
+      Number.isFinite(epaymentAmount) &&
+      secondary_payment_method
+        ? Math.max(0, finalAmountNum - epaymentAmount)
+        : null;
+
     const [items] = await cleanoxPool.query(
       `SELECT
         i.*,
@@ -921,6 +943,13 @@ export const getPosTransactionDetail = async (req, res) => {
         payment_status: transaction.payment_status || 'belum_lunas',
         payment_settled_date: formatPaymentSettledDateKey(transaction.payment_settled_date),
         payment_method,
+        epayment_amount: epaymentAmount,
+        secondary_payment_method_id:
+          transaction.secondary_payment_method_id == null
+            ? null
+            : Number(transaction.secondary_payment_method_id),
+        secondary_payment_method,
+        payment_remainder_amount,
         subtotal_amount: Number(transaction.subtotal_amount || 0),
         discount_amount: Number(transaction.discount_amount || 0),
         transport_fee: Number(transaction.transport_fee || 0),
@@ -1078,7 +1107,8 @@ export const updatePosTransactionPayment = async (req, res) => {
     await connection.beginTransaction();
 
     const [[transaction]] = await connection.query(
-      `SELECT id, status, payment_method_id, payment_status, payment_settled_date
+      `SELECT id, status, payment_method_id, payment_status, payment_settled_date,
+              final_amount, epayment_amount, secondary_payment_method_id
        FROM tr_transactions
        WHERE id = ?
        LIMIT 1
@@ -1164,11 +1194,75 @@ export const updatePosTransactionPayment = async (req, res) => {
       }
     }
 
+    const bodyHasEpayment = Object.prototype.hasOwnProperty.call(
+      req.body || {},
+      'epayment_amount'
+    );
+    const bodyHasSecondary = Object.prototype.hasOwnProperty.call(
+      req.body || {},
+      'secondary_payment_method_id'
+    );
+
+    let secondaryMethod = null;
+    const secondaryMethodIdRaw = bodyHasSecondary
+      ? req.body.secondary_payment_method_id
+      : transaction.secondary_payment_method_id;
+    if (
+      secondaryMethodIdRaw != null &&
+      String(secondaryMethodIdRaw).trim() !== '' &&
+      Number(secondaryMethodIdRaw) > 0
+    ) {
+      secondaryMethod = await loadPaymentMethod(connection, Number(secondaryMethodIdRaw));
+      if (!secondaryMethod || !Number(secondaryMethod.is_active)) {
+        await connection.rollback();
+        return res.status(400).json({ message: 'Metode pembayaran sisa tidak valid atau nonaktif' });
+      }
+    }
+
+    const epaymentAmountRaw = bodyHasEpayment
+      ? req.body.epayment_amount
+      : transaction.epayment_amount;
+
+    let nextEpaymentAmount = null;
+    let nextSecondaryMethodId = null;
+    try {
+      const normalized = normalizeEpaymentSplit({
+        primaryMethod: nextMethod,
+        epaymentAmountRaw:
+          bodyHasEpayment || bodyHasSecondary || isEpaymentMethod(nextMethod)
+            ? epaymentAmountRaw
+            : null,
+        secondaryMethod: isEpaymentMethod(nextMethod) && !isCollab ? secondaryMethod : null,
+        finalAmount: transaction.final_amount,
+      });
+      nextEpaymentAmount = normalized.epayment_amount;
+      nextSecondaryMethodId = normalized.secondary_payment_method_id;
+    } catch (splitErr) {
+      await connection.rollback();
+      return res.status(splitErr.status || 400).json({
+        message: splitErr.message || 'Split E-Payment tidak valid',
+      });
+    }
+
     await connection.query(
       `UPDATE tr_transactions
-       SET payment_method_id = ?, payment_status = ?, payment_settled_date = ?, updated_by = ?, updated_at = NOW()
+       SET payment_method_id = ?,
+           epayment_amount = ?,
+           secondary_payment_method_id = ?,
+           payment_status = ?,
+           payment_settled_date = ?,
+           updated_by = ?,
+           updated_at = NOW()
        WHERE id = ?`,
-      [nextMethodId, nextPaymentStatus, nextSettledDate, req.user?.id || null, transactionId]
+      [
+        nextMethodId,
+        nextEpaymentAmount,
+        nextSecondaryMethodId,
+        nextPaymentStatus,
+        nextSettledDate,
+        req.user?.id || null,
+        transactionId,
+      ]
     );
 
     if (isCollab || wasCollaboration) {
@@ -1182,15 +1276,28 @@ export const updatePosTransactionPayment = async (req, res) => {
     const method = nextMethodId
       ? nextMethod || (await loadPaymentMethod(connection, nextMethodId))
       : null;
+    const secondaryPaymentMethod = nextSecondaryMethodId
+      ? secondaryMethod && Number(secondaryMethod.id) === Number(nextSecondaryMethodId)
+        ? secondaryMethod
+        : await loadPaymentMethod(connection, nextSecondaryMethodId)
+      : null;
 
     const [[freshTx]] = await connection.query(
-      `SELECT status, payment_status, final_amount,
+      `SELECT status, payment_status, final_amount, epayment_amount, secondary_payment_method_id,
               DATE_FORMAT(payment_settled_date, '%Y-%m-%d') AS payment_settled_date
        FROM tr_transactions WHERE id = ? LIMIT 1`,
       [transactionId]
     );
 
     await connection.commit();
+
+    const freshEpayment =
+      freshTx?.epayment_amount == null ? null : Number(freshTx.epayment_amount);
+    const freshFinal = Number(freshTx?.final_amount || 0);
+    const paymentRemainder =
+      freshEpayment != null && secondaryPaymentMethod
+        ? Math.max(0, freshFinal - freshEpayment)
+        : null;
 
     return res.json({
       message: 'Pembayaran transaksi diperbarui',
@@ -1206,8 +1313,23 @@ export const updatePosTransactionPayment = async (req, res) => {
             label: method.label,
           }
         : null,
+      epayment_amount: freshEpayment,
+      secondary_payment_method_id:
+        freshTx?.secondary_payment_method_id == null
+          ? null
+          : Number(freshTx.secondary_payment_method_id),
+      secondary_payment_method: secondaryPaymentMethod
+        ? {
+            id: Number(secondaryPaymentMethod.id),
+            method_group: secondaryPaymentMethod.method_group,
+            code: secondaryPaymentMethod.code,
+            name: secondaryPaymentMethod.name,
+            label: secondaryPaymentMethod.label,
+          }
+        : null,
+      payment_remainder_amount: paymentRemainder,
       status: freshTx?.status || transaction.status,
-      final_amount: Number(freshTx?.final_amount || 0),
+      final_amount: freshFinal,
     });
   } catch (error) {
     await connection.rollback();

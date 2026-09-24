@@ -1,5 +1,45 @@
 import cleanoxPool from '../../shared/db/cleanox.js';
 
+/** Jakarta (UTC+7) — mirror DashboardCleanox.controller.js */
+function getJakartaDate() {
+  const now = new Date();
+  const jktOffset = 7 * 60;
+  return new Date(now.getTime() + (jktOffset + now.getTimezoneOffset()) * 60 * 1000);
+}
+
+function formatDate(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/** Periode bulan X = 26 (X-1) s/d 25 X (sama SuperApp) */
+function cutoffStart(year, month) {
+  const y = Number(year);
+  const m = Number(month);
+  const prevMonth = m === 1 ? 12 : m - 1;
+  const prevYear = m === 1 ? y - 1 : y;
+  return `${prevYear}-${String(prevMonth).padStart(2, '0')}-26`;
+}
+
+function cutoffEnd(year, month) {
+  const y = Number(year);
+  const m = Number(month);
+  return `${y}-${String(m).padStart(2, '0')}-25`;
+}
+
+function getActiveCutoffPeriod(jkt = getJakartaDate()) {
+  const day = jkt.getDate();
+  const month = jkt.getMonth() + 1;
+  const year = jkt.getFullYear();
+  if (day >= 26) {
+    if (month === 12) return { yr: year + 1, mo: 1 };
+    return { yr: year, mo: month + 1 };
+  }
+  return { yr: year, mo: month };
+}
+
 function resolvePeriod(filterType, { year, month, startDate, endDate }) {
   if (filterType === 'rentang' && startDate && endDate) {
     return {
@@ -12,9 +52,14 @@ function resolvePeriod(filterType, { year, month, startDate, endDate }) {
 
   if (filterType === 'tahun' && year) {
     const y = Number(year);
+    if (!y) {
+      throw new Error('Periode tahun tidak valid');
+    }
+    const todayJkt = formatDate(getJakartaDate());
+    const yearEnd = `${y}-12-25`;
     return {
-      date_start: `${y}-01-01`,
-      date_end: `${y}-12-31`,
+      date_start: `${y - 1}-12-26`,
+      date_end: todayJkt < yearEnd ? todayJkt : yearEnd,
       year: y,
       month: null,
     };
@@ -22,13 +67,12 @@ function resolvePeriod(filterType, { year, month, startDate, endDate }) {
 
   const y = Number(year);
   const m = Number(month);
-  if (!y || !m) {
+  if (!y || !m || m < 1 || m > 12) {
     throw new Error('Periode bulan tidak valid');
   }
-  const lastDay = new Date(y, m, 0).getDate();
   return {
-    date_start: `${y}-${String(m).padStart(2, '0')}-01`,
-    date_end: `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`,
+    date_start: cutoffStart(y, m),
+    date_end: cutoffEnd(y, m),
     year: y,
     month: m,
   };
@@ -38,21 +82,29 @@ export const getAvailablePeriods = async (_req, res) => {
   try {
     const [rows] = await cleanoxPool.query(
       `SELECT DISTINCT
-        YEAR(service_date) AS yr,
-        MONTH(service_date) AS mo
+         CASE
+           WHEN DAY(service_date) >= 26 THEN
+             CASE WHEN MONTH(service_date) = 12 THEN YEAR(service_date) + 1 ELSE YEAR(service_date) END
+           ELSE YEAR(service_date)
+         END AS yr,
+         CASE
+           WHEN DAY(service_date) >= 26 THEN
+             CASE WHEN MONTH(service_date) = 12 THEN 1 ELSE MONTH(service_date) + 1 END
+           ELSE MONTH(service_date)
+         END AS mo
        FROM tr_transactions
        WHERE service_date IS NOT NULL
+         AND status <> 'Cancelled'
        ORDER BY yr DESC, mo DESC`
     );
 
-    const now = new Date();
-    const activeYear = now.getFullYear();
-    const activeMonth = now.getMonth() + 1;
+    const { yr: activeYear, mo: activeMonth } = getActiveCutoffPeriod();
     const exists = rows.some(
       (row) => Number(row.yr) === activeYear && Number(row.mo) === activeMonth
     );
     if (!exists) {
-      rows.unshift({ yr: activeYear, mo: activeMonth });
+      rows.push({ yr: activeYear, mo: activeMonth });
+      rows.sort((a, b) => Number(b.yr) - Number(a.yr) || Number(b.mo) - Number(a.mo));
     }
 
     return res.json({
@@ -102,10 +154,12 @@ export const getDashboardData = async (req, res) => {
     const [trendRows] = await cleanoxPool.query(
       `SELECT
         DATE(service_date) AS tanggal,
-        SUM(CASE WHEN status <> 'Cancelled' THEN final_amount ELSE 0 END) AS sales,
+        SUM(final_amount) AS sales,
         COUNT(*) AS count
        FROM tr_transactions
        WHERE DATE(service_date) BETWEEN ? AND ?
+         AND status <> 'Cancelled'
+         AND COALESCE(payment_status, 'belum_lunas') = 'lunas'
        GROUP BY DATE(service_date)
        ORDER BY tanggal`,
       [date_start, date_end]
