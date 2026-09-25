@@ -324,7 +324,10 @@ async function getAssignmentOwnedByUser(assignmentId, employeeId) {
       t.total_people,
       t.status AS transaction_status,
       t.notes AS transaction_notes,
-      t.service_mode
+      t.service_mode,
+      t.billing_hours,
+      t.customer_bundle_id,
+      t.pricing_finalized_at
      FROM tr_worker_assignments a
      INNER JOIN tr_transactions t ON t.id = a.transaction_id
      WHERE a.id = ? AND a.employee_id = ?
@@ -332,6 +335,13 @@ async function getAssignmentOwnedByUser(assignmentId, employeeId) {
     [assignmentId, employeeId]
   );
   return row || null;
+}
+
+function resolveBundleTimerSeconds(row) {
+  const hours = Number(row?.billing_hours);
+  const hasBundle = Boolean(Number(row?.customer_bundle_id));
+  if (!hasBundle || !Number.isFinite(hours) || hours <= 0) return null;
+  return Math.round(hours * 3600);
 }
 
 function toMobileTakehomePhotoPath(photoFile) {
@@ -519,6 +529,7 @@ function mapTaskRow(
     evidence,
     takehome: evidence.takehome,
     customer_photos: customerPhotos,
+    bundle_timer_seconds: resolveBundleTimerSeconds(row),
     transaction: {
       id: row.transaction_id,
       transaction_no: row.transaction_no,
@@ -531,6 +542,9 @@ function mapTaskRow(
       notes: row.transaction_notes,
       service_mode: row.service_mode || 'home_service',
       service_label: serviceLabel || null,
+      billing_hours: row.billing_hours == null ? null : Number(row.billing_hours),
+      customer_bundle_id:
+        row.customer_bundle_id == null ? null : Number(row.customer_bundle_id),
     },
   };
 }
@@ -673,7 +687,10 @@ export const listMyTasks = async (req, res) => {
         t.total_people,
         t.status AS transaction_status,
         t.notes AS transaction_notes,
-        t.service_mode
+        t.service_mode,
+        t.billing_hours,
+        t.customer_bundle_id,
+        t.pricing_finalized_at
        FROM tr_worker_assignments a
        INNER JOIN tr_transactions t ON t.id = a.transaction_id
        WHERE a.employee_id = ?
@@ -1938,6 +1955,9 @@ export const submitSurveyExternal = async (req, res) => {
 export const completeTask = async (req, res) => {
   const employeeId = req.user?.id;
   const assignmentId = Number(req.params.assignmentId);
+  const completedByBundleTimer = Boolean(
+    req.body?.completed_by_bundle_timer || req.query?.completed_by_bundle_timer
+  );
 
   if (!assignmentId) {
     return res.status(400).json({ message: 'ID assignment tidak valid' });
@@ -1948,7 +1968,7 @@ export const completeTask = async (req, res) => {
     await connection.beginTransaction();
 
     const [[row]] = await connection.query(
-      `SELECT a.*, t.customer_name, t.service_mode
+      `SELECT a.*, t.customer_name, t.service_mode, t.billing_hours, t.customer_bundle_id
        FROM tr_worker_assignments a
        INNER JOIN tr_transactions t ON t.id = a.transaction_id
        WHERE a.id = ? AND a.employee_id = ?
@@ -1973,19 +1993,27 @@ export const completeTask = async (req, res) => {
         : null;
     const shared = await buildSharedContextForRow(row);
     const evidence = mapEvidence(row, photosMap.get(assignmentId) || [], takehomeProgress, shared);
-    if (!evidence.can_complete) {
-      await connection.rollback();
-      const missing = [];
-      if (String(row.service_mode) === 'take_home') {
-        if (!evidence.has_takehome_complete) missing.push('semua stage take-home');
-        if (!evidence.has_survey) missing.push('survey kepuasan');
-      } else {
-        if (!evidence.has_arrival) missing.push('bukti kedatangan');
-        if (!evidence.all_items_complete) missing.push('foto before & after per layanan');
-        if (!evidence.has_survey) missing.push('survey kepuasan');
+
+    if (!completedByBundleTimer) {
+      if (!evidence.can_complete) {
+        await connection.rollback();
+        const missing = [];
+        if (String(row.service_mode) === 'take_home') {
+          if (!evidence.has_takehome_complete) missing.push('semua stage take-home');
+          if (!evidence.has_survey) missing.push('survey kepuasan');
+        } else {
+          if (!evidence.has_arrival) missing.push('bukti kedatangan');
+          if (!evidence.all_items_complete) missing.push('foto before & after per layanan');
+          if (!evidence.has_survey) missing.push('survey kepuasan');
+        }
+        return res.status(400).json({
+          message: `Lengkapi dulu ${missing.join(', ')} sebelum menyelesaikan tugas`,
+        });
       }
+    } else if (!row.customer_bundle_id || !(Number(row.billing_hours) > 0)) {
+      await connection.rollback();
       return res.status(400).json({
-        message: `Lengkapi dulu ${missing.join(', ')} sebelum menyelesaikan tugas`,
+        message: 'Auto-complete timer hanya untuk tugas paket dengan kuota jam',
       });
     }
 
@@ -1993,17 +2021,27 @@ export const completeTask = async (req, res) => {
       `UPDATE tr_worker_assignments
        SET assignment_status = 'Done',
            completed_at = NOW(),
+           assignment_note = CASE
+             WHEN ? = 1 THEN CONCAT(
+               COALESCE(assignment_note, ''),
+               IF(assignment_note IS NULL OR assignment_note = '', '', ' | '),
+               'completed_by_bundle_timer'
+             )
+             ELSE assignment_note
+           END,
            updated_at = NOW()
        WHERE id = ?`,
-      [assignmentId]
+      [completedByBundleTimer ? 1 : 0, assignmentId]
     );
 
     await createPosTracking(
       connection,
       row.transaction_id,
       'Completed',
-      'Task Done',
-      `${row.employee_name} menyelesaikan pengerjaan untuk ${row.customer_name}`,
+      completedByBundleTimer ? 'Task Done (Bundle Timer)' : 'Task Done',
+      completedByBundleTimer
+        ? `${row.employee_name} auto-selesai karena timer paket habis untuk ${row.customer_name}`
+        : `${row.employee_name} menyelesaikan pengerjaan untuk ${row.customer_name}`,
       employeeId
     );
 
@@ -2020,14 +2058,18 @@ export const completeTask = async (req, res) => {
     const allActiveDone =
       activeAssignments.length > 0 &&
       activeAssignments.every((assignment) => assignment.assignment_status === 'Done');
-    if (allActiveDone) {
+    if (allActiveDone && !completedByBundleTimer) {
       await finalizeGeneralCleaningPricing(connection, row.transaction_id, {
         actorId: employeeId,
       });
     }
 
     await connection.commit();
-    return res.json({ message: 'Pengerjaan selesai — Done' });
+    return res.json({
+      message: completedByBundleTimer
+        ? 'Timer paket habis — pengerjaan otomatis selesai'
+        : 'Pengerjaan selesai — Done',
+    });
   } catch (error) {
     await connection.rollback();
     console.error('[mobileTasks/completeTask]', error.message);

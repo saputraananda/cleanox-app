@@ -139,6 +139,16 @@ export async function finalizeGeneralCleaningPricingFromWindow(
     return { finalized: false };
   }
 
+  // Bundle GC is prepaid quota — hours locked at create; never reprice from job window.
+  const hasBundleGc = items.some(
+    (item) =>
+      isGeneralCleaningCategory(item.category_name) &&
+      String(item.item_source || 'regular') === 'bundle'
+  );
+  if (hasBundleGc) {
+    return { finalized: false, skipped_bundle: true };
+  }
+
   const billingHours = calculateGcBillingHours({ startedAt, completedAt });
 
   let subtotal = 0;
@@ -147,6 +157,7 @@ export async function finalizeGeneralCleaningPricingFromWindow(
 
   for (const item of items) {
     const isGc = isGeneralCleaningCategory(item.category_name);
+    const isBundleLine = String(item.item_source || 'regular') === 'bundle';
 
     if (isGc) {
       const computed = computeGcLineTotals({
@@ -179,7 +190,7 @@ export async function finalizeGeneralCleaningPricingFromWindow(
       item.final_price_snapshot = computed.rateFinal;
       item.line_total = computed.lineTotal;
       item.promo_discount_amount = hasHeaderPromo ? 0 : computed.promoDiscountAmount;
-    } else {
+    } else if (!isBundleLine) {
       const qty = Math.max(1, Number(item.qty || 1));
       subtotal += Number(item.base_price_snapshot || 0) * qty;
       if (!hasHeaderPromo) discount += Number(item.promo_discount_amount || 0);

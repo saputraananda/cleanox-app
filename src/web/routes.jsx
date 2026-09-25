@@ -14,6 +14,9 @@ import PosWaschenReferralPage from '@web/pages/PosWaschenReferralPage.jsx';
 import PosPricesPage from '@web/pages/PosPricesPage.jsx';
 import PosPromosPage from '@web/pages/PosPromosPage.jsx';
 import PosDiskonsPage from '@web/pages/PosDiskonsPage.jsx';
+import PosBundlesPage from '@web/pages/PosBundlesPage.jsx';
+import PosBundlePurchasePage from '@web/pages/PosBundlePurchasePage.jsx';
+import PosBundleBalancesPage from '@web/pages/PosBundleBalancesPage.jsx';
 import PosAgendaPage from '@web/pages/PosAgendaPage.jsx';
 import PosAgendaCreatePage from '@web/pages/PosAgendaCreatePage.jsx';
 import PosAgendaDetailPage from '@web/pages/PosAgendaDetailPage.jsx';
@@ -174,6 +177,39 @@ const webRoutes = [
       <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>
         <Layout>
           <PosDiskonsPage />
+        </Layout>
+      </PrivateRoute>
+    }
+  />,
+  <Route
+    key="co-bundles"
+    path="/cleanox-only/bundles"
+    element={
+      <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>
+        <Layout>
+          <PosBundlesPage />
+        </Layout>
+      </PrivateRoute>
+    }
+  />,
+  <Route
+    key="co-bundles-purchase"
+    path="/cleanox-only/bundles/purchase"
+    element={
+      <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>
+        <Layout>
+          <PosBundlePurchasePage />
+        </Layout>
+      </PrivateRoute>
+    }
+  />,
+  <Route
+    key="co-bundles-saldo"
+    path="/cleanox-only/bundles/saldo"
+    element={
+      <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>
+        <Layout>
+          <PosBundleBalancesPage />
         </Layout>
       </PrivateRoute>
     }

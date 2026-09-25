@@ -324,6 +324,16 @@ export default function PosTransactionsPage() {
                                 History
                               </span>
                             ) : null}
+                            {row.entry_kind === 'bundle_purchase' ? (
+                              <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                                Beli Paket
+                              </span>
+                            ) : null}
+                            {row.entry_kind !== 'bundle_purchase' && row.has_bundle_items ? (
+                              <span className="inline-flex rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[10px] font-semibold text-teal-700">
+                                Pakai Paket
+                              </span>
+                            ) : null}
                           </div>
                         </td>
                         <td className="px-3 py-3">

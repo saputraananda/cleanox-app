@@ -1,6 +1,6 @@
 ﻿import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Camera, CheckCircle2, ClipboardList, Play, X, XCircle } from 'lucide-react';
+import { ArrowLeft, Camera, CheckCircle2, ClipboardList, Play, Timer, X, XCircle } from 'lucide-react';
 import api from '@shared/utils/api.js';
 import MobileWorkerBottomNav from '@mobile/components/MobileWorkerBottomNav.jsx';
 import MobileConfirmDialog from '@mobile/components/MobileConfirmDialog.jsx';
@@ -8,6 +8,69 @@ import MobileCameraCapture from '@mobile/components/MobileCameraCapture.jsx';
 import { resolvePhotoUploadError } from '@mobile/utils/photoUploadError.js';
 
 const MAX_PHOTOS_PER_KIND = 50;
+
+function formatTimer(seconds) {
+  const safe = Math.max(0, Math.floor(Number(seconds) || 0));
+  const h = Math.floor(safe / 3600);
+  const m = Math.floor((safe % 3600) / 60);
+  const s = safe % 60;
+  if (h > 0) {
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+function BundleQuotaTimer({ task, onExpired, disabled }) {
+  const timerSeconds = Number(task?.bundle_timer_seconds || 0);
+  const startedAt = task?.started_at ? new Date(task.started_at).getTime() : null;
+  const [remaining, setRemaining] = useState(null);
+  const firedRef = useRef(false);
+
+  useEffect(() => {
+    firedRef.current = false;
+    if (!(timerSeconds > 0) || !startedAt) {
+      setRemaining(null);
+      return undefined;
+    }
+
+    const tick = () => {
+      const endAt = startedAt + timerSeconds * 1000;
+      const left = Math.ceil((endAt - Date.now()) / 1000);
+      setRemaining(left);
+      if (left <= 0 && !firedRef.current && !disabled) {
+        firedRef.current = true;
+        onExpired?.(task);
+      }
+    };
+
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [timerSeconds, startedAt, task?.assignment_id, disabled]);
+
+  if (!(timerSeconds > 0) || remaining == null) return null;
+
+  const expired = remaining <= 0;
+  return (
+    <div
+      className={`rounded-[14px] border px-3 py-2.5 flex items-center gap-2 ${
+        expired ? 'border-rose-300 bg-rose-50' : 'border-amber-300 bg-amber-50'
+      }`}
+    >
+      <Timer className={`w-4 h-4 ${expired ? 'text-rose-600' : 'text-amber-700'}`} />
+      <div className="min-w-0">
+        <p className={`text-[12px] font-extrabold ${expired ? 'text-rose-700' : 'text-amber-900'}`}>
+          Timer Paket {expired ? 'Habis' : formatTimer(remaining)}
+        </p>
+        <p className="text-[10.5px] text-slate-600">
+          {expired
+            ? 'Kuota jam paket habis — tugas diselesaikan otomatis.'
+            : 'Sisa waktu kuota jam dari paket bundle.'}
+        </p>
+      </div>
+    </div>
+  );
+}
 
 const TABS = [
   { key: 'Assigned', label: 'Perlu Konfirmasi' },
@@ -400,7 +463,7 @@ export default function MobileWorkerTasksPage() {
     }
   };
 
-  const handleComplete = async (assignmentId, transactionId = null) => {
+  const handleComplete = async (assignmentId, transactionId = null, { byBundleTimer = false } = {}) => {
     if (submitting) return;
     setSubmitting(true);
     setError('');
@@ -409,9 +472,15 @@ export default function MobileWorkerTasksPage() {
       if (transactionId) {
         await api.post(`/mobile-tasks/takehome/${transactionId}/complete`);
       } else {
-        await api.post(`/mobile-tasks/${assignmentId}/complete`);
+        await api.post(`/mobile-tasks/${assignmentId}/complete`, {
+          completed_by_bundle_timer: byBundleTimer || undefined,
+        });
       }
-      setSuccess('Pengerjaan selesai — Selesai.');
+      setSuccess(
+        byBundleTimer
+          ? 'Timer paket habis — pengerjaan otomatis selesai.'
+          : 'Pengerjaan selesai — Selesai.'
+      );
       setConfirmDialog(null);
       await loadTasks(tab);
     } catch (err) {
@@ -419,6 +488,11 @@ export default function MobileWorkerTasksPage() {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleBundleTimerExpired = async (task) => {
+    if (!task?.assignment_id || submitting) return;
+    await handleComplete(task.assignment_id, null, { byBundleTimer: true });
   };
 
   const handleStartTakehome = async (transactionId) => {
@@ -1161,6 +1235,11 @@ export default function MobileWorkerTasksPage() {
 
                   {task.assignment_status === 'On_Progress' && !isTakeHomeTask(task) && (
                     <div className="space-y-3">
+                      <BundleQuotaTimer
+                        task={task}
+                        disabled={submitting}
+                        onExpired={handleBundleTimerExpired}
+                      />
                       {(evidence.arrival_photo_path || photoPreviewMap[`arrival-${task.assignment_id}`]) && (
                         <div className="rounded-[14px] border border-slate-200 bg-[#FAFBFC] p-3 space-y-2">
                           <p className="text-[12px] font-extrabold text-slate-800">Foto Kedatangan</p>

@@ -48,6 +48,9 @@ export async function recalcPosTransactionMoney(connection, transactionId, { act
   let promoPart = 0;
 
   for (const row of items) {
+    // Bundle lines are prepaid quota — exclude from billable subtotal / promo / diskon.
+    if (String(row.item_source || 'regular') === 'bundle') continue;
+
     const isGc = isGeneralCleaningCategory(row.category_name);
     if (isGc && !pricingFinalizedAt) continue;
     if (
@@ -114,8 +117,15 @@ export async function recalcPosTransactionMoney(connection, transactionId, { act
   }
 
   const hasGcPending =
-    !pricingFinalizedAt && items.some((row) => isGeneralCleaningCategory(row.category_name));
-  const hasMeterPending = transactionHasMeterPending(items);
+    !pricingFinalizedAt &&
+    items.some(
+      (row) =>
+        isGeneralCleaningCategory(row.category_name) &&
+        String(row.item_source || 'regular') !== 'bundle'
+    );
+  const hasMeterPending = transactionHasMeterPending(
+    items.filter((row) => String(row.item_source || 'regular') !== 'bundle')
+  );
   const pricingFinalized = !hasGcPending && !hasMeterPending;
 
   const [workerRows] = await connection.query(

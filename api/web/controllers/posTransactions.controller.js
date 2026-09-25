@@ -35,6 +35,11 @@ import { resolveEffectiveBasePrice } from '../../shared/utils/posServicePrice.js
 import { computeTransactionPromoDiscount } from '../../shared/utils/posTransactionPromo.js';
 import { recalcPosTransactionMoney } from '../../shared/utils/posTransactionTotals.js';
 import {
+  activateCustomerBundleOnPaid,
+  assertBundleUsageLines,
+  deductBundleBalances,
+} from '../../shared/utils/posBundle.js';
+import {
   getBillableMultiplier,
   isMeterPricedService,
   resolveMeterFromDimensions,
@@ -696,7 +701,10 @@ export const getPosTransactions = async (req, res) => {
         v.payment_method_id,
         v.payment_status,
         v.payment_method_label,
-        v.payment_settled_date
+        v.payment_settled_date,
+        v.entry_kind,
+        v.customer_bundle_id,
+        v.has_bundle_items
       ${fromSql}
       ORDER BY v.created_at DESC, v.transaction_no DESC
       LIMIT ? OFFSET ?`;
@@ -726,6 +734,10 @@ export const getPosTransactions = async (req, res) => {
         payment_status: row.payment_status || null,
         payment_method_label: row.payment_method_label || null,
         payment_settled_date: formatPaymentSettledDateKey(row.payment_settled_date),
+        entry_kind: row.entry_kind || 'service',
+        customer_bundle_id:
+          row.customer_bundle_id == null ? null : Number(row.customer_bundle_id),
+        has_bundle_items: Boolean(Number(row.has_bundle_items || 0)),
       })),
       pagination: {
         page,
@@ -933,10 +945,55 @@ export const getPosTransactionDetail = async (req, res) => {
       });
     }
 
+    let customer_bundle = null;
+    if (transaction.customer_bundle_id) {
+      const [[cb]] = await cleanoxPool.query(
+        `SELECT *
+         FROM tr_customer_bundles
+         WHERE id = ?
+         LIMIT 1`,
+        [transaction.customer_bundle_id]
+      );
+      if (cb) {
+        const [balances] = await cleanoxPool.query(
+          `SELECT id, service_id, service_name_snapshot, quota_unit, initial_amount, remaining_amount
+           FROM tr_customer_bundle_balances
+           WHERE customer_bundle_id = ?
+           ORDER BY id ASC`,
+          [cb.id]
+        );
+        customer_bundle = {
+          id: cb.id,
+          bundle_id: cb.bundle_id,
+          bundle_name: cb.bundle_name,
+          bundle_price: Number(cb.bundle_price || 0),
+          bundle_coret_price:
+            cb.bundle_coret_price == null ? null : Number(cb.bundle_coret_price),
+          duration_months: Number(cb.duration_months || 0),
+          status: cb.status,
+          purchased_at: cb.purchased_at,
+          activated_at: cb.activated_at,
+          expires_at: cb.expires_at,
+          purchase_transaction_id: cb.purchase_transaction_id,
+          balances: balances.map((bal) => ({
+            id: bal.id,
+            service_id: bal.service_id,
+            service_name: bal.service_name_snapshot,
+            quota_unit: bal.quota_unit,
+            initial_amount: Number(bal.initial_amount || 0),
+            remaining_amount: Number(bal.remaining_amount || 0),
+          })),
+        };
+      }
+    }
+
     return res.json({
       transaction: {
         ...transaction,
         service_mode: transaction.service_mode || 'home_service',
+        entry_kind: transaction.entry_kind || 'service',
+        customer_bundle_id:
+          transaction.customer_bundle_id == null ? null : Number(transaction.customer_bundle_id),
         is_history_entry: Boolean(Number(transaction.is_history_entry || 0)),
         payment_method_id:
           transaction.payment_method_id == null ? null : Number(transaction.payment_method_id),
@@ -971,6 +1028,7 @@ export const getPosTransactionDetail = async (req, res) => {
         billing_hours:
           transaction.billing_hours == null ? null : Number(transaction.billing_hours),
       },
+      customer_bundle,
       items: enrichedItems.map((item) => ({
         ...item,
         qty: Number(item.qty || 0),
@@ -982,6 +1040,13 @@ export const getPosTransactionDetail = async (req, res) => {
         promo_discount_amount: Number(item.promo_discount_amount || 0),
         final_price_snapshot: Number(item.final_price_snapshot || 0),
         line_total: Number(item.line_total || 0),
+        item_source: item.item_source || 'regular',
+        customer_bundle_balance_id:
+          item.customer_bundle_balance_id == null
+            ? null
+            : Number(item.customer_bundle_balance_id),
+        bundle_quota_used:
+          item.bundle_quota_used == null ? null : Number(item.bundle_quota_used),
       })),
       assignments: enrichedAssignments,
       customer_photos,
@@ -1108,7 +1173,8 @@ export const updatePosTransactionPayment = async (req, res) => {
 
     const [[transaction]] = await connection.query(
       `SELECT id, status, payment_method_id, payment_status, payment_settled_date,
-              final_amount, epayment_amount, secondary_payment_method_id
+              final_amount, epayment_amount, secondary_payment_method_id,
+              entry_kind, customer_bundle_id
        FROM tr_transactions
        WHERE id = ?
        LIMIT 1
@@ -1178,6 +1244,29 @@ export const updatePosTransactionPayment = async (req, res) => {
         nextSettledDate = existing;
       } else {
         nextSettledDate = todayDateStringJakarta();
+      }
+    }
+
+    // Bundle purchase: block un-pay if already activated and any quota used.
+    if (
+      String(transaction.entry_kind || '') === 'bundle_purchase' &&
+      String(transaction.payment_status || '') === 'lunas' &&
+      nextPaymentStatus === 'belum_lunas' &&
+      transaction.customer_bundle_id
+    ) {
+      const [[usage]] = await connection.query(
+        `SELECT
+           COUNT(*) AS balance_rows,
+           SUM(CASE WHEN remaining_amount < initial_amount THEN 1 ELSE 0 END) AS used_rows
+         FROM tr_customer_bundle_balances
+         WHERE customer_bundle_id = ?`,
+        [transaction.customer_bundle_id]
+      );
+      if (Number(usage?.used_rows || 0) > 0) {
+        await connection.rollback();
+        return res.status(409).json({
+          message: 'Pembelian paket yang sudah dipakai tidak dapat dikembalikan ke belum lunas',
+        });
       }
     }
 
@@ -1269,6 +1358,32 @@ export const updatePosTransactionPayment = async (req, res) => {
       await recalcPosTransactionMoney(connection, transactionId, {
         actorId: req.user?.id || null,
       });
+    }
+
+    if (
+      String(transaction.entry_kind || '') === 'bundle_purchase' &&
+      nextPaymentStatus === 'lunas' &&
+      transaction.customer_bundle_id
+    ) {
+      await activateCustomerBundleOnPaid(connection, transaction.customer_bundle_id);
+    }
+
+    // If bundle purchase reverted to belum_lunas and never used, reset pending.
+    if (
+      String(transaction.entry_kind || '') === 'bundle_purchase' &&
+      nextPaymentStatus === 'belum_lunas' &&
+      transaction.customer_bundle_id
+    ) {
+      await connection.query(
+        `UPDATE tr_customer_bundles
+         SET status = 'pending_payment',
+             activated_at = NULL,
+             expires_at = NULL,
+             updated_at = NOW()
+         WHERE id = ?
+           AND status IN ('active', 'pending_payment')`,
+        [transaction.customer_bundle_id]
+      );
     }
 
     await syncTransactionStatusFromAssignments(connection, transactionId);
@@ -1746,6 +1861,15 @@ export const createPosTransaction = async (req, res) => {
   } = req.body;
 
   const isHistoryEntry = parseTruthyFlag(req.body?.is_history_entry);
+  const customerBundleIdRaw = req.body?.customer_bundle_id;
+  const customerBundleIdParsed = Number(customerBundleIdRaw);
+  const customerBundleId =
+    customerBundleIdRaw == null ||
+    customerBundleIdRaw === '' ||
+    !Number.isFinite(customerBundleIdParsed) ||
+    customerBundleIdParsed <= 0
+      ? null
+      : customerBundleIdParsed;
   const service_mode = String(serviceModeRaw || 'home_service').trim();
   const paymentMethodIdParsed = Number(paymentMethodIdRaw);
   const paymentMethodId =
@@ -1946,13 +2070,102 @@ export const createPosTransaction = async (req, res) => {
     }
 
     let subtotal = 0;
+    let hasAnyRegularBillable = false;
+    let bundleGcHoursTotal = 0;
+    const bundleUsageLines = [];
+
+    for (const rawItem of items) {
+      const itemSource = String(rawItem.item_source || 'regular').trim().toLowerCase() === 'bundle'
+        ? 'bundle'
+        : 'regular';
+      if (itemSource === 'bundle') {
+        const quotaUsed = Number(
+          rawItem.bundle_quota_used != null ? rawItem.bundle_quota_used : rawItem.qty || 1
+        );
+        bundleUsageLines.push({
+          service_id: Number(rawItem.service_id),
+          quota_used: quotaUsed,
+        });
+      }
+    }
+
+    if (bundleUsageLines.length > 0 && !customerBundleId) {
+      await connection.rollback();
+      return res.status(400).json({
+        message: 'customer_bundle_id wajib diisi jika ada item dari paket',
+      });
+    }
+
+    let bundleAssert = null;
+    if (bundleUsageLines.length > 0) {
+      try {
+        bundleAssert = await assertBundleUsageLines(connection, {
+          customerBundleId,
+          customerId: customer.id,
+          lines: bundleUsageLines,
+        });
+      } catch (bundleErr) {
+        await connection.rollback();
+        return res.status(400).json({ message: bundleErr.message || 'Kuota paket tidak valid' });
+      }
+    }
+
+    const balanceByService = new Map(
+      (bundleAssert?.balances || []).map((row) => [Number(row.service_id), row])
+    );
+
     const normalizedItems = items.map((item) => {
       const service = servicesMap.get(Number(item.service_id));
       if (!service) {
         throw new Error(`Service ${item.service_id} tidak ditemukan`);
       }
 
+      const itemSource =
+        String(item.item_source || 'regular').trim().toLowerCase() === 'bundle'
+          ? 'bundle'
+          : 'regular';
       const isGc = isGeneralCleaningCategory(service.category_name);
+      const balance = itemSource === 'bundle' ? balanceByService.get(Number(item.service_id)) : null;
+
+      if (itemSource === 'bundle') {
+        const quotaUsed = Number(
+          item.bundle_quota_used != null ? item.bundle_quota_used : item.qty || 1
+        );
+        if (!(quotaUsed > 0)) {
+          throw new Error(`Kuota pemakaian untuk ${service.name} tidak valid`);
+        }
+        if (isGc && balance && balance.quota_unit !== 'jam') {
+          throw new Error(`General Cleaning dari paket harus memakai kuota jam`);
+        }
+        if (!isGc && balance && balance.quota_unit === 'jam') {
+          throw new Error(`Layanan ${service.name} harus memakai kuota kali`);
+        }
+
+        const qty = isGc ? quotaUsed : Math.max(1, Number(item.qty || quotaUsed || 1));
+        if (isGc) bundleGcHoursTotal += quotaUsed;
+
+        return {
+          service_id: service.id,
+          qty,
+          meter: null,
+          unit_label: isGc
+            ? item.unit_label || service.satuan_name || 'jam'
+            : item.unit_label || service.satuan_name || null,
+          base_price_snapshot: toMoney(0),
+          original_price_snapshot: null,
+          promo_name_snapshot: null,
+          promo_type_snapshot: null,
+          promo_value_snapshot: null,
+          promo_discount_amount: toMoney(0),
+          final_price_snapshot: toMoney(0),
+          line_total: toMoney(0),
+          category_name: service.category_name || null,
+          item_source: 'bundle',
+          customer_bundle_balance_id: balance?.id || null,
+          bundle_quota_used: toMoney(quotaUsed),
+        };
+      }
+
       const qty = isGc ? 1 : Math.max(1, Number(item.qty || 1));
       const needsMeter =
         !isGc && isMeterPricedService({ satuanName: service.satuan_name });
@@ -1993,6 +2206,9 @@ export const createPosTransaction = async (req, res) => {
           final_price_snapshot: toMoney(finalPrice),
           line_total: toMoney(0),
           category_name: service.category_name || null,
+          item_source: 'regular',
+          customer_bundle_balance_id: null,
+          bundle_quota_used: null,
         };
       }
 
@@ -2012,11 +2228,15 @@ export const createPosTransaction = async (req, res) => {
           final_price_snapshot: toMoney(finalPrice),
           line_total: toMoney(0),
           category_name: service.category_name || null,
+          item_source: 'regular',
+          customer_bundle_balance_id: null,
+          bundle_quota_used: null,
         };
       }
 
       const lineTotal = finalPrice * billable;
       subtotal += basePrice * billable;
+      hasAnyRegularBillable = true;
 
       return {
         service_id: service.id,
@@ -2032,18 +2252,29 @@ export const createPosTransaction = async (req, res) => {
         final_price_snapshot: toMoney(finalPrice),
         line_total: toMoney(lineTotal),
         category_name: service.category_name || null,
+        item_source: 'regular',
+        customer_bundle_balance_id: null,
+        bundle_quota_used: null,
       };
     });
 
+    // Header promo/diskon only apply when there is regular billable subtotal.
+    if (!hasAnyRegularBillable && (headerPromo || headerDiscount)) {
+      // Keep snapshots null for all-bundle; ignore promo/discount ids.
+    }
+
+    const effectivePromo = hasAnyRegularBillable ? headerPromo : null;
+    const effectiveDiscount = hasAnyRegularBillable ? headerDiscount : null;
+
     const { discountAmount: promoPart } = computeTransactionPromoDiscount({
       subtotal,
-      promoType: headerPromo?.promo_type || null,
-      promoValue: headerPromo?.promo_value ?? null,
+      promoType: effectivePromo?.promo_type || null,
+      promoValue: effectivePromo?.promo_value ?? null,
     });
     const { discountAmount: diskonPart } = computeTransactionPromoDiscount({
       subtotal,
-      promoType: headerDiscount?.discount_type || null,
-      promoValue: headerDiscount?.discount_value ?? null,
+      promoType: effectiveDiscount?.discount_type || null,
+      promoValue: effectiveDiscount?.discount_value ?? null,
     });
     const discount = toMoney(Math.min(subtotal, Math.max(0, promoPart) + Math.max(0, diskonPart)));
     let transportFee = 0;
@@ -2058,13 +2289,20 @@ export const createPosTransaction = async (req, res) => {
       }
     }
     const isCollaborationPayment = isCollaborationMethod(selectedPaymentMethod);
-    const finalAmount = isCollaborationPayment
-      ? 0
-      : toMoney(subtotal - discount + transportFee);
-    const initialPaymentStatus = isCollaborationPayment ? 'lunas' : 'belum_lunas';
-    const initialPaymentSettledDate = isCollaborationPayment ? todayDateStringJakarta() : null;
+    const isAllBundle = bundleUsageLines.length > 0 && !hasAnyRegularBillable && transportFee === 0;
+    const finalAmount =
+      isCollaborationPayment || isAllBundle
+        ? 0
+        : toMoney(subtotal - discount + transportFee);
+    const initialPaymentStatus =
+      isCollaborationPayment || isAllBundle ? 'lunas' : 'belum_lunas';
+    const initialPaymentSettledDate =
+      isCollaborationPayment || isAllBundle ? todayDateStringJakarta() : null;
     const transactionNo = buildTransactionNo();
     const resolvedServiceDate = isHistoryEntry ? historyStarted.mysql : service_date;
+    const hasBundleGc = bundleGcHoursTotal > 0;
+    const billingHoursAtCreate = hasBundleGc ? toMoney(bundleGcHoursTotal) : null;
+    const pricingFinalizedAtCreate = hasBundleGc ? new Date() : null;
 
     let assignedWorkers = [];
     if (uniqueWorkerIds.length > 0) {
@@ -2135,7 +2373,7 @@ export const createPosTransaction = async (req, res) => {
       totalPeople: totalPeopleCount,
       notes: notes || null,
       finalAmount,
-      pricingFinalized: false,
+      pricingFinalized: Boolean(pricingFinalizedAtCreate),
       workers: assignedWorkers.map((worker) => ({
         full_name: worker.full_name,
         phone_number: worker.phone_number,
@@ -2150,7 +2388,7 @@ export const createPosTransaction = async (req, res) => {
       items: messageItems,
       totalPeople: totalPeopleCount,
       finalAmount,
-      pricingFinalized: false,
+      pricingFinalized: Boolean(pricingFinalizedAtCreate),
     });
 
     const initialStatus = isHistoryEntry ? 'Completed' : 'Scheduled';
@@ -2162,8 +2400,9 @@ export const createPosTransaction = async (req, res) => {
          discount_id, discount_name_snapshot, discount_type_snapshot, discount_value_snapshot,
          final_amount, billing_hours, pricing_finalized_at, notes,
          group_message_template, customer_message_template, service_mode, is_history_entry,
+         entry_kind, customer_bundle_id,
          payment_method_id, payment_status, payment_settled_date, status, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'service', ?, ?, ?, ?, ?, ?, ?)`,
       [
         transactionNo,
         customer.id,
@@ -2175,20 +2414,23 @@ export const createPosTransaction = async (req, res) => {
         toMoney(subtotal),
         toMoney(discount),
         transportFee,
-        headerPromo ? Number(headerPromo.id) : null,
-        headerPromo?.name || null,
-        headerPromo?.promo_type || null,
-        headerPromo ? toMoney(headerPromo.promo_value) : null,
-        headerDiscount ? Number(headerDiscount.id) : null,
-        headerDiscount?.name || null,
-        headerDiscount?.discount_type || null,
-        headerDiscount ? toMoney(headerDiscount.discount_value) : null,
+        effectivePromo ? Number(effectivePromo.id) : null,
+        effectivePromo?.name || null,
+        effectivePromo?.promo_type || null,
+        effectivePromo ? toMoney(effectivePromo.promo_value) : null,
+        effectiveDiscount ? Number(effectiveDiscount.id) : null,
+        effectiveDiscount?.name || null,
+        effectiveDiscount?.discount_type || null,
+        effectiveDiscount ? toMoney(effectiveDiscount.discount_value) : null,
         toMoney(finalAmount),
+        billingHoursAtCreate,
+        pricingFinalizedAtCreate,
         notes || null,
         groupMessageTemplate,
         customerMessageTemplate,
         service_mode,
         isHistoryEntry ? 1 : 0,
+        customerBundleId,
         paymentMethodId,
         initialPaymentStatus,
         initialPaymentSettledDate,
@@ -2212,8 +2454,8 @@ export const createPosTransaction = async (req, res) => {
         `INSERT INTO tr_transaction_items
           (transaction_id, service_id, qty, meter, unit_label, base_price_snapshot, original_price_snapshot,
            promo_name_snapshot, promo_type_snapshot, promo_value_snapshot, promo_discount_amount,
-           final_price_snapshot, line_total)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           final_price_snapshot, line_total, item_source, customer_bundle_balance_id, bundle_quota_used)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           transactionId,
           item.service_id,
@@ -2228,8 +2470,15 @@ export const createPosTransaction = async (req, res) => {
           item.promo_discount_amount,
           item.final_price_snapshot,
           item.line_total,
+          item.item_source || 'regular',
+          item.customer_bundle_balance_id || null,
+          item.bundle_quota_used == null ? null : item.bundle_quota_used,
         ]
       );
+    }
+
+    if (bundleAssert?.deductions?.length) {
+      await deductBundleBalances(connection, bundleAssert.deductions);
     }
 
     for (const worker of assignedWorkers) {

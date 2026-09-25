@@ -716,10 +716,12 @@ export default function PosTransactionDetailPage() {
     payment_proofs: paymentProofs = [],
     takehome_progress: takehomeProgress,
     legacy_evidence: legacyEvidence = null,
+    customer_bundle: customerBundle = null,
   } = detail;
   const isTakeHome = String(transaction.service_mode || 'home_service') === 'take_home';
   const isHistoryEntry = Boolean(transaction.is_history_entry);
-  const canEditOffers = transaction.status !== 'Cancelled';
+  const isBundlePurchase = String(transaction.entry_kind || '') === 'bundle_purchase';
+  const canEditOffers = transaction.status !== 'Cancelled' && !isBundlePurchase;
   const availablePromos = (() => {
     const map = new Map();
     for (const item of items || []) {
@@ -732,6 +734,7 @@ export default function PosTransactionDetailPage() {
   })();
   const canMutateItems =
     !isHistoryEntry &&
+    !isBundlePurchase &&
     transaction.status !== 'Cancelled' &&
     transaction.payment_status !== 'lunas';
   const historyStartedAt = (assignments || [])
@@ -1307,6 +1310,30 @@ export default function PosTransactionDetailPage() {
             <div>
               <p className="text-xs uppercase tracking-wide text-slate-400">Status</p>
               <p className="mt-1 font-semibold text-slate-900">{transaction.status}</p>
+              {isBundlePurchase ? (
+                <p className="mt-1 text-xs font-semibold text-emerald-700">Pembelian Paket Bundle</p>
+              ) : null}
+              {customerBundle ? (
+                <div className="mt-2 rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-[12px] text-emerald-900">
+                  <p className="font-bold">{customerBundle.bundle_name}</p>
+                  <p>
+                    Status {customerBundle.status}
+                    {customerBundle.expires_at
+                      ? ` · expired ${formatDateTime(customerBundle.expires_at)}`
+                      : ''}
+                  </p>
+                  {(customerBundle.balances || []).length > 0 ? (
+                    <ul className="mt-1 space-y-0.5">
+                      {customerBundle.balances.map((bal) => (
+                        <li key={bal.id}>
+                          {bal.service_name}: {bal.remaining_amount}/{bal.initial_amount}{' '}
+                          {bal.quota_unit}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
             <div className="sm:col-span-2 space-y-3">
               <div className="grid gap-3 sm:grid-cols-2">

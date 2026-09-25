@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Search,
   Plus,
@@ -202,6 +202,8 @@ export default function PosTransactionCreatePage() {
     qty: 1,
     meter_length: '',
     meter_width: '',
+    item_source: 'regular',
+    bundle_quota_used: '1',
   });
   const [itemModalError, setItemModalError] = useState('');
   const [deleteItemIndex, setDeleteItemIndex] = useState(null);
@@ -209,6 +211,12 @@ export default function PosTransactionCreatePage() {
   const [selectedCategoryId, setSelectedCategoryId] = useState('all');
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleTime, setScheduleTime] = useState('');
+  const [activeBundles, setActiveBundles] = useState([]);
+  const [selectedCustomerBundleId, setSelectedCustomerBundleId] = useState('');
+  const [searchParams] = useSearchParams();
+  const prefillCustomerId = searchParams.get('customer_id');
+  const prefillBundleId = searchParams.get('customer_bundle_id');
+  const [bundlePrefillTried, setBundlePrefillTried] = useState(false);
 
   const hasSchedule = Boolean(form.service_date);
   const isTakeHome = form.service_mode === 'take_home';
@@ -265,6 +273,12 @@ export default function PosTransactionCreatePage() {
     setSelectedCustomer(customer);
     setPendingCustomer(null);
     setCustomerModalOpen(false);
+    setSelectedCustomerBundleId('');
+    setActiveBundles([]);
+    api
+      .get(`/pos-bundles/customers/${customer.id}/active`)
+      .then(({ data }) => setActiveBundles(data.bundles || []))
+      .catch(() => setActiveBundles([]));
   };
 
   const handleSelectCustomer = async (row) => {
@@ -350,6 +364,72 @@ export default function PosTransactionCreatePage() {
     loadData();
   }, []);
 
+  // Prefill from Saldo Paket hub: ?customer_id=&customer_bundle_id=
+  useEffect(() => {
+    if (loading) return undefined;
+    if (!prefillCustomerId) return undefined;
+    if (selectedCustomer?.id && Number(selectedCustomer.id) === Number(prefillCustomerId)) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const { data } = await api.get(`/pos-customers/${prefillCustomerId}`);
+        if (cancelled) return;
+        const customer = data.customer;
+        if (!customer?.id) {
+          setError('Customer dari link tidak valid');
+          return;
+        }
+        if (isBlankAddress(customer.address)) {
+          setPendingCustomer(customer);
+          setAddressFillDraft('');
+          setAddressFillError('');
+          setAddressFillOpen(true);
+          return;
+        }
+        setSelectedCustomer(customer);
+        setSelectedCustomerBundleId('');
+        const bundleRes = await api.get(`/pos-bundles/customers/${customer.id}/active`);
+        if (cancelled) return;
+        const bundles = bundleRes.data.bundles || [];
+        setActiveBundles(bundles);
+        if (prefillBundleId) {
+          const found = bundles.find((row) => Number(row.id) === Number(prefillBundleId));
+          if (found) {
+            setSelectedCustomerBundleId(String(found.id));
+          } else {
+            setError('Paket tidak aktif / tidak punya sisa kuota');
+          }
+          setBundlePrefillTried(true);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err.response?.data?.message || 'Gagal memuat customer dari link Saldo Paket');
+        }
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, prefillCustomerId]);
+
+  useEffect(() => {
+    if (!prefillBundleId || bundlePrefillTried) return;
+    if (!selectedCustomer?.id) return;
+    if (!activeBundles.length) return;
+    const found = activeBundles.find((row) => Number(row.id) === Number(prefillBundleId));
+    if (found) {
+      setSelectedCustomerBundleId(String(found.id));
+    } else {
+      setError('Paket tidak aktif / tidak punya sisa kuota');
+    }
+    setBundlePrefillTried(true);
+  }, [prefillBundleId, activeBundles, selectedCustomer, bundlePrefillTried]);
+
   useEffect(() => {
     if (!form.service_date) return undefined;
     let cancelled = false;
@@ -394,6 +474,7 @@ export default function PosTransactionCreatePage() {
       (state, item) => {
         const service = services.find((row) => Number(row.id) === Number(item.service_id));
         if (!service) return state;
+        if (item.item_source === 'bundle') return state;
 
         const isGc = isGeneralCleaningCategory(service.category_name);
         const qty = Math.max(1, Number(item.qty || 1));
@@ -661,6 +742,8 @@ export default function PosTransactionCreatePage() {
     qty: 1,
     meter_length: '',
     meter_width: '',
+    item_source: 'regular',
+    bundle_quota_used: '1',
   });
 
   const openAddItemModal = () => {
@@ -692,6 +775,8 @@ export default function PosTransactionCreatePage() {
           : item.meter != null && item.meter !== ''
             ? '1'
             : '',
+      item_source: item.item_source === 'bundle' ? 'bundle' : 'regular',
+      bundle_quota_used: String(item.bundle_quota_used ?? item.qty ?? '1'),
     });
     setItemModalError('');
     resetServicePickerFilters(categoryId);
@@ -739,26 +824,42 @@ export default function PosTransactionCreatePage() {
     // Meter ukuran opsional — bisa diisi nanti di detail
 
     const qtyValue = Math.max(1, Number(itemDraft.qty || 1));
+    const itemSource = itemDraft.item_source === 'bundle' ? 'bundle' : 'regular';
+    const quotaUsed = Number(itemDraft.bundle_quota_used || qtyValue || 1);
+    if (itemSource === 'bundle') {
+      if (!selectedCustomerBundleId) {
+        setItemModalError('Pilih paket customer terlebih dahulu');
+        return;
+      }
+      if (!(quotaUsed > 0)) {
+        setItemModalError('Kuota paket harus lebih dari 0');
+        return;
+      }
+    }
     const nextItemsPreview =
       editingItemIndex === null
         ? [
             ...form.items,
             {
               service_id: itemDraft.service_id,
-              qty: qtyValue,
+              qty: itemSource === 'bundle' ? quotaUsed : qtyValue,
               meter: needsMeter ? meterValue : null,
               meter_length: needsMeter && meterValue != null ? lengthValue : null,
               meter_width: needsMeter && meterValue != null ? widthValue : null,
+              item_source: itemSource,
+              bundle_quota_used: itemSource === 'bundle' ? quotaUsed : null,
             },
           ]
         : form.items.map((item, idx) =>
             idx === editingItemIndex
               ? {
                   service_id: itemDraft.service_id,
-                  qty: qtyValue,
+                  qty: itemSource === 'bundle' ? quotaUsed : qtyValue,
                   meter: needsMeter ? meterValue : null,
                   meter_length: needsMeter && meterValue != null ? lengthValue : null,
                   meter_width: needsMeter && meterValue != null ? widthValue : null,
+                  item_source: itemSource,
+                  bundle_quota_used: itemSource === 'bundle' ? quotaUsed : null,
                 }
               : item
           );
@@ -771,10 +872,12 @@ export default function PosTransactionCreatePage() {
     const isGc = isGeneralCleaningCategory(service?.category_name);
     const payload = {
       service_id: itemDraft.service_id,
-      qty: isGc ? 1 : qtyValue,
+      qty: itemSource === 'bundle' ? quotaUsed : isGc ? 1 : qtyValue,
       meter: isGc || !needsMeter ? null : meterValue,
       meter_length: isGc || !needsMeter || meterValue == null ? null : lengthValue,
       meter_width: isGc || !needsMeter || meterValue == null ? null : widthValue,
+      item_source: itemSource,
+      bundle_quota_used: itemSource === 'bundle' ? quotaUsed : null,
     };
 
     setForm((prev) => {
@@ -1041,10 +1144,18 @@ export default function PosTransactionCreatePage() {
         transport_fee:
           form.service_mode === 'home_service' ? Number(form.transport_fee || 0) || 0 : 0,
         worker_ids: form.service_mode === 'take_home' ? [] : form.worker_ids,
+        customer_bundle_id: selectedCustomerBundleId
+          ? Number(selectedCustomerBundleId)
+          : null,
         items: form.items.map((item) => ({
           service_id: Number(item.service_id),
           qty: Number(item.qty || 1),
           meter: item.meter == null || item.meter === '' ? null : Number(item.meter),
+          item_source: item.item_source === 'bundle' ? 'bundle' : 'regular',
+          bundle_quota_used:
+            item.item_source === 'bundle'
+              ? Number(item.bundle_quota_used ?? item.qty ?? 1)
+              : undefined,
         })),
       };
       const { data } = await api.post('/pos-transactions', payload);
@@ -1459,6 +1570,46 @@ export default function PosTransactionCreatePage() {
             <>
               <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px] xl:items-start">
                 <div className="min-w-0 space-y-5">
+              {activeBundles.length > 0 && (
+                <section className={`${sectionCardClass} transition duration-150`}>
+                  <SectionHeader
+                    step="Paket"
+                    icon={Package}
+                    title="Pakai dari Paket Bundle"
+                    hint="Pilih paket milik customer jika ada item yang memakai kuota"
+                  />
+                  <select
+                    className="mt-3 w-full rounded-[12px] border border-slate-200 bg-slate-50 px-3 py-2.5 text-[13px]"
+                    value={selectedCustomerBundleId}
+                    onChange={(e) => setSelectedCustomerBundleId(e.target.value)}
+                  >
+                    <option value="">Tanpa paket (semua regular)</option>
+                    {activeBundles.map((bundle) => (
+                      <option key={bundle.id} value={bundle.id}>
+                        {bundle.bundle_name} · expired{' '}
+                        {bundle.expires_at
+                          ? new Date(bundle.expires_at).toLocaleDateString('id-ID')
+                          : '-'}
+                      </option>
+                    ))}
+                  </select>
+                  {selectedCustomerBundleId
+                    ? (
+                      <ul className="mt-3 space-y-1 text-[12px] text-slate-600">
+                        {(
+                          activeBundles.find(
+                            (row) => Number(row.id) === Number(selectedCustomerBundleId)
+                          )?.balances || []
+                        ).map((bal) => (
+                          <li key={bal.id}>
+                            • {bal.service_name}: sisa {bal.remaining_amount} {bal.quota_unit}
+                          </li>
+                        ))}
+                      </ul>
+                    )
+                    : null}
+                </section>
+              )}
               <section className={`${sectionCardClass} transition duration-150`}>
                 <SectionHeader
                   step="Langkah 4"
@@ -2268,6 +2419,40 @@ export default function PosTransactionCreatePage() {
               onSubmit={handleSaveItemModal}
               className="shrink-0 space-y-3 border-t border-slate-100 bg-slate-50/80 px-5 py-4"
             >
+              {selectedCustomerBundleId ? (
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="mb-1 block text-[11px] font-semibold text-slate-600">
+                      Sumber
+                    </label>
+                    <select
+                      className="w-full rounded-[12px] border border-slate-200 bg-white px-3 py-2 text-[13px]"
+                      value={itemDraft.item_source || 'regular'}
+                      onChange={(e) => handleItemDraftChange('item_source', e.target.value)}
+                    >
+                      <option value="regular">Regular (bayar)</option>
+                      <option value="bundle">Dari paket</option>
+                    </select>
+                  </div>
+                  {itemDraft.item_source === 'bundle' ? (
+                    <div>
+                      <label className="mb-1 block text-[11px] font-semibold text-slate-600">
+                        Kuota dipakai
+                      </label>
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        className="w-full rounded-[12px] border border-slate-200 bg-white px-3 py-2 text-[13px]"
+                        value={itemDraft.bundle_quota_used}
+                        onChange={(e) =>
+                          handleItemDraftChange('bundle_quota_used', e.target.value)
+                        }
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               {(() => {
                 const draftService = services.find(
                   (row) => Number(row.id) === Number(itemDraft.service_id)

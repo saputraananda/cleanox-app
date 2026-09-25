@@ -15,6 +15,9 @@ import {
   BadgePercent,
   CircleDollarSign,
   Handshake,
+  Package,
+  ShoppingBag,
+  Wallet,
   X,
 } from 'lucide-react';
 import cleanoxLogo from '../../assets/cleanox.png';
@@ -46,6 +49,9 @@ const NAV_TREE = [
       { label: 'Prices', icon: Tag, to: '/cleanox-only/prices' },
       { label: 'Promo', icon: BadgePercent, to: '/cleanox-only/promos' },
       { label: 'Diskon', icon: CircleDollarSign, to: '/cleanox-only/discounts' },
+      { label: 'Paket Bundle', icon: Package, to: '/cleanox-only/bundles' },
+      { label: 'Beli Paket Bundle', icon: ShoppingBag, to: '/cleanox-only/bundles/purchase' },
+      { label: 'Saldo Paket', icon: Wallet, to: '/cleanox-only/bundles/saldo' },
     ],
   },
   {
