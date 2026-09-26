@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import { authenticate } from '../../shared/middleware/auth.middleware.js';
-import { getWaschenReferralLeaderboard } from '../controllers/posWaschenReferral.controller.js';
+import {
+  getWaschenReferralLeaderboard,
+  exportWaschenReferralExcel,
+} from '../controllers/posWaschenReferral.controller.js';
 
 const router = Router();
 
@@ -24,5 +27,6 @@ router.use(authenticate);
 router.use(authorizePosAccess);
 
 router.get('/leaderboard', getWaschenReferralLeaderboard);
+router.get('/export', exportWaschenReferralExcel);
 
 export default router;
