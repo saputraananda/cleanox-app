@@ -20,6 +20,26 @@ export function getMethodsInGroup(paymentMethods = [], group) {
   return paymentMethods.filter((m) => String(m.method_group || '') === g);
 }
 
+export function getSubGroups(methodsInGroup = []) {
+  const seen = new Set();
+  const subGroups = [];
+  for (const row of methodsInGroup) {
+    const subGroup = String(row?.sub_group || '').trim();
+    if (!subGroup || seen.has(subGroup)) continue;
+    seen.add(subGroup);
+    subGroups.push(subGroup);
+  }
+  return subGroups;
+}
+
+export function getMethodsInSubGroup(paymentMethods = [], group, subGroup) {
+  const g = String(group || '');
+  const s = String(subGroup || '');
+  return paymentMethods.filter(
+    (m) => String(m.method_group || '') === g && String(m.sub_group || '').trim() === s
+  );
+}
+
 /** Groups with more than one active method need a sub-select (e.g. EDC). */
 export function groupNeedsMethodSelect(paymentMethods = [], group) {
   return getMethodsInGroup(paymentMethods, group).length > 1;

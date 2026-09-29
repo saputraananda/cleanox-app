@@ -3,8 +3,7 @@ export const EPAYMENT_METHOD_GROUP = 'E-Payment';
 
 export const PAYMENT_METHOD_GROUP_ORDER = [
   'Tunai',
-  'BCA',
-  'BSI',
+  'Transfer Bank',
   'EDC',
   'QRIS',
   'E-Payment',

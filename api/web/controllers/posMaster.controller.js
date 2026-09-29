@@ -572,6 +572,7 @@ export const listPaymentMethods = async (req, res) => {
       SELECT
         id,
         \`group\` AS method_group,
+        sub_group,
         code,
         name,
         label,

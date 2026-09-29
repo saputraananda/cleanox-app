@@ -16,6 +16,7 @@ export default function PosCustomersPage() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [loadingDetail, setLoadingDetail] = useState(false);
   const [error, setError] = useState('');
   const [panelOpen, setPanelOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -81,10 +82,22 @@ export default function PosCustomersPage() {
     setPanelOpen(true);
   };
 
-  const openEdit = (row) => {
+  const openEdit = async (row) => {
     setEditingId(row.id);
-    setForm(customerToForm(row));
+    setError('');
+    setForm(emptyCustomerForm);
+    setLoadingDetail(true);
     setPanelOpen(true);
+    try {
+      const { data } = await api.get(`/pos-customers/${row.id}`);
+      setForm(customerToForm(data.customer));
+    } catch (err) {
+      setPanelOpen(false);
+      setEditingId(null);
+      setError(err.response?.data?.message || 'Gagal memuat detail customer');
+    } finally {
+      setLoadingDetail(false);
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -306,7 +319,11 @@ export default function PosCustomersPage() {
               )}
 
               <form onSubmit={handleSubmit} className="space-y-4">
-                <CustomerFormFields form={form} setForm={setForm} />
+                {loadingDetail ? (
+                  <div className="py-10 text-center text-[13px] text-slate-500">Memuat data customer...</div>
+                ) : (
+                  <CustomerFormFields form={form} setForm={setForm} />
+                )}
                 <div className="flex justify-end gap-2 pt-2">
                   <button
                     type="button"
@@ -318,7 +335,7 @@ export default function PosCustomersPage() {
                   </button>
                   <button
                     type="submit"
-                    disabled={saving}
+                    disabled={saving || loadingDetail}
                     className="inline-flex items-center gap-2 rounded-[12px] px-4 py-2.5 text-[13px] font-bold text-white disabled:opacity-60"
                     style={{ background: 'linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%)' }}
                   >

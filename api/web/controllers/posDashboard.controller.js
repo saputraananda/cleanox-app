@@ -207,7 +207,17 @@ export const getDashboardData = async (req, res) => {
         pm.label AS payment_method_label,
         pm.\`group\` AS payment_method_group,
         GROUP_CONCAT(DISTINCT s.name ORDER BY s.name SEPARATOR ', ') AS daftar_item,
-        COUNT(DISTINCT a.id) AS total_workers
+        COUNT(DISTINCT a.id) AS total_workers,
+        (
+          EXISTS (
+            SELECT 1 FROM tr_tracking tk
+            WHERE tk.transaction_id = t.id AND tk.title = 'Jadwal dipindah'
+          )
+          OR EXISTS (
+            SELECT 1 FROM tr_transaction_schedule_changes sc
+            WHERE sc.transaction_id = t.id AND sc.action_type = 'reschedule'
+          )
+        ) AS is_rescheduled
        FROM tr_transactions t
        LEFT JOIN mst_payment_method pm ON pm.id = t.payment_method_id
        LEFT JOIN tr_transaction_items i ON i.transaction_id = t.id
@@ -246,7 +256,7 @@ export const getDashboardData = async (req, res) => {
            AND DATE(t.service_date) BETWEEN ? AND ?
          GROUP BY COALESCE(pm.\`group\`, 'Belum diisi')
        ) AS payment_method_agg
-       ORDER BY FIELD(method_group, 'Tunai', 'BCA', 'BSI', 'EDC', 'QRIS', 'Collaboration', 'Belum diisi'), method_group`,
+       ORDER BY FIELD(method_group, 'Tunai', 'Transfer Bank', 'EDC', 'QRIS', 'E-Payment', 'Collaboration', 'Belum diisi'), method_group`,
       [date_start, date_end]
     );
 
@@ -348,6 +358,7 @@ export const getDashboardData = async (req, res) => {
         payment_status: row.payment_status || 'belum_lunas',
         payment_method_label: row.payment_method_label || null,
         payment_method_group: row.payment_method_group || null,
+        is_rescheduled: Boolean(Number(row.is_rescheduled || 0)),
       })),
     });
   } catch (err) {

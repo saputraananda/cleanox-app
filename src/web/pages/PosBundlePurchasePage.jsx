@@ -12,6 +12,7 @@ import {
 import api from '@shared/utils/api.js';
 import BodyPortal from '@web/components/BodyPortal.jsx';
 import TablePagination, { PAGE_SIZE_OPTIONS } from '@web/components/TablePagination.jsx';
+import PaymentMethodPicker from '@web/components/PaymentMethodPicker.jsx';
 
 const inputClass =
   'w-full rounded-[12px] border border-slate-200 bg-slate-50 px-3 py-2.5 text-[13px] text-slate-800 transition duration-150 focus:bg-white focus:border-blue-400 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,.12)]';
@@ -132,7 +133,7 @@ export default function PosBundlePurchasePage() {
       try {
         const [bundleRes, payRes] = await Promise.all([
           api.get('/pos-bundles', { params: { is_active: 1 } }),
-          api.get('/pos-master/payment-methods'),
+          api.get('/pos-master/payment-methods', { params: { is_active: 1 } }),
         ]);
         setBundles(bundleRes.data.bundles || []);
         setPaymentMethods(payRes.data.data || payRes.data.payment_methods || []);
@@ -509,21 +510,15 @@ export default function PosBundlePurchasePage() {
                       hint="Saldo paket baru aktif setelah status lunas"
                     />
                     <div className="grid gap-3 sm:grid-cols-2">
-                      <label className="block space-y-1.5">
+                      <div className="block space-y-1.5 sm:col-span-2">
                         <span className={labelEyebrowClass}>Metode bayar</span>
-                        <select
-                          className={inputClass}
+                        <PaymentMethodPicker
+                          paymentMethods={paymentMethods}
                           value={paymentMethodId}
-                          onChange={(e) => setPaymentMethodId(e.target.value)}
-                        >
-                          <option value="">Belum dipilih</option>
-                          {paymentMethods.map((row) => (
-                            <option key={row.id} value={row.id}>
-                              {row.label || row.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+                          onChange={(methodId) => setPaymentMethodId(methodId)}
+                          allowClear
+                        />
+                      </div>
                       <label className="block space-y-1.5">
                         <span className={labelEyebrowClass}>Status bayar</span>
                         <div className="grid grid-cols-2 gap-2">

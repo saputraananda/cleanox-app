@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   Sparkles,
   Calendar,
@@ -81,6 +81,55 @@ const STATUS_STYLE = {
   Cancelled: 'bg-rose-50 text-rose-700 border-rose-100',
 };
 
+const ORDER_STATUS_FILTERS = [
+  { value: 'all', label: 'Semua status order' },
+  { value: 'schedule', label: 'Schedule' },
+  { value: 'in_progress', label: 'In Progress' },
+  { value: 'reschedule', label: 'Reschedule' },
+  { value: 'completed', label: 'Complete' },
+  { value: 'cancelled', label: 'Cancel/Void' },
+];
+
+const PAYMENT_STATUS_FILTERS = [
+  { value: 'all', label: 'Semua status bayar' },
+  { value: 'lunas', label: 'Lunas' },
+  { value: 'belum_lunas', label: 'Belum Lunas' },
+];
+
+const SCHEDULE_STATUSES = ['Scheduled', 'Assigned', 'Waiting_Confirmation', 'Draft'];
+
+function matchesOrderStatusFilter(row, filter) {
+  switch (filter) {
+    case 'all':
+      return true;
+    case 'schedule':
+      return SCHEDULE_STATUSES.includes(row.status);
+    case 'in_progress':
+      return row.status === 'In_Progress';
+    case 'completed':
+      return row.status === 'Completed';
+    case 'cancelled':
+      return row.status === 'Cancelled';
+    case 'reschedule':
+      return Boolean(row.is_rescheduled);
+    default:
+      return true;
+  }
+}
+
+function matchesPaymentStatusFilter(row, filter) {
+  switch (filter) {
+    case 'all':
+      return true;
+    case 'lunas':
+      return row.payment_status === 'lunas';
+    case 'belum_lunas':
+      return row.payment_status !== 'lunas';
+    default:
+      return true;
+  }
+}
+
 const PIE_COLORS = ['#6366f1', '#8b5cf6', '#a78bfa', '#c4b5fd', '#818cf8', '#4f46e5'];
 
 const QUICK_LINKS = [
@@ -141,17 +190,35 @@ const emptyDashboard = {
 };
 
 export default function CleanoxOnlyDashboardPage() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const restoreState = location.state?.restore || null;
+  const restoringPageRef = useRef(Boolean(restoreState));
+  const pendingScrollRef = useRef(Boolean(restoreState));
+  const detailSectionRef = useRef(null);
   const [periods, setPeriods] = useState([]);
-  const [filterType, setFilterType] = useState('bulan');
-  const [selectedPeriod, setSelectedPeriod] = useState({ yr: '', mo: '' });
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-  const [dateRange, setDateRange] = useState(() => getDefaultCutoffDateRange());
+  const [filterType, setFilterType] = useState(restoreState?.filterType ?? 'bulan');
+  const [selectedPeriod, setSelectedPeriod] = useState(
+    restoreState?.selectedPeriod ?? { yr: '', mo: '' }
+  );
+  const [selectedYear, setSelectedYear] = useState(
+    restoreState?.selectedYear ?? new Date().getFullYear()
+  );
+  const [dateRange, setDateRange] = useState(
+    () => restoreState?.dateRange ?? getDefaultCutoffDateRange()
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [dashboardData, setDashboardData] = useState(emptyDashboard);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState(restoreState?.searchTerm ?? '');
+  const [orderStatusFilter, setOrderStatusFilter] = useState(
+    restoreState?.orderStatusFilter ?? 'all'
+  );
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState(
+    restoreState?.paymentStatusFilter ?? 'all'
+  );
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [pageSize, setPageSize] = useState(restoreState?.pageSize ?? DEFAULT_PAGE_SIZE);
 
   const yearsList = useMemo(() => {
     const list = Array.from(new Set(periods.map((p) => p.yr))).filter(Boolean).sort((a, b) => b - a);
@@ -168,6 +235,7 @@ export default function CleanoxOnlyDashboardPage() {
       .then(({ data }) => {
         const list = data.periods || [];
         setPeriods(list);
+        if (restoreState) return;
         if (list.length > 0) {
           const active = getActiveCutoffPeriod();
           const match = list.find(
@@ -206,13 +274,25 @@ export default function CleanoxOnlyDashboardPage() {
     api.get(url)
       .then(({ data }) => {
         setDashboardData(data);
-        setCurrentPage(1);
+        if (restoringPageRef.current) {
+          setCurrentPage(restoreState?.currentPage || 1);
+          restoringPageRef.current = false;
+        } else {
+          setCurrentPage(1);
+        }
       })
       .catch((err) => {
         setError(err.response?.data?.message || 'Gagal memuat data dashboard revenue');
       })
       .finally(() => setLoading(false));
   }, [filterType, selectedPeriod, selectedYear, dateRange]);
+
+  useEffect(() => {
+    if (loading || !pendingScrollRef.current) return;
+    pendingScrollRef.current = false;
+    detailSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    navigate(location.pathname, { replace: true, state: null });
+  }, [loading]);
 
   const handlePeriodChange = (e) => {
     const [yr, mo] = e.target.value.split('-').map(Number);
@@ -299,7 +379,11 @@ export default function CleanoxOnlyDashboardPage() {
   }, [dashboardData.paymentStatusBreakdown]);
 
   const filteredDetails = useMemo(() => {
-    const details = dashboardData.details || [];
+    const details = (dashboardData.details || []).filter(
+      (row) =>
+        matchesOrderStatusFilter(row, orderStatusFilter) &&
+        matchesPaymentStatusFilter(row, paymentStatusFilter)
+    );
     if (!searchTerm.trim()) return details;
     const term = searchTerm.toLowerCase();
     return details.filter((row) =>
@@ -313,7 +397,7 @@ export default function CleanoxOnlyDashboardPage() {
       (row.payment_status === 'lunas' && 'lunas'.includes(term)) ||
       (row.payment_status !== 'lunas' && 'belum lunas'.includes(term))
     );
-  }, [dashboardData.details, searchTerm]);
+  }, [dashboardData.details, searchTerm, orderStatusFilter, paymentStatusFilter]);
 
   const {
     items: paginatedDetails,
@@ -765,24 +849,57 @@ export default function CleanoxOnlyDashboardPage() {
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden p-5 space-y-4">
+          <div
+            ref={detailSectionRef}
+            className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden p-5 space-y-4 scroll-mt-4"
+          >
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h3 className="text-sm font-bold text-slate-800">Detail Transaksi</h3>
                 <p className="text-[11px] text-slate-400 mt-0.5">Daftar transaksi dalam periode filter</p>
               </div>
-              <div className="relative w-full sm:w-64">
-                <input
-                  type="text"
-                  placeholder="Cari transaksi, customer, item..."
-                  value={searchTerm}
+              <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                <select
+                  value={orderStatusFilter}
                   onChange={(e) => {
-                    setSearchTerm(e.target.value);
+                    setOrderStatusFilter(e.target.value);
                     setCurrentPage(1);
                   }}
-                  className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-xl pl-8 pr-3 py-1.5 text-xs focus:outline-none font-medium"
-                />
-                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none focus:border-indigo-500"
+                >
+                  {ORDER_STATUS_FILTERS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={paymentStatusFilter}
+                  onChange={(e) => {
+                    setPaymentStatusFilter(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none focus:border-indigo-500"
+                >
+                  {PAYMENT_STATUS_FILTERS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <div className="relative w-full sm:w-64">
+                  <input
+                    type="text"
+                    placeholder="Cari transaksi, customer, item..."
+                    value={searchTerm}
+                    onChange={(e) => {
+                      setSearchTerm(e.target.value);
+                      setCurrentPage(1);
+                    }}
+                    className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-xl pl-8 pr-3 py-1.5 text-xs focus:outline-none font-medium"
+                  />
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                </div>
               </div>
             </div>
 
@@ -814,6 +931,20 @@ export default function CleanoxOnlyDashboardPage() {
                         <td className="px-4 py-2.5">
                           <Link
                             to={`/cleanox-only/transactions/${row.id}`}
+                            state={{
+                              from: 'dashboard',
+                              dashboardState: {
+                                filterType,
+                                selectedPeriod,
+                                selectedYear,
+                                dateRange,
+                                orderStatusFilter,
+                                paymentStatusFilter,
+                                searchTerm,
+                                currentPage: safePage,
+                                pageSize,
+                              },
+                            }}
                             className="font-bold text-indigo-600 font-sans text-[12px] hover:underline"
                           >
                             {row.transaction_no}

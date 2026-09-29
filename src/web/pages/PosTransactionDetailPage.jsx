@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useLocation, useParams } from 'react-router-dom';
 import { Download, FileSpreadsheet, FileText, ArrowLeft, Save, Copy, Send, ImagePlus, X, Plus, Minus, Pencil, Trash2 } from 'lucide-react';
 import api from '@shared/utils/api.js';
 import BodyPortal from '@web/components/BodyPortal.jsx';
@@ -18,13 +18,16 @@ import {
 import { downloadPosEReceiptPdf, loadEReceiptKopAsDataUrl, loadImageAsDataUrl } from '@web/utils/posEReceipt.js';
 import { downloadPosInternalInvoicePdf } from '@web/utils/posInternalInvoicePdf.js';
 import { downloadPosOrderFormPdf } from '@web/utils/posOrderFormPdf.js';
-import PosTakehomeStageTimeline from '@web/components/PosTakehomeStageTimeline.jsx';
 import {
-  getMethodsInGroup,
-  getPaymentMethodGroups,
-  groupNeedsMethodSelect,
-} from '@web/utils/posPaymentMethods.js';
+  PENDING_METER_TOTAL_TEXT,
+  PENDING_PRICE_TOTAL_TEXT,
+  PENDING_TOTAL_TEXT,
+} from '@web/utils/posPdfLayout.js';
+import PosTakehomeStageTimeline from '@web/components/PosTakehomeStageTimeline.jsx';
+import PaymentMethodPicker from '@web/components/PaymentMethodPicker.jsx';
 import cleanoxLogo from '../../assets/cleanox.png';
+
+const MAX_SCHEDULE_PROOFS = 5;
 
 const emptyAddItemDraft = () => ({
   service_id: '',
@@ -156,6 +159,9 @@ const buildEvidenceDownloadName = ({ transactionNo, employeeName, kind, index, p
 
 export default function PosTransactionDetailPage() {
   const { id } = useParams();
+  const location = useLocation();
+  const fromDashboard = location.state?.from === 'dashboard';
+  const dashboardReturnState = location.state?.dashboardState || null;
   const [detail, setDetail] = useState(null);
   const [workers, setWorkers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -205,6 +211,15 @@ export default function PosTransactionDetailPage() {
   const [scheduleSubmitting, setScheduleSubmitting] = useState(false);
   const [scheduleSuccess, setScheduleSuccess] = useState('');
   const [scheduleConfirm, setScheduleConfirm] = useState(null);
+  const [scheduleProofs, setScheduleProofs] = useState({
+    reschedule: { files: [], urls: [] },
+    cancel: { files: [], urls: [] },
+  });
+  const [scheduleProofErrors, setScheduleProofErrors] = useState({ reschedule: '', cancel: '' });
+  const rescheduleProofInputRef = useRef(null);
+  const cancelProofInputRef = useRef(null);
+  const [scheduleChangePreviewMap, setScheduleChangePreviewMap] = useState({});
+  const scheduleChangePreviewMapRef = useRef({});
   const [photoPreview, setPhotoPreview] = useState(null);
   const [discountOptions, setDiscountOptions] = useState([]);
   const [offerForm, setOfferForm] = useState({
@@ -301,6 +316,17 @@ export default function PosTransactionDetailPage() {
       needed.set(String(photo.id), photo.photo_path);
     }
     await refreshBlobPreviews(needed, setPaymentPreviewMap);
+  };
+
+  const refreshScheduleChangePreviews = async (changes = []) => {
+    const needed = new Map();
+    for (const change of changes) {
+      for (const photo of change?.photos || []) {
+        if (!photo?.id || !photo?.photo_path) continue;
+        needed.set(String(photo.id), photo.photo_path);
+      }
+    }
+    await refreshBlobPreviews(needed, setScheduleChangePreviewMap);
   };
 
   const refreshTakehomePreviews = async (progress) => {
@@ -413,6 +439,7 @@ export default function PosTransactionDetailPage() {
         }),
         refreshCustomerPreviews(nextDetail.customer_photos || []),
         refreshPaymentPreviews(nextDetail.payment_proofs || []),
+        refreshScheduleChangePreviews(nextDetail.schedule_changes || []),
         refreshTakehomePreviews(nextDetail.takehome_progress),
       ]);
     } catch (err) {
@@ -443,6 +470,10 @@ export default function PosTransactionDetailPage() {
   }, [takehomePreviewMap]);
 
   useEffect(() => {
+    scheduleChangePreviewMapRef.current = scheduleChangePreviewMap;
+  }, [scheduleChangePreviewMap]);
+
+  useEffect(() => {
     if (!photoPreview) return undefined;
     const onKeyDown = (event) => {
       if (event.key === 'Escape') closePhotoPreview();
@@ -463,6 +494,9 @@ export default function PosTransactionDetailPage() {
         if (typeof url === 'string' && url.startsWith('blob:')) URL.revokeObjectURL(url);
       });
       Object.values(takehomePreviewMapRef.current).forEach((url) => {
+        if (typeof url === 'string' && url.startsWith('blob:')) URL.revokeObjectURL(url);
+      });
+      Object.values(scheduleChangePreviewMapRef.current).forEach((url) => {
         if (typeof url === 'string' && url.startsWith('blob:')) URL.revokeObjectURL(url);
       });
     };
@@ -714,6 +748,7 @@ export default function PosTransactionDetailPage() {
     tracking,
     customer_photos: customerPhotos = [],
     payment_proofs: paymentProofs = [],
+    schedule_changes: scheduleChanges = [],
     takehome_progress: takehomeProgress,
     legacy_evidence: legacyEvidence = null,
     customer_bundle: customerBundle = null,
@@ -753,6 +788,15 @@ export default function PosTransactionDetailPage() {
   const isTerminalStatus = ['Completed', 'Cancelled'].includes(transaction.status);
   const hasGc = transactionHasGeneralCleaning(items);
   const hasMeterPending = transactionHasMeterPending(items);
+  const pendingGcTotal = hasGc && !transaction.pricing_finalized_at;
+  const pendingTotals = pendingGcTotal || hasMeterPending;
+  const pendingTotalsText =
+    pendingGcTotal && hasMeterPending
+      ? PENDING_PRICE_TOTAL_TEXT
+      : hasMeterPending
+        ? PENDING_METER_TOTAL_TEXT
+        : PENDING_TOTAL_TEXT;
+  const itemTableColSpan = canMutateItems ? 6 : 5;
   const canReschedule =
     !isHistoryEntry &&
     !isTerminalStatus &&
@@ -765,7 +809,6 @@ export default function PosTransactionDetailPage() {
   const canEditPayment = transaction.status !== 'Cancelled';
   const canUploadPaymentProofs =
     canEditPayment && paymentProofs.length < 10;
-  const paymentMethodGroups = getPaymentMethodGroups(paymentMethods);
   const selectedPaymentMethod =
     paymentMethods.find((m) => Number(m.id) === Number(paymentForm.payment_method_id)) ||
     transaction.payment_method ||
@@ -774,19 +817,6 @@ export default function PosTransactionDetailPage() {
     paymentForm.payment_group || selectedPaymentMethod?.method_group || '';
   const isCollaborationPayment = activePaymentGroup === 'Collaboration';
   const isEpaymentPayment = activePaymentGroup === 'E-Payment';
-  const activeGroupNeedsSelect = groupNeedsMethodSelect(paymentMethods, activePaymentGroup);
-  const activeGroupMethods = getMethodsInGroup(paymentMethods, activePaymentGroup);
-  const secondaryPaymentGroups = paymentMethodGroups.filter(
-    (g) => g !== 'E-Payment' && g !== 'Collaboration'
-  );
-  const secondaryGroupNeedsSelect = groupNeedsMethodSelect(
-    paymentMethods,
-    paymentForm.secondary_payment_group
-  );
-  const secondaryGroupMethods = getMethodsInGroup(
-    paymentMethods,
-    paymentForm.secondary_payment_group
-  );
   const finalAmountNum = Number(transaction.final_amount || 0);
   const epaymentAmountNum =
     paymentForm.epayment_amount === '' ? null : Number(paymentForm.epayment_amount);
@@ -797,26 +827,13 @@ export default function PosTransactionDetailPage() {
       ? Math.max(0, finalAmountNum - epaymentAmountNum)
       : null;
 
-  const handlePaymentGroupChange = (group) => {
+  const handlePaymentMethodChange = (methodId, _method, group) => {
     setPaymentForm((prev) => {
-      const methodsInGroup = getMethodsInGroup(paymentMethods, group);
-      const needsSelect = methodsInGroup.length > 1;
-      const stillInGroup = methodsInGroup.some(
-        (m) => Number(m.id) === Number(prev.payment_method_id)
-      );
-      const nextMethodId = needsSelect
-        ? stillInGroup
-          ? prev.payment_method_id
-          : ''
-        : methodsInGroup[0]
-          ? String(methodsInGroup[0].id)
-          : '';
-
       const leavingEpayment = group !== 'E-Payment';
       return {
         ...prev,
         payment_group: group,
-        payment_method_id: nextMethodId,
+        payment_method_id: methodId,
         payment_status:
           group === 'Collaboration'
             ? 'lunas'
@@ -830,26 +847,12 @@ export default function PosTransactionDetailPage() {
     });
   };
 
-  const handleSecondaryPaymentGroupChange = (group) => {
-    setPaymentForm((prev) => {
-      const methodsInGroup = getMethodsInGroup(paymentMethods, group);
-      const needsSelect = methodsInGroup.length > 1;
-      const stillInGroup = methodsInGroup.some(
-        (m) => Number(m.id) === Number(prev.secondary_payment_method_id)
-      );
-      const nextMethodId = needsSelect
-        ? stillInGroup
-          ? prev.secondary_payment_method_id
-          : ''
-        : methodsInGroup[0]
-          ? String(methodsInGroup[0].id)
-          : '';
-      return {
-        ...prev,
-        secondary_payment_group: group,
-        secondary_payment_method_id: nextMethodId,
-      };
-    });
+  const handleSecondaryPaymentMethodChange = (methodId, _method, group) => {
+    setPaymentForm((prev) => ({
+      ...prev,
+      secondary_payment_group: group,
+      secondary_payment_method_id: methodId,
+    }));
   };
 
   const handleSavePayment = async () => {
@@ -1174,16 +1177,126 @@ export default function PosTransactionDetailPage() {
     rescheduleBlockedReason = 'Reschedule is only allowed at least 1 day before the service date.';
   }
 
+  const clearScheduleProofs = (type) => {
+    scheduleProofs[type].urls.forEach((url) => URL.revokeObjectURL(url));
+    setScheduleProofs((prev) => ({ ...prev, [type]: { files: [], urls: [] } }));
+    setScheduleProofErrors((prev) => ({ ...prev, [type]: '' }));
+  };
+
+  const openScheduleConfirm = (type) => {
+    setScheduleConfirm({ type });
+  };
+
+  const closeScheduleConfirm = () => {
+    setScheduleConfirm(null);
+  };
+
+  const handleScheduleProofsSelected = (type, event) => {
+    const files = Array.from(event.target.files || []).filter((file) => /^image\//.test(file.type));
+    event.target.value = '';
+    if (files.length === 0) return;
+
+    const remaining = Math.max(0, MAX_SCHEDULE_PROOFS - scheduleProofs[type].files.length);
+    if (remaining === 0) {
+      setScheduleProofErrors((prev) => ({ ...prev, [type]: `Maksimal ${MAX_SCHEDULE_PROOFS} foto bukti` }));
+      return;
+    }
+
+    const toAdd = files.slice(0, remaining);
+    setScheduleProofErrors((prev) => ({ ...prev, [type]: '' }));
+    setScheduleProofs((prev) => ({
+      ...prev,
+      [type]: {
+        files: [...prev[type].files, ...toAdd],
+        urls: [...prev[type].urls, ...toAdd.map((file) => URL.createObjectURL(file))],
+      },
+    }));
+  };
+
+  const handleRemoveScheduleProof = (type, index) => {
+    const url = scheduleProofs[type].urls[index];
+    if (url) URL.revokeObjectURL(url);
+    setScheduleProofs((prev) => ({
+      ...prev,
+      [type]: {
+        files: prev[type].files.filter((_, i) => i !== index),
+        urls: prev[type].urls.filter((_, i) => i !== index),
+      },
+    }));
+  };
+
+  const renderScheduleProofPicker = (type, disabled) => {
+    const { files, urls } = scheduleProofs[type];
+    const inputRef = type === 'reschedule' ? rescheduleProofInputRef : cancelProofInputRef;
+    return (
+      <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs font-semibold text-slate-700">
+            Foto bukti {type === 'reschedule' ? 'reschedule' : 'cancel'} (wajib, min 1 · maks {MAX_SCHEDULE_PROOFS})
+          </p>
+          <span className="text-xs text-slate-500">
+            {files.length}/{MAX_SCHEDULE_PROOFS}
+          </span>
+        </div>
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={(event) => handleScheduleProofsSelected(type, event)}
+        />
+        <button
+          type="button"
+          disabled={disabled || files.length >= MAX_SCHEDULE_PROOFS}
+          onClick={() => inputRef.current?.click()}
+          className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <ImagePlus className="h-4 w-4" />
+          Tambah foto
+        </button>
+        {urls.length > 0 && (
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-5 lg:grid-cols-8">
+            {urls.map((url, index) => (
+              <div
+                key={url}
+                className="relative overflow-hidden rounded-lg border border-slate-200 bg-white"
+              >
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => handleRemoveScheduleProof(type, index)}
+                  className="absolute right-1 top-1 z-[1] inline-flex h-6 w-6 items-center justify-center rounded-full bg-black/65 text-white shadow-lg disabled:opacity-60"
+                  aria-label="Hapus foto bukti"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+                <img src={url} alt="Foto bukti" className="h-20 w-full object-cover" />
+              </div>
+            ))}
+          </div>
+        )}
+        {scheduleProofErrors[type] && (
+          <p className="text-xs text-rose-600">{scheduleProofErrors[type]}</p>
+        )}
+      </div>
+    );
+  };
+
   const handleRescheduleSubmit = async () => {
-    if (!scheduleDateInput || scheduleSubmitting) return;
+    if (!scheduleDateInput || scheduleSubmitting || scheduleProofs.reschedule.files.length === 0) return;
     setScheduleSubmitting(true);
     setError('');
     setScheduleSuccess('');
     try {
-      await api.patch(`/pos-transactions/${id}/reschedule`, {
-        service_date: scheduleDateInput,
+      const formData = new FormData();
+      formData.append('service_date', scheduleDateInput);
+      scheduleProofs.reschedule.files.forEach((file) => formData.append('photos', file));
+      await api.patch(`/pos-transactions/${id}/reschedule`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
       setScheduleSuccess('Jadwal layanan berhasil dipindah. Pekerja akan mendapat notifikasi.');
+      clearScheduleProofs('reschedule');
       setScheduleConfirm(null);
       await loadData();
     } catch (err) {
@@ -1194,13 +1307,19 @@ export default function PosTransactionDetailPage() {
   };
 
   const handleCancelSubmit = async () => {
-    if (scheduleSubmitting) return;
+    if (scheduleSubmitting || scheduleProofs.cancel.files.length === 0) return;
     setScheduleSubmitting(true);
     setError('');
     setScheduleSuccess('');
     try {
-      await api.patch(`/pos-transactions/${id}/cancel`, { note: cancelNote || undefined });
+      const formData = new FormData();
+      if (cancelNote) formData.append('note', cancelNote);
+      scheduleProofs.cancel.files.forEach((file) => formData.append('photos', file));
+      await api.patch(`/pos-transactions/${id}/cancel`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
       setScheduleSuccess('Transaction cancelled. Active assignments were cancelled.');
+      clearScheduleProofs('cancel');
       setScheduleConfirm(null);
       await loadData();
     } catch (err) {
@@ -1214,9 +1333,13 @@ export default function PosTransactionDetailPage() {
     <div className="max-w-7xl mx-auto p-6 space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
         <div>
-          <Link to="/cleanox-only/transactions" className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-700 hover:text-blue-800">
+          <Link
+            to={fromDashboard ? '/cleanox-only/dashboard' : '/cleanox-only/transactions'}
+            state={fromDashboard ? { restore: dashboardReturnState } : undefined}
+            className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-700 hover:text-blue-800"
+          >
             <ArrowLeft className="w-4 h-4" />
-            Kembali ke daftar POS
+            {fromDashboard ? 'Kembali ke Dashboard' : 'Kembali ke daftar POS'}
           </Link>
           <h1 className="mt-2 text-2xl font-bold text-slate-900">{transaction.transaction_no}</h1>
           <p className="mt-1 text-sm text-slate-500">{transaction.customer_name} • {itemSummary}</p>
@@ -1568,66 +1691,15 @@ export default function PosTransactionDetailPage() {
               </div>
               <div className="grid gap-4 lg:grid-cols-2">
                 <div className="space-y-4">
-                  <div className="flex flex-wrap gap-2">
-                    {paymentMethodGroups.map((group) => {
-                      const active =
-                        (paymentForm.payment_group || selectedPaymentMethod?.method_group || '') ===
-                        group;
-                      return (
-                        <button
-                          key={group}
-                          type="button"
-                          onClick={() => handlePaymentGroupChange(group)}
-                          className={`rounded-xl border px-3.5 py-2 text-sm font-semibold transition ${
-                            active
-                              ? 'border-slate-900 bg-slate-900 text-white'
-                              : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                          }`}
-                        >
-                          {group}
-                        </button>
-                      );
-                    })}
-                  </div>
+                  <PaymentMethodPicker
+                    paymentMethods={paymentMethods}
+                    value={paymentForm.payment_method_id}
+                    onChange={handlePaymentMethodChange}
+                  />
                   {activePaymentGroup === 'Collaboration' && selectedPaymentMethod && (
                     <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
                       Collaboration · pencatatan saja · total Rp 0 · otomatis lunas tanpa bukti
                     </p>
-                  )}
-                  {activePaymentGroup &&
-                    activePaymentGroup !== 'Collaboration' &&
-                    !activeGroupNeedsSelect &&
-                    selectedPaymentMethod && (
-                      <p className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
-                        {selectedPaymentMethod.label || selectedPaymentMethod.name}
-                      </p>
-                    )}
-                  {activeGroupNeedsSelect && (
-                    <label className="block space-y-1.5">
-                      <span className="text-xs font-semibold text-slate-600">
-                        {activePaymentGroup === 'EDC'
-                          ? 'Jenis kartu EDC BCA'
-                          : `Pilih ${activePaymentGroup}`}
-                      </span>
-                      <select
-                        value={paymentForm.payment_method_id}
-                        onChange={(e) =>
-                          setPaymentForm((prev) => ({
-                            ...prev,
-                            payment_method_id: e.target.value,
-                            payment_group: activePaymentGroup,
-                          }))
-                        }
-                        className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
-                      >
-                        <option value="">Pilih metode</option>
-                        {activeGroupMethods.map((method) => (
-                          <option key={method.id} value={method.id}>
-                            {method.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
                   )}
                   {isEpaymentPayment && (
                     <div className="space-y-3 rounded-xl border border-indigo-100 bg-indigo-50/60 p-3">
@@ -1673,58 +1745,13 @@ export default function PosTransactionDetailPage() {
                       {paymentRemainderNum != null && paymentRemainderNum > 0 && (
                         <div className="space-y-2">
                           <p className="text-xs font-semibold text-slate-600">Metode sisa</p>
-                          <div className="flex flex-wrap gap-2">
-                            {secondaryPaymentGroups.map((group) => {
-                              const active = paymentForm.secondary_payment_group === group;
-                              return (
-                                <button
-                                  key={group}
-                                  type="button"
-                                  onClick={() => handleSecondaryPaymentGroupChange(group)}
-                                  className={`rounded-xl border px-3 py-1.5 text-xs font-semibold transition ${
-                                    active
-                                      ? 'border-indigo-700 bg-indigo-700 text-white'
-                                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                                  }`}
-                                >
-                                  {group}
-                                </button>
-                              );
-                            })}
-                          </div>
-                          {secondaryGroupNeedsSelect && (
-                            <select
-                              value={paymentForm.secondary_payment_method_id}
-                              onChange={(e) =>
-                                setPaymentForm((prev) => ({
-                                  ...prev,
-                                  secondary_payment_method_id: e.target.value,
-                                }))
-                              }
-                              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"
-                            >
-                              <option value="">Pilih metode sisa</option>
-                              {secondaryGroupMethods.map((method) => (
-                                <option key={method.id} value={method.id}>
-                                  {method.name}
-                                </option>
-                              ))}
-                            </select>
-                          )}
-                          {paymentForm.secondary_payment_group &&
-                            !secondaryGroupNeedsSelect &&
-                            paymentForm.secondary_payment_method_id && (
-                              <p className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
-                                {getMethodsInGroup(
-                                  paymentMethods,
-                                  paymentForm.secondary_payment_group
-                                )[0]?.label ||
-                                  getMethodsInGroup(
-                                    paymentMethods,
-                                    paymentForm.secondary_payment_group
-                                  )[0]?.name}
-                              </p>
-                            )}
+                          <PaymentMethodPicker
+                            paymentMethods={paymentMethods}
+                            value={paymentForm.secondary_payment_method_id}
+                            onChange={handleSecondaryPaymentMethodChange}
+                            excludeGroups={['E-Payment', 'Collaboration']}
+                            tone="indigo"
+                          />
                         </div>
                       )}
                     </div>
@@ -1861,6 +1888,7 @@ export default function PosTransactionDetailPage() {
               <p className="mt-1 text-xs text-slate-500">
                 Setelah konfirmasi customer via WA: pindahkan tanggal (minimal H−1) atau batalkan transaksi.
                 Reschedule tidak meminta accept ulang dari pekerja.
+                Wajib melampirkan minimal 1 foto bukti (mis. screenshot chat WA customer).
               </p>
             </div>
 
@@ -1877,13 +1905,19 @@ export default function PosTransactionDetailPage() {
               </div>
               <button
                 type="button"
-                disabled={!canReschedule || scheduleSubmitting || !scheduleDateInput}
-                onClick={() => setScheduleConfirm({ type: 'reschedule' })}
+                disabled={
+                  !canReschedule ||
+                  scheduleSubmitting ||
+                  !scheduleDateInput ||
+                  scheduleProofs.reschedule.files.length === 0
+                }
+                onClick={() => openScheduleConfirm('reschedule')}
                 className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
               >
                 Simpan jadwal baru
               </button>
             </div>
+            {renderScheduleProofPicker('reschedule', !canReschedule || scheduleSubmitting)}
             {!canReschedule && rescheduleBlockedReason && (
               <p className="text-xs text-amber-700">{rescheduleBlockedReason}</p>
             )}
@@ -1900,14 +1934,79 @@ export default function PosTransactionDetailPage() {
                   className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm disabled:opacity-60"
                 />
               </div>
+              {renderScheduleProofPicker('cancel', !canCancel || scheduleSubmitting)}
               <button
                 type="button"
-                disabled={!canCancel || scheduleSubmitting}
-                onClick={() => setScheduleConfirm({ type: 'cancel' })}
+                disabled={!canCancel || scheduleSubmitting || scheduleProofs.cancel.files.length === 0}
+                onClick={() => openScheduleConfirm('cancel')}
                 className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-60"
               >
                 Batalkan transaksi
               </button>
+            </div>
+
+            <div className="border-t border-slate-200 pt-4 space-y-3">
+              <p className="text-xs font-semibold text-slate-600">Riwayat bukti cancel / reschedule</p>
+              {scheduleChanges.length === 0 ? (
+                <p className="text-sm text-slate-500">Belum ada bukti cancel / reschedule.</p>
+              ) : (
+                scheduleChanges.map((change) => (
+                  <div key={change.id} className="rounded-xl border border-slate-200 bg-white p-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                          change.action_type === 'cancel'
+                            ? 'bg-rose-100 text-rose-700'
+                            : 'bg-slate-100 text-slate-700'
+                        }`}
+                      >
+                        {change.action_type === 'cancel' ? 'Cancel' : 'Reschedule'}
+                      </span>
+                      <span className="text-xs text-slate-500">{formatDateTime(change.created_at)}</span>
+                    </div>
+                    {change.action_type === 'reschedule' && (
+                      <p className="mt-2 text-sm text-slate-700">
+                        {formatDateTime(change.old_service_date)} → {formatDateTime(change.new_service_date)}
+                      </p>
+                    )}
+                    {change.action_type === 'cancel' && change.note && (
+                      <p className="mt-2 text-sm text-slate-700">Catatan: {change.note}</p>
+                    )}
+                    <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+                      {(change.photos || []).map((photo) => (
+                        <div
+                          key={photo.id}
+                          className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-50"
+                        >
+                          {scheduleChangePreviewMap[String(photo.id)] ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openPhotoPreview(
+                                  scheduleChangePreviewMap[String(photo.id)],
+                                  'Bukti Cancel / Reschedule'
+                                )
+                              }
+                              aria-label="Preview foto bukti cancel / reschedule"
+                              className="block w-full cursor-pointer"
+                            >
+                              <img
+                                src={scheduleChangePreviewMap[String(photo.id)]}
+                                alt="Bukti cancel / reschedule"
+                                className="h-28 w-full object-cover"
+                              />
+                            </button>
+                          ) : (
+                            <div className="flex h-28 w-full items-center justify-center text-xs text-slate-400">
+                              Memuat...
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
           )}
@@ -2102,6 +2201,73 @@ export default function PosTransactionDetailPage() {
                   );
                 })}
               </tbody>
+              <tfoot className="border-t border-slate-200 bg-slate-50/60">
+                {pendingTotals ? (
+                  <>
+                    <tr>
+                      <td colSpan={itemTableColSpan} className="px-3 py-2">
+                        <div className="flex justify-end">
+                          <span className="w-40 text-slate-500">Biaya Transport</span>
+                          <span className="w-40 text-right text-slate-700">
+                            {formatCurrency(transaction.transport_fee || 0)}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td
+                        colSpan={itemTableColSpan}
+                        className="px-3 py-3 text-right font-semibold text-amber-700"
+                      >
+                        {pendingTotalsText}
+                      </td>
+                    </tr>
+                  </>
+                ) : (
+                  <>
+                    <tr>
+                      <td colSpan={itemTableColSpan} className="px-3 py-2">
+                        <div className="flex justify-end">
+                          <span className="w-40 text-slate-500">Subtotal</span>
+                          <span className="w-40 text-right text-slate-700">
+                            {formatCurrency(transaction.subtotal_amount)}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td colSpan={itemTableColSpan} className="px-3 py-2">
+                        <div className="flex justify-end">
+                          <span className="w-40 text-slate-500">Diskon</span>
+                          <span className="w-40 text-right text-slate-700">
+                            {formatCurrency(transaction.discount_amount)}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td colSpan={itemTableColSpan} className="px-3 py-2">
+                        <div className="flex justify-end">
+                          <span className="w-40 text-slate-500">Biaya Transport</span>
+                          <span className="w-40 text-right text-slate-700">
+                            {formatCurrency(transaction.transport_fee || 0)}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr className="border-t border-slate-200">
+                      <td colSpan={itemTableColSpan} className="px-3 py-3">
+                        <div className="flex justify-end text-base font-bold text-slate-900">
+                          <span className="w-40">Grand Total</span>
+                          <span className="w-40 text-right">
+                            {formatCurrency(transaction.final_amount)}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  </>
+                )}
+              </tfoot>
             </table>
           </div>
           {(hasGc && !transaction.pricing_finalized_at) || hasMeterPending ? (
@@ -2622,18 +2788,22 @@ export default function PosTransactionDetailPage() {
                 )}
               </>
             )}
+            <p className="text-sm text-slate-600">
+              Foto bukti terlampir:{' '}
+              <span className="font-semibold">{scheduleProofs[scheduleConfirm.type].files.length} foto</span>
+            </p>
             <div className="flex items-center justify-end gap-2">
               <button
                 type="button"
                 disabled={scheduleSubmitting}
-                onClick={() => setScheduleConfirm(null)}
+                onClick={closeScheduleConfirm}
                 className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
               >
                 Batal
               </button>
               <button
                 type="button"
-                disabled={scheduleSubmitting}
+                disabled={scheduleSubmitting || scheduleProofs[scheduleConfirm.type].files.length === 0}
                 onClick={() =>
                   scheduleConfirm.type === 'reschedule' ? handleRescheduleSubmit() : handleCancelSubmit()
                 }

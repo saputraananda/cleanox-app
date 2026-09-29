@@ -72,8 +72,11 @@ const TASK_EVIDENCE_BASE = path.join(STORAGE_BASE, 'worker-task-evidence');
 const CUSTOMER_PHOTO_BASE = path.join(STORAGE_BASE, 'transaction-customer-photos');
 const PAYMENT_PROOF_BASE = path.join(STORAGE_BASE, 'transaction-payment-proofs');
 const TAKEHOME_EVIDENCE_BASE = path.join(STORAGE_BASE, 'worker-takehome-evidence');
+const SCHEDULE_PROOF_BASE = path.join(STORAGE_BASE, 'transaction-schedule-proofs');
 const MAX_CUSTOMER_PHOTOS = 10;
 const MAX_PAYMENT_PROOFS = 10;
+const MAX_SCHEDULE_PROOFS = 5;
+export const MAX_SCHEDULE_PROOF_FILES = MAX_SCHEDULE_PROOFS;
 const PAYMENT_STATUSES = new Set(['belum_lunas', 'lunas']);
 
 async function loadPaymentMethod(connection, methodId) {
@@ -96,6 +99,7 @@ function shouldSkipPaymentProof(method) {
 if (!fs.existsSync(CUSTOMER_PHOTO_BASE)) fs.mkdirSync(CUSTOMER_PHOTO_BASE, { recursive: true });
 if (!fs.existsSync(PAYMENT_PROOF_BASE)) fs.mkdirSync(PAYMENT_PROOF_BASE, { recursive: true });
 if (!fs.existsSync(TAKEHOME_EVIDENCE_BASE)) fs.mkdirSync(TAKEHOME_EVIDENCE_BASE, { recursive: true });
+if (!fs.existsSync(SCHEDULE_PROOF_BASE)) fs.mkdirSync(SCHEDULE_PROOF_BASE, { recursive: true });
 
 const customerPhotoUpload = multer({
   storage: multer.memoryStorage(),
@@ -124,9 +128,19 @@ const takehomeEvidenceUpload = multer({
   },
 });
 
+const scheduleProofUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024, files: MAX_SCHEDULE_PROOFS },
+  fileFilter: (_req, file, cb) => {
+    if (/^image\//.test(file.mimetype)) return cb(null, true);
+    cb(new Error('File bukti cancel/reschedule harus berupa gambar'));
+  },
+});
+
 export const customerPhotoUploadMiddleware = customerPhotoUpload.single('photo');
 export const paymentProofUploadMiddleware = paymentProofUpload.single('photo');
 export const takehomeEvidenceUploadMiddleware = takehomeEvidenceUpload.single('photo');
+export const scheduleProofUploadMiddleware = scheduleProofUpload.array('photos', MAX_SCHEDULE_PROOFS);
 
 const WA_URL = (process.env.ALORA_WA_URL || 'http://43.129.37.205:3000').replace(/\/$/, '');
 const WA_SESSION = process.env.ALORA_WA_CLEANOX_SESSION || 'cleanox';
@@ -260,6 +274,63 @@ async function savePaymentProofFile(transactionId, file) {
   };
 }
 
+function toAdminScheduleProofPath(photoFile) {
+  if (!photoFile) return null;
+  return `/pos-transactions/schedule-proof/${path.basename(String(photoFile))}`;
+}
+
+async function compressScheduleProofPhotos(files) {
+  return Promise.all(files.map((file) => compressCustomerPhoto(file.buffer)));
+}
+
+function writeScheduleProofFiles(transactionId, actionType, buffers) {
+  const stamp = Date.now();
+  const saved = [];
+  buffers.forEach((buffer, index) => {
+    const fileName = `${transactionId}_${actionType}_${stamp}_${index}.jpg`;
+    fs.writeFileSync(path.join(SCHEDULE_PROOF_BASE, fileName), buffer);
+    saved.push({ file: fileName, path: toAdminScheduleProofPath(fileName) });
+  });
+  return saved;
+}
+
+function unlinkScheduleProofFiles(savedFiles = []) {
+  for (const saved of savedFiles) {
+    const fullPath = path.join(SCHEDULE_PROOF_BASE, path.basename(String(saved.file || '')));
+    if (fs.existsSync(fullPath)) {
+      try {
+        fs.unlinkSync(fullPath);
+      } catch {
+        // ignore unlink errors
+      }
+    }
+  }
+}
+
+async function insertScheduleChangeWithPhotos(
+  connection,
+  { transactionId, actionType, oldServiceDate, newServiceDate, note, userId, savedFiles }
+) {
+  const [changeResult] = await connection.query(
+    `INSERT INTO tr_transaction_schedule_changes
+      (transaction_id, action_type, old_service_date, new_service_date, note, created_by)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [transactionId, actionType, oldServiceDate || null, newServiceDate || null, note || null, userId || null]
+  );
+  const scheduleChangeId = changeResult.insertId;
+
+  for (const [index, saved] of savedFiles.entries()) {
+    await connection.query(
+      `INSERT INTO tr_transaction_schedule_change_photos
+        (schedule_change_id, transaction_id, photo_file, photo_path, sort_order, created_by)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [scheduleChangeId, transactionId, saved.file, saved.path, index, userId || null]
+    );
+  }
+
+  return scheduleChangeId;
+}
+
 function mapAdminItemEvidencePhotos(photos = []) {
   return (photos || []).map((photo) => ({
     id: photo.id,
@@ -340,6 +411,17 @@ export const servePosPaymentProof = (req, res) => {
 
   if (!safeFileName || !fs.existsSync(fullPath)) {
     return res.status(404).json({ message: 'File bukti pembayaran tidak ditemukan' });
+  }
+
+  return res.sendFile(fullPath);
+};
+
+export const servePosScheduleProof = (req, res) => {
+  const safeFileName = path.basename(req.params.filename || '');
+  const fullPath = path.join(SCHEDULE_PROOF_BASE, safeFileName);
+
+  if (!safeFileName || !fs.existsSync(fullPath)) {
+    return res.status(404).json({ message: 'File bukti cancel/reschedule tidak ditemukan' });
   }
 
   return res.sendFile(fullPath);
@@ -909,6 +991,44 @@ export const getPosTransactionDetail = async (req, res) => {
       created_at: row.created_at,
     }));
 
+    const [scheduleChangeRows] = await cleanoxPool.query(
+      `SELECT id, action_type, old_service_date, new_service_date, note, created_at
+       FROM tr_transaction_schedule_changes
+       WHERE transaction_id = ?
+       ORDER BY created_at DESC, id DESC`,
+      [transactionId]
+    );
+
+    const [scheduleChangePhotoRows] = await cleanoxPool.query(
+      `SELECT id, schedule_change_id, photo_file, photo_path, created_at
+       FROM tr_transaction_schedule_change_photos
+       WHERE transaction_id = ?
+       ORDER BY schedule_change_id ASC, sort_order ASC, id ASC`,
+      [transactionId]
+    );
+
+    const scheduleChangePhotosByChange = new Map();
+    for (const row of scheduleChangePhotoRows) {
+      const key = Number(row.schedule_change_id);
+      if (!scheduleChangePhotosByChange.has(key)) scheduleChangePhotosByChange.set(key, []);
+      scheduleChangePhotosByChange.get(key).push({
+        id: row.id,
+        photo_file: row.photo_file,
+        photo_path: toAdminScheduleProofPath(row.photo_file) || row.photo_path,
+        created_at: row.created_at,
+      });
+    }
+
+    const schedule_changes = scheduleChangeRows.map((row) => ({
+      id: row.id,
+      action_type: row.action_type,
+      old_service_date: row.old_service_date,
+      new_service_date: row.new_service_date,
+      note: row.note,
+      created_at: row.created_at,
+      photos: scheduleChangePhotosByChange.get(Number(row.id)) || [],
+    }));
+
     let takehome_progress = null;
     let legacy_evidence = { before_photos: [], after_photos: [] };
     let enrichedItems = items;
@@ -1051,6 +1171,7 @@ export const getPosTransactionDetail = async (req, res) => {
       assignments: enrichedAssignments,
       customer_photos,
       payment_proofs,
+      schedule_changes,
       takehome_progress,
       legacy_evidence,
       tracking,
@@ -3443,6 +3564,12 @@ export const updatePosTransactionStatus = async (req, res) => {
     return res.status(400).json({ message: 'ID transaksi dan status wajib diisi' });
   }
 
+  if (status === 'Cancelled') {
+    return res.status(409).json({
+      message: 'Gunakan aksi Batalkan transaksi (wajib foto bukti) untuk membatalkan',
+    });
+  }
+
   const connection = await cleanoxPool.getConnection();
   try {
     await connection.beginTransaction();
@@ -3494,6 +3621,11 @@ export const reschedulePosTransaction = async (req, res) => {
     return res.status(400).json({ message: 'ID transaksi dan tanggal layanan baru wajib diisi' });
   }
 
+  const proofFiles = Array.isArray(req.files) ? req.files : [];
+  if (proofFiles.length === 0) {
+    return res.status(400).json({ message: 'Minimal 1 foto bukti reschedule wajib diunggah' });
+  }
+
   const newDateKey = formatServiceDateKey(newServiceDateRaw);
   if (!newDateKey) {
     return res.status(400).json({ message: 'Format tanggal layanan baru tidak valid' });
@@ -3501,6 +3633,13 @@ export const reschedulePosTransaction = async (req, res) => {
 
   const todayKey = todayDateStringJakarta();
   const minOldServiceKey = addDaysToDateKey(todayKey, 1);
+  let proofBuffers;
+  try {
+    proofBuffers = await compressScheduleProofPhotos(proofFiles);
+  } catch {
+    return res.status(400).json({ message: 'Foto bukti tidak dapat diproses' });
+  }
+  let savedProofFiles = [];
   const connection = await cleanoxPool.getConnection();
 
   try {
@@ -3619,6 +3758,17 @@ export const reschedulePosTransaction = async (req, res) => {
       );
     }
 
+    savedProofFiles = writeScheduleProofFiles(transactionId, 'reschedule', proofBuffers);
+    await insertScheduleChangeWithPhotos(connection, {
+      transactionId,
+      actionType: 'reschedule',
+      oldServiceDate: transaction.service_date,
+      newServiceDate: newServiceDateValue,
+      note: null,
+      userId: req.user?.id,
+      savedFiles: savedProofFiles,
+    });
+
     await connection.commit();
     return res.json({
       message: 'Jadwal layanan berhasil dipindah',
@@ -3628,6 +3778,7 @@ export const reschedulePosTransaction = async (req, res) => {
     });
   } catch (error) {
     await connection.rollback();
+    unlinkScheduleProofFiles(savedProofFiles);
     console.error('[pos/reschedulePosTransaction]', error.message);
     return res.status(500).json({ message: 'Gagal memindah jadwal layanan' });
   } finally {
@@ -3643,6 +3794,18 @@ export const cancelPosTransaction = async (req, res) => {
     return res.status(400).json({ message: 'ID transaksi tidak valid' });
   }
 
+  const proofFiles = Array.isArray(req.files) ? req.files : [];
+  if (proofFiles.length === 0) {
+    return res.status(400).json({ message: 'Minimal 1 foto bukti cancel wajib diunggah' });
+  }
+
+  let proofBuffers;
+  try {
+    proofBuffers = await compressScheduleProofPhotos(proofFiles);
+  } catch {
+    return res.status(400).json({ message: 'Foto bukti tidak dapat diproses' });
+  }
+  let savedProofFiles = [];
   const connection = await cleanoxPool.getConnection();
   try {
     await connection.beginTransaction();
@@ -3721,10 +3884,22 @@ export const cancelPosTransaction = async (req, res) => {
       );
     }
 
+    savedProofFiles = writeScheduleProofFiles(transactionId, 'cancel', proofBuffers);
+    await insertScheduleChangeWithPhotos(connection, {
+      transactionId,
+      actionType: 'cancel',
+      oldServiceDate: transaction.service_date,
+      newServiceDate: null,
+      note,
+      userId: req.user?.id,
+      savedFiles: savedProofFiles,
+    });
+
     await connection.commit();
     return res.json({ message: 'Transaction cancelled successfully' });
   } catch (error) {
     await connection.rollback();
+    unlinkScheduleProofFiles(savedProofFiles);
     console.error('[pos/cancelPosTransaction]', error.message);
     return res.status(500).json({ message: 'Failed to cancel transaction' });
   } finally {

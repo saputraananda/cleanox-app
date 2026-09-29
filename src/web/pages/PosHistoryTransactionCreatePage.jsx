@@ -32,11 +32,7 @@ import {
 } from '@web/utils/posMeterServices.js';
 import { isBlankAddress } from '@web/utils/posCustomerAddress.js';
 import { computeTransactionPromoDiscount } from '@web/utils/posTransactionPromo.js';
-import {
-  getMethodsInGroup,
-  getPaymentMethodGroups,
-  groupNeedsMethodSelect,
-} from '@web/utils/posPaymentMethods.js';
+import PaymentMethodPicker from '@web/components/PaymentMethodPicker.jsx';
 
 const inputClass =
   'w-full rounded-[12px] border border-slate-200 bg-slate-50 px-3 py-2.5 text-[13px] text-slate-800 transition duration-150 focus:bg-white focus:border-blue-400 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,.12)]';
@@ -974,91 +970,21 @@ export default function PosHistoryTransactionCreatePage() {
             Status default belum lunas — bukti diunggah di detail transaksi. Collaboration otomatis
             lunas · total Rp 0 · tanpa bukti.
           </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {getPaymentMethodGroups(paymentMethods).map((group) => {
-              const selectedMethod = paymentMethods.find(
-                (m) => Number(m.id) === Number(form.payment_method_id)
-              );
-              const active = (paymentGroup || selectedMethod?.method_group || '') === group;
-              return (
-                <button
-                  key={group}
-                  type="button"
-                  onClick={() => {
-                    setPaymentGroup(group);
-                    const methodsInGroup = getMethodsInGroup(paymentMethods, group);
-                    const needsSelect = methodsInGroup.length > 1;
-                    const stillInGroup = methodsInGroup.some(
-                      (m) => Number(m.id) === Number(form.payment_method_id)
-                    );
-                    if (needsSelect) {
-                      if (!stillInGroup) {
-                        setForm((prev) => ({ ...prev, payment_method_id: '' }));
-                      }
-                      return;
-                    }
-                    const method = methodsInGroup[0];
-                    setForm((prev) => ({
-                      ...prev,
-                      payment_method_id: method ? String(method.id) : '',
-                    }));
-                  }}
-                  className={`rounded-xl border px-3.5 py-2 text-sm font-semibold transition ${
-                    active
-                      ? 'border-slate-900 bg-slate-900 text-white'
-                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  {group}
-                </button>
-              );
-            })}
+          <div className="mt-3">
+            <PaymentMethodPicker
+              paymentMethods={paymentMethods}
+              value={form.payment_method_id}
+              onChange={(methodId, _method, group) => {
+                setPaymentGroup(group);
+                setForm((prev) => ({ ...prev, payment_method_id: methodId }));
+              }}
+            />
           </div>
-          {(() => {
-            const selectedMethod = paymentMethods.find(
-              (m) => Number(m.id) === Number(form.payment_method_id)
-            );
-            const group = paymentGroup || selectedMethod?.method_group || '';
-            if (!group) return null;
-            if (group === 'Collaboration' && selectedMethod) {
-              return (
-                <p className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-                  Otomatis lunas · total Rp 0 · tanpa bukti
-                </p>
-              );
-            }
-            if (groupNeedsMethodSelect(paymentMethods, group)) {
-              return (
-                <label className="mt-3 block space-y-1.5">
-                  <span className="text-[12px] font-semibold text-slate-600">
-                    {group === 'EDC' ? 'Jenis kartu EDC BCA' : `Pilih ${group}`}
-                  </span>
-                  <select
-                    value={form.payment_method_id}
-                    onChange={(e) =>
-                      setForm((prev) => ({ ...prev, payment_method_id: e.target.value }))
-                    }
-                    className={inputClass}
-                  >
-                    <option value="">Pilih metode</option>
-                    {getMethodsInGroup(paymentMethods, group).map((method) => (
-                      <option key={method.id} value={method.id}>
-                        {method.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              );
-            }
-            if (selectedMethod) {
-              return (
-                <p className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-                  {selectedMethod.label || selectedMethod.name}
-                </p>
-              );
-            }
-            return null;
-          })()}
+          {paymentGroup === 'Collaboration' && form.payment_method_id && (
+            <p className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+              Otomatis lunas · total Rp 0 · tanpa bukti
+            </p>
+          )}
         </section>
 
         <section className={sectionCardClass}>

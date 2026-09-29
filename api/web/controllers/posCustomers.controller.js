@@ -102,6 +102,28 @@ function toNullableDate(value) {
   return text || null;
 }
 
+function toNullableText(value, label, maxLength = 150) {
+  const text = value == null ? '' : String(value).trim();
+  if (!text) return null;
+  if (text.length > maxLength) {
+    throw Object.assign(new Error(`${label} maksimal ${maxLength} karakter`), { status: 400 });
+  }
+  return text;
+}
+
+function toChildrenCount(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const num = Number(value);
+  if (!Number.isInteger(num) || num < 0 || num > 99) {
+    throw Object.assign(new Error('Jumlah anak harus berupa angka 0 sampai 99'), { status: 400 });
+  }
+  return num;
+}
+
+function toBooleanFlag(value) {
+  return value === true || value === 1 || value === '1' || value === 'true' ? 1 : 0;
+}
+
 async function resolveWaschenReferralEmployee(
   referralSourceId,
   referralWaschenBranchRaw,
@@ -196,6 +218,10 @@ export async function normalizeCustomerPayload(body) {
       : String(body.tier).trim();
   const status = String(body.status || 'Aktif').trim() || 'Aktif';
   const birth_date = toNullableDate(body.birth_date);
+  const spouse_occupation = toNullableText(body.spouse_occupation, 'Pekerjaan suami/istri');
+  const children_count = toChildrenCount(body.children_count);
+  const has_baby = toBooleanFlag(body.has_baby);
+  const children_occupation = toNullableText(body.children_occupation, 'Pekerjaan anak');
   const province_id = toNullableInt(body.province_id);
   const regency_id = toNullableInt(body.regency_id);
   const district_id = toNullableInt(body.district_id);
@@ -236,6 +262,10 @@ export async function normalizeCustomerPayload(body) {
     phone,
     address,
     birth_date,
+    spouse_occupation,
+    children_count,
+    has_baby,
+    children_occupation,
     province_id,
     regency_id,
     district_id,
@@ -258,6 +288,10 @@ const CUSTOMER_SELECT = `
   c.phone,
   c.address,
   c.birth_date,
+  c.spouse_occupation,
+  c.children_count,
+  c.has_baby,
+  c.children_occupation,
   c.province_id,
   c.regency_id,
   c.district_id,
@@ -293,7 +327,8 @@ const CUSTOMER_JOINS = `
 `;
 
 const CUSTOMER_GROUP = `
-  c.id, c.name, c.phone, c.address, c.birth_date, c.province_id, c.regency_id, c.district_id,
+  c.id, c.name, c.phone, c.address, c.birth_date, c.spouse_occupation, c.children_count,
+  c.has_baby, c.children_occupation, c.province_id, c.regency_id, c.district_id,
   c.village_id, c.house_number, c.street_detail, c.address_note, c.referral_source_id,
   c.referral_employee_id, c.referral_employee_name, c.referral_waschen_branch, c.tier,
   c.status, c.created_at, c.updated_at, p.name, r.name, d.name, v.name, rs.code, rs.name
@@ -413,6 +448,8 @@ async function fetchCustomerHistory(posCustomerId) {
 function mapCustomerRow(row) {
   return {
     ...row,
+    children_count: row.children_count == null ? null : Number(row.children_count),
+    has_baby: Boolean(Number(row.has_baby || 0)),
     transaction_count: Number(row.transaction_count || 0),
   };
 }
@@ -710,15 +747,20 @@ export const createPosCustomer = async (req, res) => {
 
     const [result] = await cleanoxPool.query(
       `INSERT INTO mst_customers
-        (name, phone, address, birth_date, province_id, regency_id, district_id, village_id,
+        (name, phone, address, birth_date, spouse_occupation, children_count, has_baby,
+         children_occupation, province_id, regency_id, district_id, village_id,
          house_number, street_detail, address_note, referral_source_id, referral_employee_id,
          referral_employee_name, referral_waschen_branch, tier, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         payload.name,
         payload.phone,
         payload.address,
         payload.birth_date,
+        payload.spouse_occupation,
+        payload.children_count,
+        payload.has_baby,
+        payload.children_occupation,
         payload.province_id,
         payload.regency_id,
         payload.district_id,
@@ -770,7 +812,8 @@ export const updatePosCustomer = async (req, res) => {
 
     await cleanoxPool.query(
       `UPDATE mst_customers
-       SET name = ?, phone = ?, address = ?, birth_date = ?, province_id = ?, regency_id = ?,
+       SET name = ?, phone = ?, address = ?, birth_date = ?, spouse_occupation = ?,
+           children_count = ?, has_baby = ?, children_occupation = ?, province_id = ?, regency_id = ?,
            district_id = ?, village_id = ?, house_number = ?, street_detail = ?, address_note = ?,
            referral_source_id = ?, referral_employee_id = ?, referral_employee_name = ?,
            referral_waschen_branch = ?, tier = ?, status = ?, updated_at = CURRENT_TIMESTAMP
@@ -780,6 +823,10 @@ export const updatePosCustomer = async (req, res) => {
         payload.phone,
         payload.address,
         payload.birth_date,
+        payload.spouse_occupation,
+        payload.children_count,
+        payload.has_baby,
+        payload.children_occupation,
         payload.province_id,
         payload.regency_id,
         payload.district_id,

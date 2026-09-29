@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import api from '@shared/utils/api.js';
 
 export const WASCHEN_EMPLOYEE_OTHER_VALUE = '__other__';
@@ -7,6 +8,10 @@ export const emptyCustomerForm = {
   name: '',
   phone: '',
   birth_date: '',
+  spouse_occupation: '',
+  children_count: '',
+  has_baby: '0',
+  children_occupation: '',
   province_id: '',
   regency_id: '',
   district_id: '',
@@ -34,6 +39,10 @@ export function customerToForm(row = {}) {
     name: row.name || '',
     phone: row.phone || '',
     birth_date: row.birth_date ? String(row.birth_date).slice(0, 10) : '',
+    spouse_occupation: row.spouse_occupation || '',
+    children_count: row.children_count == null ? '' : String(row.children_count),
+    has_baby: row.has_baby ? '1' : '0',
+    children_occupation: row.children_occupation || '',
     province_id: row.province_id ? String(row.province_id) : '',
     regency_id: row.regency_id ? String(row.regency_id) : '',
     district_id: row.district_id ? String(row.district_id) : '',
@@ -61,6 +70,10 @@ export function formToPayload(form) {
     name: form.name.trim(),
     phone: form.phone.trim() || null,
     birth_date: form.birth_date || null,
+    spouse_occupation: form.spouse_occupation.trim() || null,
+    children_count: form.children_count === '' ? null : Number(form.children_count),
+    has_baby: form.has_baby === '1',
+    children_occupation: form.children_occupation.trim() || null,
     province_id: form.province_id ? Number(form.province_id) : null,
     regency_id: form.regency_id ? Number(form.regency_id) : null,
     district_id: form.district_id ? Number(form.district_id) : null,
@@ -81,12 +94,22 @@ export function formToPayload(form) {
   };
 }
 
+function hasFamilyInfo(form) {
+  return (
+    Boolean(String(form.spouse_occupation || '').trim()) ||
+    String(form.children_count ?? '') !== '' ||
+    Boolean(String(form.children_occupation || '').trim()) ||
+    form.has_baby === '1'
+  );
+}
+
 export default function CustomerFormFields({
   form,
   setForm,
   showStatus = true,
   showTier = true,
 }) {
+  const [familyOpen, setFamilyOpen] = useState(() => hasFamilyInfo(form));
   const [provinces, setProvinces] = useState([]);
   const [regencies, setRegencies] = useState([]);
   const [districts, setDistricts] = useState([]);
@@ -281,6 +304,73 @@ export default function CustomerFormFields({
             className={inputClass}
           />
         </label>
+      </div>
+
+      <div className="rounded-[12px] border border-slate-200">
+        <button
+          type="button"
+          onClick={() => setFamilyOpen((v) => !v)}
+          aria-expanded={familyOpen}
+          className="flex w-full items-center justify-between px-3 py-2.5 text-[12.5px]"
+        >
+          <span>
+            <span className="font-medium text-slate-700">Info Keluarga</span>{' '}
+            <span className="text-slate-400">(opsional)</span>
+          </span>
+          <ChevronDown
+            className={`w-4 h-4 text-slate-500 transition-transform duration-150 ${
+              familyOpen ? 'rotate-180' : ''
+            }`}
+          />
+        </button>
+        {familyOpen && (
+          <div className="grid gap-3 border-t border-slate-200 p-3 md:grid-cols-2">
+            <label className="block space-y-1.5 text-[12.5px] text-slate-600">
+              <span className="font-medium">Pekerjaan Suami/Istri</span>
+              <input
+                value={form.spouse_occupation}
+                onChange={(e) => updateField('spouse_occupation', e.target.value)}
+                maxLength={150}
+                className={inputClass}
+                placeholder="Contoh: Karyawan swasta"
+              />
+            </label>
+            <label className="block space-y-1.5 text-[12.5px] text-slate-600">
+              <span className="font-medium">Jumlah Anak</span>
+              <input
+                type="number"
+                min={0}
+                max={99}
+                step={1}
+                value={form.children_count}
+                onChange={(e) => updateField('children_count', e.target.value)}
+                className={inputClass}
+                placeholder="Contoh: 2"
+              />
+            </label>
+            <label className="block space-y-1.5 text-[12.5px] text-slate-600">
+              <span className="font-medium">Punya Bayi</span>
+              <select
+                value={form.has_baby}
+                onChange={(e) => updateField('has_baby', e.target.value)}
+                className={inputClass}
+              >
+                <option value="0">Tidak</option>
+                <option value="1">Ya</option>
+              </select>
+            </label>
+            <label className="block space-y-1.5 text-[12.5px] text-slate-600">
+              <span className="font-medium">Pekerjaan Anak</span>
+              <input
+                value={form.children_occupation}
+                onChange={(e) => updateField('children_occupation', e.target.value)}
+                maxLength={150}
+                className={inputClass}
+                placeholder="Contoh: Pelajar"
+              />
+            </label>
+          </div>
+        )}
       </div>
 
       <div className="grid gap-3 md:grid-cols-2">
