@@ -10,19 +10,16 @@ import {
   transactionHasGeneralCleaning,
 } from '@web/utils/posGeneralCleaningBilling.js';
 import {
+  formatItemQtyLabel,
   isMeterPricedService,
   isMeterPricingPending,
   resolveMeterFromDimensions,
   transactionHasMeterPending,
 } from '@web/utils/posMeterServices.js';
+import { buildTotalsSummary } from '@web/utils/posPendingTotals.js';
 import { downloadPosEReceiptPdf, loadEReceiptKopAsDataUrl, loadImageAsDataUrl } from '@web/utils/posEReceipt.js';
 import { downloadPosInternalInvoicePdf } from '@web/utils/posInternalInvoicePdf.js';
 import { downloadPosOrderFormPdf } from '@web/utils/posOrderFormPdf.js';
-import {
-  PENDING_METER_TOTAL_TEXT,
-  PENDING_PRICE_TOTAL_TEXT,
-  PENDING_TOTAL_TEXT,
-} from '@web/utils/posPdfLayout.js';
 import PosTakehomeStageTimeline from '@web/components/PosTakehomeStageTimeline.jsx';
 import PaymentMethodPicker from '@web/components/PaymentMethodPicker.jsx';
 import cleanoxLogo from '../../assets/cleanox.png';
@@ -525,6 +522,9 @@ export default function PosTransactionDetailPage() {
       items: items.map((item) => ({
         service_name: item.service_name,
         qty: item.qty,
+        meter: item.meter,
+        satuan_name: item.satuan_name,
+        unit_label: item.unit_label,
         base_price: item.base_price_snapshot,
         original_price: item.original_price_snapshot,
         final_price_per_unit: item.final_price_snapshot,
@@ -567,6 +567,9 @@ export default function PosTransactionDetailPage() {
       items: items.map((item) => ({
         service_name: item.service_name,
         qty: item.qty,
+        meter: item.meter,
+        satuan_name: item.satuan_name,
+        unit_label: item.unit_label,
         base_price: item.base_price_snapshot,
         original_price: item.original_price_snapshot,
         final_price_per_unit: item.final_price_snapshot,
@@ -790,12 +793,11 @@ export default function PosTransactionDetailPage() {
   const hasMeterPending = transactionHasMeterPending(items);
   const pendingGcTotal = hasGc && !transaction.pricing_finalized_at;
   const pendingTotals = pendingGcTotal || hasMeterPending;
-  const pendingTotalsText =
-    pendingGcTotal && hasMeterPending
-      ? PENDING_PRICE_TOTAL_TEXT
-      : hasMeterPending
-        ? PENDING_METER_TOTAL_TEXT
-        : PENDING_TOTAL_TEXT;
+  const totalsSummary = buildTotalsSummary({
+    transaction,
+    gcPending: pendingGcTotal,
+    meterPending: hasMeterPending,
+  });
   const itemTableColSpan = canMutateItems ? 6 : 5;
   const canReschedule =
     !isHistoryEntry &&
@@ -1378,14 +1380,18 @@ export default function PosTransactionDetailPage() {
             {invoiceLoading ? 'Menyiapkan PDF...' : 'Invoice Internal A4'}
           </button>
           <div className="rounded-2xl bg-slate-900 px-5 py-4 text-white">
-            <p className="text-xs uppercase tracking-wide text-slate-300">Total Akhir</p>
-            {hasGc && !transaction.pricing_finalized_at ? (
+            {pendingTotals ? (
               <>
-                <p className="mt-1 text-lg font-bold leading-snug">Menyesuaikan jam pengerjaan</p>
-                <p className="mt-1 text-xs text-slate-300">Nota tersedia setelah Done</p>
+                <p className="text-xs uppercase tracking-wide text-slate-300">Total Sementara</p>
+                <p className="mt-1 text-2xl font-bold">{formatCurrency(transaction.final_amount)}</p>
+                <p className="mt-1 text-xs font-semibold text-amber-300">{totalsSummary.note}</p>
+                {pendingGcTotal && (
+                  <p className="mt-1 text-xs text-slate-300">Nota tersedia setelah Done</p>
+                )}
               </>
             ) : (
               <>
+                <p className="text-xs uppercase tracking-wide text-slate-300">Total Akhir</p>
                 <p className="mt-1 text-2xl font-bold">{formatCurrency(transaction.final_amount)}</p>
                 {transaction.billing_hours != null && (
                   <p className="mt-1 text-xs text-slate-300">
@@ -2098,10 +2104,7 @@ export default function PosTransactionDetailPage() {
                         '—'
                       ) : isMeter ? (
                         <div className="space-y-2">
-                          <p>
-                            Qty {item.qty}
-                            {!pendingMeter ? ` · ${Number(item.meter)} m²` : ''}
-                          </p>
+                          <p>{pendingMeter ? `Qty ${item.qty}` : formatItemQtyLabel(item)}</p>
                           {canEditMeter && (
                             <div className="flex flex-wrap items-center gap-1.5">
                               <input
@@ -2202,70 +2205,37 @@ export default function PosTransactionDetailPage() {
                 })}
               </tbody>
               <tfoot className="border-t border-slate-200 bg-slate-50/60">
-                {pendingTotals ? (
-                  <>
-                    <tr>
-                      <td colSpan={itemTableColSpan} className="px-3 py-2">
-                        <div className="flex justify-end">
-                          <span className="w-40 text-slate-500">Biaya Transport</span>
-                          <span className="w-40 text-right text-slate-700">
-                            {formatCurrency(transaction.transport_fee || 0)}
-                          </span>
-                        </div>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td
-                        colSpan={itemTableColSpan}
-                        className="px-3 py-3 text-right font-semibold text-amber-700"
-                      >
-                        {pendingTotalsText}
-                      </td>
-                    </tr>
-                  </>
-                ) : (
-                  <>
-                    <tr>
-                      <td colSpan={itemTableColSpan} className="px-3 py-2">
-                        <div className="flex justify-end">
-                          <span className="w-40 text-slate-500">Subtotal</span>
-                          <span className="w-40 text-right text-slate-700">
-                            {formatCurrency(transaction.subtotal_amount)}
-                          </span>
-                        </div>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td colSpan={itemTableColSpan} className="px-3 py-2">
-                        <div className="flex justify-end">
-                          <span className="w-40 text-slate-500">Diskon</span>
-                          <span className="w-40 text-right text-slate-700">
-                            {formatCurrency(transaction.discount_amount)}
-                          </span>
-                        </div>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td colSpan={itemTableColSpan} className="px-3 py-2">
-                        <div className="flex justify-end">
-                          <span className="w-40 text-slate-500">Biaya Transport</span>
-                          <span className="w-40 text-right text-slate-700">
-                            {formatCurrency(transaction.transport_fee || 0)}
-                          </span>
-                        </div>
-                      </td>
-                    </tr>
-                    <tr className="border-t border-slate-200">
-                      <td colSpan={itemTableColSpan} className="px-3 py-3">
-                        <div className="flex justify-end text-base font-bold text-slate-900">
-                          <span className="w-40">Grand Total</span>
-                          <span className="w-40 text-right">
-                            {formatCurrency(transaction.final_amount)}
-                          </span>
-                        </div>
-                      </td>
-                    </tr>
-                  </>
+                {totalsSummary.rows.map((row) => (
+                  <tr key={row.label}>
+                    <td colSpan={itemTableColSpan} className="px-3 py-2">
+                      <div className="flex justify-end">
+                        <span className="w-40 text-slate-500">{row.label}</span>
+                        <span className="w-40 text-right text-slate-700">
+                          {formatCurrency(row.amount)}
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                <tr className="border-t border-slate-200">
+                  <td colSpan={itemTableColSpan} className="px-3 py-3">
+                    <div className="flex justify-end text-base font-bold text-slate-900">
+                      <span className="w-40">{pendingTotals ? 'Total Sementara' : 'Grand Total'}</span>
+                      <span className="w-40 text-right">
+                        {formatCurrency(totalsSummary.totalAmount)}
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+                {totalsSummary.note && (
+                  <tr>
+                    <td
+                      colSpan={itemTableColSpan}
+                      className="px-3 pb-3 text-right font-semibold text-amber-700"
+                    >
+                      {totalsSummary.note}
+                    </td>
+                  </tr>
                 )}
               </tfoot>
             </table>

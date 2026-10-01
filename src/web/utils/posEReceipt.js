@@ -65,9 +65,9 @@ export async function downloadPosEReceiptPdf({ transaction, items = [], logoData
 
   // Portrait column widths (sum = contentW)
   const colNo = 8;
-  const colService = 58;
+  const colService = 54;
   const colPromo = 28;
-  const colQty = 12;
+  const colQty = 16;
   const colPrice = 36;
   const colTotal = contentW - colNo - colService - colPromo - colQty - colPrice;
 
@@ -103,7 +103,7 @@ export async function downloadPosEReceiptPdf({ transaction, items = [], logoData
     columnWidths: [colNo, colService, colPromo, colQty, colPrice, colTotal],
   });
 
-  const totalsBlockH = pendingGc || pendingMeter ? 40 : 58;
+  const totalsBlockH = pendingGc || pendingMeter ? 70 : 58;
   const printedGap = 8;
   if (y + totalsBlockH + printedGap > pageH - 8) {
     doc.addPage();

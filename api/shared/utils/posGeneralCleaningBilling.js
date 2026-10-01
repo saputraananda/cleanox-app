@@ -126,6 +126,7 @@ export async function finalizeGeneralCleaningPricingFromWindow(
     `SELECT
       i.*,
       s.name AS service_name,
+      s.satuan_name,
       c.name AS category_name
      FROM tr_transaction_items i
      INNER JOIN mst_services s ON s.id = i.service_id
@@ -228,6 +229,9 @@ export async function finalizeGeneralCleaningPricingFromWindow(
   const messageItems = items.map((item) => ({
     service_name: item.service_name,
     qty: item.qty,
+    meter: item.meter,
+    satuan_name: item.satuan_name || null,
+    unit_label: item.unit_label || null,
     base_price: item.base_price_snapshot,
     final_price_per_unit: item.final_price_snapshot,
     line_total: item.line_total,

@@ -5,7 +5,6 @@ import {
   isMeterPricedService,
   isMeterPricingPending,
   resolveMeterValue,
-  transactionHasMeterPending,
 } from './posMeterServices.js';
 import { computeTransactionPromoDiscount } from './posTransactionPromo.js';
 import { isCollaborationMethod } from './posCollaborationPayment.js';
@@ -123,10 +122,6 @@ export async function recalcPosTransactionMoney(connection, transactionId, { act
         isGeneralCleaningCategory(row.category_name) &&
         String(row.item_source || 'regular') !== 'bundle'
     );
-  const hasMeterPending = transactionHasMeterPending(
-    items.filter((row) => String(row.item_source || 'regular') !== 'bundle')
-  );
-  const pricingFinalized = !hasGcPending && !hasMeterPending;
 
   const [workerRows] = await connection.query(
     `SELECT employee_id, employee_name
@@ -141,6 +136,8 @@ export async function recalcPosTransactionMoney(connection, transactionId, { act
     service_name: row.service_name,
     qty: row.qty,
     meter: row.meter,
+    satuan_name: row.satuan_name || null,
+    unit_label: row.unit_label || null,
     base_price: row.base_price_snapshot,
     original_price: row.original_price_snapshot,
     final_price_per_unit: row.final_price_snapshot,
@@ -159,7 +156,7 @@ export async function recalcPosTransactionMoney(connection, transactionId, { act
     totalPeople: transaction.total_people,
     notes: transaction.notes,
     finalAmount,
-    pricingFinalized,
+    pricingFinalized: !hasGcPending,
     workers: workerRows.map((row) => ({
       full_name: row.employee_name,
       phone_number: null,
@@ -174,7 +171,7 @@ export async function recalcPosTransactionMoney(connection, transactionId, { act
     items: messageItems,
     totalPeople: transaction.total_people,
     finalAmount,
-    pricingFinalized,
+    pricingFinalized: !hasGcPending,
   });
 
   await connection.query(

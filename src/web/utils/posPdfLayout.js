@@ -1,6 +1,7 @@
 import { formatServiceDateParts } from './posCustomerOrderMessage.js';
 import { isGeneralCleaningCategory } from './posGeneralCleaningBilling.js';
-import { isMeterPricingPending } from './posMeterServices.js';
+import { formatItemQtyLabel, isMeterPricingPending } from './posMeterServices.js';
+import { buildTotalsSummary } from './posPendingTotals.js';
 
 export const CLEANOX_RECEIPT_COMPANY = {
   name: 'Cleanox',
@@ -282,11 +283,7 @@ export function drawItemsTable(
   doc.setFontSize(8);
   let x = margin + 2;
   for (const col of cols) {
-    let align = 'left';
-    if (['qty', 'price'].includes(col.key)) align = 'right';
-    if (col.key === 'total') align = 'center';
-    const tx = align === 'right' ? x + col.w - 2 : align === 'center' ? x + col.w / 2 : x;
-    doc.text(col.label, tx, y + 5.5, align === 'left' ? undefined : { align });
+    doc.text(col.label, x + col.w / 2, y + 5.5, { align: 'center' });
     x += col.w;
   }
   y += 8;
@@ -301,82 +298,66 @@ export function drawItemsTable(
       y = margin;
     }
 
-    const rowH = 9;
-    if (index % 2 === 0) {
-      doc.setFillColor(248, 250, 252);
-      doc.rect(margin, y, contentW, rowH, 'F');
-    }
-
     const isGcItem = isGeneralCleaningCategory(item.category_name);
     const pendingMeter = isMeterPricingPending({
       satuanName: item.satuan_name,
       unitLabel: item.unit_label,
       meter: item.meter,
     });
-    const cells =
+    const serviceText = String(item.service_name || `Service #${item.service_id}`);
+    const promoText = String(item.promo_name_snapshot || '-');
+    const texts =
       pendingGc && isGcItem
         ? [
-            { text: String(index + 1), w: cols[0].w, align: 'left' },
-            {
-              text: String(item.service_name || `Service #${item.service_id}`),
-              w: cols[1].w,
-              align: 'left',
-            },
-            { text: String(item.promo_name_snapshot || '-'), w: cols[2].w, align: 'left' },
-            { text: '—', w: cols[3].w, align: 'right' },
-            {
-              text: `${formatMoney(item.final_price_snapshot)} / ${crew} Teknisi / Jam`,
-              w: cols[4].w,
-              align: 'right',
-            },
-            { text: 'Pending jam', w: cols[5].w, align: 'center' },
+            String(index + 1),
+            serviceText,
+            promoText,
+            '—',
+            `${formatMoney(item.final_price_snapshot)} / ${crew} Teknisi / Jam`,
+            'Pending jam',
           ]
         : pendingMeter
           ? [
-              { text: String(index + 1), w: cols[0].w, align: 'left' },
-              {
-                text: String(item.service_name || `Service #${item.service_id}`),
-                w: cols[1].w,
-                align: 'left',
-              },
-              { text: String(item.promo_name_snapshot || '-'), w: cols[2].w, align: 'left' },
-              { text: String(item.qty ?? 1), w: cols[3].w, align: 'right' },
-              { text: formatMoney(item.final_price_snapshot), w: cols[4].w, align: 'right' },
-              { text: 'Pending meter', w: cols[5].w, align: 'center' },
+              String(index + 1),
+              serviceText,
+              promoText,
+              String(item.qty ?? 1),
+              formatMoney(item.final_price_snapshot),
+              'Pending meter',
             ]
-        : [
-            { text: String(index + 1), w: cols[0].w, align: 'left' },
-            {
-              text: String(item.service_name || `Service #${item.service_id}`),
-              w: cols[1].w,
-              align: 'left',
-            },
-            { text: String(item.promo_name_snapshot || '-'), w: cols[2].w, align: 'left' },
-            {
-              text:
-                item.meter != null && item.meter !== ''
-                  ? `${item.qty ?? 1} × ${Number(item.meter)}m`
-                  : String(item.qty ?? 1),
-              w: cols[3].w,
-              align: 'right',
-            },
-            { text: formatMoney(item.final_price_snapshot), w: cols[4].w, align: 'right' },
-            { text: formatMoney(item.line_total), w: cols[5].w, align: 'center' },
-          ];
+          : [
+              String(index + 1),
+              serviceText,
+              promoText,
+              formatItemQtyLabel(item),
+              formatMoney(item.final_price_snapshot),
+              formatMoney(item.line_total),
+            ];
+
+    const cellLines = texts.map((text, i) => wrap(doc, text, cols[i].w - 3, 8).slice(0, 2));
+    const lineCount = Math.max(...cellLines.map((lines) => lines.length));
+    const lineStep = 3.5;
+    const rowH = 9 + (lineCount - 1) * lineStep;
+
+    if (index % 2 === 0) {
+      doc.setFillColor(248, 250, 252);
+      doc.rect(margin, y, contentW, rowH, 'F');
+    }
 
     let cx = margin + 2;
-    for (const cell of cells) {
-      const lines = wrap(doc, cell.text, cell.w - 3, 8);
-      const textY = y + 5.5;
-      if (cell.align === 'right') {
-        doc.text(lines[0] || '-', cx + cell.w - 2, textY, { align: 'right' });
-      } else if (cell.align === 'center') {
-        doc.text(lines[0] || '-', cx + cell.w / 2, textY, { align: 'center' });
-      } else {
-        doc.text(lines[0] || '-', cx, textY);
-      }
-      cx += cell.w;
-    }
+    cellLines.forEach((lines, i) => {
+      const col = cols[i];
+      const startY = y + 5.5 + ((lineCount - lines.length) * lineStep) / 2;
+      lines.forEach((line, lineIdx) => {
+        const lineY = startY + lineIdx * lineStep;
+        if (col.key === 'service') {
+          doc.text(line || '-', cx, lineY);
+        } else {
+          doc.text(line || '-', cx + col.w / 2, lineY, { align: 'center' });
+        }
+      });
+      cx += col.w;
+    });
     y += rowH;
   });
 
@@ -405,74 +386,65 @@ export function drawTotalsBox(
   const boxW = 78;
   const boxX = pageW - margin - boxW;
   const boxY = y + 4;
-  const pending = pendingGc || pendingMeter;
-  const badgeExtraH = showPaymentBadge && !pending ? 10 : 0;
-  const transportFee = Number(transaction.transport_fee || 0);
-  const boxH = pending ? 36 : 43 + badgeExtraH;
-  const pendingText =
-    pendingGc && pendingMeter
-      ? PENDING_PRICE_TOTAL_TEXT
-      : pendingMeter
-        ? PENDING_METER_TOTAL_TEXT
-        : PENDING_TOTAL_TEXT;
+  const summary = buildTotalsSummary({
+    transaction,
+    gcPending: pendingGc,
+    meterPending: pendingMeter,
+  });
+  doc.setFont('helvetica', 'bold');
+  const noteLines = summary.note ? wrap(doc, summary.note, boxW - 8, 8.5) : [];
+  const boxH = 8 + 3 * 7 + 8 + noteLines.length * 4.5 + (showPaymentBadge ? 10 : 0) + 2;
 
   doc.setFillColor(248, 250, 252);
   doc.setDrawColor(203, 213, 225);
   doc.roundedRect(boxX, boxY, boxW, boxH, 2, 2, 'FD');
 
-  if (pending) {
-    let ty = boxY + 7;
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.setTextColor(51, 65, 85);
-    doc.text('Biaya Transport', boxX + 4, ty);
-    doc.text(formatMoney(transportFee), boxX + boxW - 4, ty, { align: 'right' });
-    ty += 8;
+  let ty = boxY + 8;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(51, 65, 85);
+  for (const row of summary.rows) {
+    doc.text(row.label, boxX + 4, ty);
+    doc.text(formatMoney(row.amount), boxX + boxW - 4, ty, { align: 'right' });
+    ty += 7;
+  }
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(...PDF_HEADER_RGB);
+  doc.text(summary.totalLabel, boxX + 4, ty);
+  doc.text(formatMoney(summary.totalAmount), boxX + boxW - 4, ty, { align: 'right' });
+  ty += 8;
+
+  if (noteLines.length) {
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
+    doc.setFontSize(8.5);
     doc.setTextColor(...PDF_HEADER_RGB);
-    const pendingLines = wrap(doc, pendingText, boxW - 8, 9);
-    doc.text(pendingLines, boxX + 4, ty);
-  } else {
-    const totals = [
-      ['Subtotal', formatMoney(transaction.subtotal_amount)],
-      ['Diskon', formatMoney(transaction.discount_amount)],
-      ['Biaya Transport', formatMoney(transportFee)],
-      ['TOTAL', formatMoney(transaction.final_amount)],
-    ];
-    let ty = boxY + 8;
-    for (const [label, value] of totals) {
-      const isTotal = label === 'TOTAL';
-      doc.setFont('helvetica', isTotal ? 'bold' : 'normal');
-      doc.setFontSize(isTotal ? 11 : 9);
-      doc.setTextColor(isTotal ? 12 : 51, isTotal ? 41 : 65, isTotal ? 93 : 85);
-      doc.text(label, boxX + 4, ty);
-      doc.text(value, boxX + boxW - 4, ty, { align: 'right' });
-      ty += isTotal ? 8 : 7;
+    doc.text(noteLines, boxX + 4, ty - 2.5);
+    ty += noteLines.length * 4.5;
+  }
+
+  if (showPaymentBadge) {
+    const isPaid = String(transaction.payment_status || '').toLowerCase() === 'lunas';
+    const badgeLabel = isPaid ? 'LUNAS' : 'BELUM LUNAS';
+    const badgeY = ty + 1;
+    const badgeH = 7;
+    const badgePad = 2;
+
+    if (isPaid) {
+      doc.setFillColor(220, 252, 231);
+      doc.setDrawColor(134, 239, 172);
+      doc.setTextColor(21, 128, 61);
+    } else {
+      doc.setFillColor(254, 226, 226);
+      doc.setDrawColor(252, 165, 165);
+      doc.setTextColor(185, 28, 28);
     }
 
-    if (showPaymentBadge) {
-      const isPaid = String(transaction.payment_status || '').toLowerCase() === 'lunas';
-      const badgeLabel = isPaid ? 'LUNAS' : 'BELUM LUNAS';
-      const badgeY = ty + 1;
-      const badgeH = 7;
-      const badgePad = 2;
-
-      if (isPaid) {
-        doc.setFillColor(220, 252, 231);
-        doc.setDrawColor(134, 239, 172);
-        doc.setTextColor(21, 128, 61);
-      } else {
-        doc.setFillColor(254, 226, 226);
-        doc.setDrawColor(252, 165, 165);
-        doc.setTextColor(185, 28, 28);
-      }
-
-      doc.roundedRect(boxX + badgePad, badgeY, boxW - badgePad * 2, badgeH, 1.5, 1.5, 'FD');
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8.5);
-      doc.text(badgeLabel, boxX + boxW / 2, badgeY + 4.8, { align: 'center' });
-    }
+    doc.roundedRect(boxX + badgePad, badgeY, boxW - badgePad * 2, badgeH, 1.5, 1.5, 'FD');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.text(badgeLabel, boxX + boxW / 2, badgeY + 4.8, { align: 'center' });
   }
 
   return boxY + boxH;

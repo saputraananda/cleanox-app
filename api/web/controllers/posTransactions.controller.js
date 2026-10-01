@@ -2475,6 +2475,8 @@ export const createPosTransaction = async (req, res) => {
         service_name: service?.name || `Service #${item.service_id}`,
         qty: item.qty,
         meter: item.meter,
+        satuan_name: service?.satuan_name || null,
+        unit_label: item.unit_label || null,
         base_price: item.base_price_snapshot,
         original_price: item.original_price_snapshot,
         final_price_per_unit: item.final_price_snapshot,

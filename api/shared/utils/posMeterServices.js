@@ -111,3 +111,34 @@ export function getBillableMultiplier({
 
   return safeQty * meterValue;
 }
+
+/**
+ * Total ukuran (qty × meter) untuk item meter; null jika bukan meter / meter pending.
+ * Tanpa satuan tapi meter terisi (messageItems lama) tetap dianggap meter.
+ * @returns {number|null}
+ */
+export function resolveTotalMeter({ satuanName = null, unitLabel = null, qty, meter } = {}) {
+  const meterService =
+    isMeterPricedService({ satuanName, unitLabel }) ||
+    (!satuanName && !unitLabel && Number(meter) > 0);
+  if (!meterService) return null;
+
+  const value = Number(meter);
+  if (meter == null || meter === '' || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+
+  const safeQty = Math.max(1, Number(qty || 1));
+  return Math.round(safeQty * value * 100) / 100;
+}
+
+export function formatItemQtyLabel(item) {
+  const total = resolveTotalMeter({
+    satuanName: item?.satuan_name,
+    unitLabel: item?.unit_label,
+    qty: item?.qty,
+    meter: item?.meter,
+  });
+  if (total != null) return `${total} m`;
+  return String(item?.qty ?? 1);
+}

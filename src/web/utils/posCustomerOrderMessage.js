@@ -1,3 +1,6 @@
+import { formatItemQtyLabel, isMeterPricingPending } from './posMeterServices.js';
+import { TEMP_TOTAL_LABEL, getPendingTotalNote } from './posPendingTotals.js';
+
 function toNumber(value) {
   return Number(value || 0);
 }
@@ -131,12 +134,7 @@ export function formatItemLine(item, totalPeople) {
   }
 
   const serviceName = item?.service_name || '-';
-  const qty = Math.max(1, toNumber(item?.qty || 1));
-  const meter = item?.meter == null || item?.meter === '' ? null : toNumber(item.meter);
-  const qtyPart =
-    meter != null && Number.isFinite(meter) && meter > 0
-      ? `${qty} x ${meter} m`
-      : String(qty);
+  const qtyPart = formatItemQtyLabel({ ...item, qty: Math.max(1, toNumber(item?.qty || 1)) });
   const basePart = formatBasePricePart(item);
   const finalPrice = toNumber(item?.final_price_per_unit);
   const lineTotal = toNumber(item?.line_total);
@@ -151,8 +149,16 @@ export function formatItemLine(item, totalPeople) {
 
 export function formatCustomerTotalLine(items = [], finalAmount, { pricingFinalized = false } = {}) {
   const hasGc = (items || []).some((item) => isGeneralCleaningCategory(item?.category_name));
-  if (hasGc && !pricingFinalized) {
-    return '📌Total = Menyesuaikan total jam pengerjaan';
+  const meterPending = (items || []).some((item) =>
+    isMeterPricingPending({
+      satuanName: item?.satuan_name,
+      unitLabel: item?.unit_label,
+      meter: item?.meter,
+    })
+  );
+  const note = getPendingTotalNote({ gcPending: hasGc && !pricingFinalized, meterPending });
+  if (note) {
+    return `📌${TEMP_TOTAL_LABEL} = ${formatIdr(finalAmount)} ${note}`;
   }
   return `📌Total = ${formatIdr(finalAmount)}`;
 }

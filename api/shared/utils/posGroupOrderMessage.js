@@ -16,6 +16,10 @@ import {
 
 import { isGeneralCleaningCategory, transactionHasGeneralCleaning } from './posGeneralCleaningBilling.js';
 
+import { formatItemQtyLabel, isMeterPricingPending } from './posMeterServices.js';
+
+import { TEMP_TOTAL_LABEL, getPendingTotalNote } from './posPendingTotals.js';
+
 
 
 const WORKER_LINE_PREFIX = '👨🏼‍🔧';
@@ -86,9 +90,19 @@ export function formatGroupTotalLine(items = [], finalAmount, { pricingFinalized
 
   const hasGc = transactionHasGeneralCleaning(list);
 
-  if (hasGc && !pricingFinalized) {
+  const meterPending = list.some((item) =>
+    isMeterPricingPending({
+      satuanName: item?.satuan_name,
+      unitLabel: item?.unit_label,
+      meter: item?.meter,
+    })
+  );
 
-    return '📌Total = Menyesuaikan total jam pengerjaan';
+  const note = getPendingTotalNote({ gcPending: hasGc && !pricingFinalized, meterPending });
+
+  if (note) {
+
+    return `📌${TEMP_TOTAL_LABEL} = ${formatIdr(finalAmount || 0)} ${note}`;
 
   }
 
@@ -120,12 +134,7 @@ export function formatGroupStandardItemLine(item) {
 
   const qty = Math.max(1, Number(item?.qty || 1));
 
-  const meter = item?.meter == null || item?.meter === '' ? null : Number(item.meter);
-
-  const qtyPart =
-    meter != null && Number.isFinite(meter) && meter > 0
-      ? `${qty} x ${meter} m`
-      : String(qty);
+  const qtyPart = formatItemQtyLabel({ ...item, qty });
 
   const basePart = formatBasePricePart(item);
 

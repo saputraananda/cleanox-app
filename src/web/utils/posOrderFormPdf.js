@@ -4,10 +4,14 @@ import {
   isGeneralCleaningCategory,
   isGcPricingPending,
 } from './posGeneralCleaningBilling.js';
-import { isMeterPricingPending } from './posMeterServices.js';
+import {
+  formatItemQtyLabel,
+  isMeterPricingPending,
+  transactionHasMeterPending,
+} from './posMeterServices.js';
+import { buildTotalsSummary } from './posPendingTotals.js';
 import {
   PDF_HEADER_RGB,
-  PENDING_TOTAL_TEXT,
   fitLogoDimensionsMm,
   formatMoney,
   wrap,
@@ -75,7 +79,7 @@ function formatQtyLabel(item, pendingGc) {
     return String(item.qty ?? 1);
   }
   if (item.meter != null && item.meter !== '') {
-    return `${item.qty ?? 1} × ${Number(item.meter)} m`;
+    return formatItemQtyLabel(item);
   }
   const qty = Number(item.qty ?? 1);
   return Number.isFinite(qty) ? qty.toFixed(2) : '1.00';
@@ -335,34 +339,29 @@ export async function downloadPosOrderFormPdf({ transaction, items = [], logoDat
   doc.setFontSize(9);
   doc.setTextColor(51, 65, 85);
 
-  if (pendingGc) {
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.setTextColor(51, 65, 85);
-    doc.text('Biaya Transport', summaryLabelX, y, { align: 'right' });
-    doc.text(formatMoney(transaction.transport_fee || 0), summaryValueX, y, { align: 'right' });
-    y += 6;
+  const summary = buildTotalsSummary({
+    transaction,
+    gcPending: pendingGc,
+    meterPending: transactionHasMeterPending(itemRows),
+  });
+  const summaryRows = [
+    ...summary.rows.map((row) => [row.label, formatMoney(row.amount), false]),
+    [summary.totalLabel, formatMoney(summary.totalAmount), true],
+  ];
+  for (const [label, value, isTotal] of summaryRows) {
+    doc.setFont('helvetica', isTotal ? 'bold' : 'normal');
+    doc.setFontSize(isTotal ? 11 : 9);
+    doc.setTextColor(isTotal ? 12 : 51, isTotal ? 41 : 65, isTotal ? 93 : 85);
+    doc.text(label, summaryLabelX, y, { align: 'right' });
+    doc.text(value, summaryValueX, y, { align: 'right' });
+    y += isTotal ? 7 : 6;
+  }
+  if (summary.note) {
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(...PDF_HEADER_RGB);
-    const pendingLines = wrap(doc, PENDING_TOTAL_TEXT, 48, 9);
-    doc.text(pendingLines, summaryLabelX, y + 4);
-    y += pendingLines.length * 5 + 6;
-  } else {
-    const rows = [
-      ['Subtotal', formatMoney(transaction.subtotal_amount)],
-      ['Diskon', formatMoney(transaction.discount_amount)],
-      ['Biaya Transport', formatMoney(transaction.transport_fee || 0)],
-      ['TOTAL', formatMoney(transaction.final_amount)],
-    ];
-    for (const [label, value] of rows) {
-      const isTotal = label === 'TOTAL';
-      doc.setFont('helvetica', isTotal ? 'bold' : 'normal');
-      doc.setFontSize(isTotal ? 11 : 9);
-      doc.setTextColor(isTotal ? 12 : 51, isTotal ? 41 : 65, isTotal ? 93 : 85);
-      doc.text(label, summaryLabelX, y, { align: 'right' });
-      doc.text(value, summaryValueX, y, { align: 'right' });
-      y += isTotal ? 7 : 6;
-    }
+    const noteLines = wrap(doc, summary.note, 48, 9);
+    doc.text(noteLines, summaryLabelX, y);
+    y += noteLines.length * 5 + 2;
   }
 
   y += 6;
