@@ -1,18 +1,37 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Camera, CheckCircle2, Trash2, X } from 'lucide-react';
 import api from '@shared/utils/api.js';
 import MobileWorkerBottomNav from '@mobile/components/MobileWorkerBottomNav.jsx';
 import MobileCameraCapture from '@mobile/components/MobileCameraCapture.jsx';
 import MobileConfirmDialog from '@mobile/components/MobileConfirmDialog.jsx';
+import CheckoutOutsideSheet from '@mobile/components/CheckoutOutsideSheet.jsx';
 import {
+  CHECKOUT_OUTSIDE_PHOTO_LABEL,
   DEFAULT_ABSEN_RADIUS_KM,
+  HEAD_OFFICE_LABEL,
+  OUTSIDE_LABEL,
   resolveAttendanceLocationLabel,
 } from '@mobile/utils/attendanceLocation.js';
 import { resolvePhotoUploadError } from '@mobile/utils/photoUploadError.js';
+import {
+  isLateAt,
+  isOvertimeCheckOutAt,
+  LATE_REASON_MAX_LENGTH,
+  WORK_START_TIME,
+} from '@mobile/utils/attendanceLate.js';
 
 const MONTHS_ID_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
 const pad2 = (n) => String(n).padStart(2, '0');
+
+const isOutsideMeta = (meta) => Boolean(meta?.locationName) && meta.locationName !== HEAD_OFFICE_LABEL;
+
+function appendOutside(formData, outside) {
+  if (!outside) return;
+  formData.append('outside_type', outside.type);
+  formData.append('outside_note', outside.note);
+  formData.append('outside_transaction_ids', JSON.stringify(outside.transactionIds || []));
+}
 
 function normalizePhotoPath(path) {
   return String(path || '')
@@ -74,6 +93,7 @@ function LihatFotoButton({ onClick }) {
 }
 
 export default function MobileWorkerAttendancePage() {
+  const navigate = useNavigate();
   const [attendance, setAttendance] = useState(null);
   const [checkInFile, setCheckInFile] = useState(null);
   const [checkoutProofFile, setCheckoutProofFile] = useState(null);
@@ -98,6 +118,14 @@ export default function MobileWorkerAttendancePage() {
   const [activeLeave, setActiveLeave] = useState(null);
   const [activeOffDay, setActiveOffDay] = useState(null);
   const [absenOffice, setAbsenOffice] = useState(null);
+  const [serverOffsetMs, setServerOffsetMs] = useState(0);
+  const [lateReason, setLateReason] = useState('');
+  const [replaceLateReason, setReplaceLateReason] = useState('');
+  const [lateReasonAlertOpen, setLateReasonAlertOpen] = useState(false);
+  const [checkInIsLate, setCheckInIsLate] = useState(false);
+  const [savedLateReason, setSavedLateReason] = useState('');
+  const [outsideSheet, setOutsideSheet] = useState(null);
+  const [checkOutServices, setCheckOutServices] = useState([]);
   const checkInPreviewUrlRef = useRef('');
   const checkoutProofPreviewUrlRef = useRef('');
   const savedCheckInPhotoUrlRef = useRef('');
@@ -126,6 +154,15 @@ export default function MobileWorkerAttendancePage() {
     [absenOffice]
   );
 
+  const resolveCheckOutLocationLabel = useCallback(
+    (lat, lng) => {
+      const label = resolveLocationLabel(lat, lng);
+      if (!label) return null;
+      return label === OUTSIDE_LABEL ? CHECKOUT_OUTSIDE_PHOTO_LABEL : label;
+    },
+    [resolveLocationLabel]
+  );
+
   const loadStatus = async () => {
     setLoading(true);
     try {
@@ -137,6 +174,13 @@ export default function MobileWorkerAttendancePage() {
       ]);
       const row = attendanceData.attendance || null;
       setAttendance(row);
+      const serverNow = Number(attendanceData.server_now_ms);
+      if (Number.isFinite(serverNow)) setServerOffsetMs(serverNow - Date.now());
+      setCheckInIsLate(Boolean(attendanceData.check_in_is_late));
+      setSavedLateReason(attendanceData.late_reason || '');
+      setCheckOutServices(
+        Array.isArray(attendanceData.check_out_outside_services) ? attendanceData.check_out_outside_services : []
+      );
       setActiveLeave(leaveRes.data?.leave || null);
       setActiveOffDay(offDayRes.data?.off_day || null);
 
@@ -198,6 +242,11 @@ export default function MobileWorkerAttendancePage() {
         second: '2-digit',
       }),
     [now]
+  );
+
+  const isLateNow = useMemo(
+    () => isLateAt(new Date(now.getTime() + serverOffsetMs)),
+    [now, serverOffsetMs]
   );
 
   const liveDate = useMemo(
@@ -289,7 +338,7 @@ export default function MobileWorkerAttendancePage() {
     }
   };
 
-  const submitReplacePhoto = async (kind, file, meta) => {
+  const submitReplacePhoto = async (kind, file, meta, outside = null) => {
     if (!file || photoActionBusy) return;
     setPhotoActionBusy(true);
     setSubmitting(true);
@@ -305,6 +354,8 @@ export default function MobileWorkerAttendancePage() {
       if (meta?.latitude != null) formData.append('latitude', String(meta.latitude));
       if (meta?.longitude != null) formData.append('longitude', String(meta.longitude));
       if (meta?.locationName) formData.append('location_name', meta.locationName);
+      if (kind === 'check_in' && isLateNow) formData.append('late_reason', replaceLateReason.trim());
+      if (kind === 'check_out') appendOutside(formData, outside);
 
       const endpoint =
         kind === 'check_in'
@@ -319,8 +370,24 @@ export default function MobileWorkerAttendancePage() {
             ? 'Foto In diganti. Waktu absen masuk diperbarui.'
             : 'Foto Out diganti. Waktu absen pulang diperbarui.')
       );
+      if (kind === 'check_in') setReplaceLateReason('');
+      if (kind === 'check_out') setOutsideSheet(null);
       await loadStatus();
     } catch (err) {
+      const code = err.response?.data?.code;
+      if (code === 'LATE_REASON_REQUIRED') {
+        setLateReasonAlertOpen(true);
+        return;
+      }
+      if (kind === 'check_out' && code === 'CHECKOUT_OUTSIDE_NOTE_REQUIRED') {
+        setOutsideSheet({ mode: 'replace', file, meta });
+        setError(err.response?.data?.message || '');
+        return;
+      }
+      if (kind === 'check_out' && code === 'CHECKOUT_OUTSIDE_SERVICE_INVALID') {
+        setError(err.response?.data?.message || '');
+        return;
+      }
       const info = resolvePhotoUploadError(
         err,
         kind === 'check_in' ? 'attendance-check-in' : 'attendance-check-out'
@@ -343,6 +410,11 @@ export default function MobileWorkerAttendancePage() {
       return;
     }
 
+    if (isLateNow && !lateReason.trim()) {
+      setLateReasonAlertOpen(true);
+      return;
+    }
+
     setSubmitting(true);
     try {
       const formData = new FormData();
@@ -350,14 +422,20 @@ export default function MobileWorkerAttendancePage() {
       if (checkInMeta?.latitude != null) formData.append('latitude', String(checkInMeta.latitude));
       if (checkInMeta?.longitude != null) formData.append('longitude', String(checkInMeta.longitude));
       if (checkInMeta?.locationName) formData.append('location_name', checkInMeta.locationName);
+      if (isLateNow) formData.append('late_reason', lateReason.trim());
 
       await api.post('/mobile-attendance/check-in', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setSuccess('Absen masuk berhasil. Lanjut isi foto grooming jika belum.');
       handleCheckInFileChange(null);
+      setLateReason('');
       await loadStatus();
     } catch (err) {
+      if (err.response?.data?.code === 'LATE_REASON_REQUIRED') {
+        setLateReasonAlertOpen(true);
+        return;
+      }
       const info = resolvePhotoUploadError(err, 'attendance-check-in');
       setUploadFailAlert(info);
       setError(info.description);
@@ -366,7 +444,7 @@ export default function MobileWorkerAttendancePage() {
     }
   };
 
-  const submitCheckOut = async () => {
+  const submitCheckOut = async (outside = null) => {
     setError('');
     setSuccess('');
     setSubmitting(true);
@@ -376,15 +454,34 @@ export default function MobileWorkerAttendancePage() {
       if (checkOutMeta?.latitude != null) formData.append('latitude', String(checkOutMeta.latitude));
       if (checkOutMeta?.longitude != null) formData.append('longitude', String(checkOutMeta.longitude));
       if (checkOutMeta?.locationName) formData.append('location_name', checkOutMeta.locationName);
+      appendOutside(formData, outside);
 
       await api.post('/mobile-attendance/check-out', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
+      const checkedOutAt = new Date(Date.now() + serverOffsetMs);
 
       handleCheckoutProofChange(null);
+      setOutsideSheet(null);
+      if (isOvertimeCheckOutAt(checkedOutAt)) {
+        navigate('/mobile-worker/overtime', {
+          state: { flash: 'Absen pulang berhasil disimpan. Silakan ajukan lembur jika lembur hari ini.' },
+        });
+        return;
+      }
       setSuccess('Absen pulang berhasil disimpan.');
       await loadStatus();
     } catch (err) {
+      const code = err.response?.data?.code;
+      if (code === 'CHECKOUT_OUTSIDE_NOTE_REQUIRED') {
+        setOutsideSheet({ mode: 'checkout' });
+        setError(err.response?.data?.message || '');
+        return;
+      }
+      if (code === 'CHECKOUT_OUTSIDE_SERVICE_INVALID') {
+        setError(err.response?.data?.message || '');
+        return;
+      }
       const info = resolvePhotoUploadError(err, 'attendance-check-out');
       setUploadFailAlert(info);
       setError(info.description);
@@ -399,6 +496,11 @@ export default function MobileWorkerAttendancePage() {
 
     if (!checkoutProofFile) {
       setCheckoutPhotoRequirementAlertOpen(true);
+      return;
+    }
+
+    if (isOutsideMeta(checkOutMeta)) {
+      setOutsideSheet({ mode: 'checkout' });
       return;
     }
 
@@ -479,6 +581,12 @@ export default function MobileWorkerAttendancePage() {
                   <p className="mt-1 text-[10.5px] text-slate-500">
                     {attendance?.check_in_location_name || 'Lokasi belum tercatat'}
                   </p>
+                  {attendance?.check_in_at && checkInIsLate ? (
+                    <>
+                      <p className="mt-1 text-[10.5px] font-bold text-rose-600">Terlambat</p>
+                      <p className="text-[10.5px] text-slate-500 break-words">Alasan: {savedLateReason || '-'}</p>
+                    </>
+                  ) : null}
                   {attendance?.check_in_at && savedCheckInPhotoUrl ? (
                     <LihatFotoButton
                       onClick={() =>
@@ -496,6 +604,25 @@ export default function MobileWorkerAttendancePage() {
                   <p className="mt-1 text-[10.5px] text-slate-500">
                     {attendance?.check_out_location_name || 'Lokasi belum tercatat'}
                   </p>
+                  {attendance?.check_out_outside_type ? (
+                    <>
+                      <p className="mt-1 text-[10.5px] font-bold text-amber-700">
+                        {attendance.check_out_outside_type === 'layanan'
+                          ? 'Tugas luar · Layanan'
+                          : 'Di luar HO · Alasan lain'}
+                      </p>
+                      {attendance.check_out_outside_type === 'layanan'
+                        ? checkOutServices.map((s) => (
+                            <p key={s.transaction_id} className="text-[10.5px] text-slate-500 break-words">
+                              {s.transaction_no} · {s.customer_name}
+                            </p>
+                          ))
+                        : null}
+                      <p className="text-[10.5px] text-slate-500 break-words">
+                        Catatan: {attendance.check_out_outside_note || '-'}
+                      </p>
+                    </>
+                  ) : null}
                   {attendance?.check_out_at && savedCheckOutPhotoUrl ? (
                     <LihatFotoButton
                       onClick={() =>
@@ -567,6 +694,25 @@ export default function MobileWorkerAttendancePage() {
                   </div>
                 )}
               </div>
+
+              {isLateNow && (
+                <div className="rounded-[16px] border border-rose-200 bg-rose-50 p-3 space-y-2">
+                  <p className="text-[11.5px] text-rose-700">
+                    Sudah lewat jam {WORK_START_TIME} — absen masuk tercatat <b>Terlambat</b>.
+                  </p>
+                  <label className="block">
+                    <span className="text-[11px] font-semibold text-slate-600">Alasan terlambat *</span>
+                    <textarea
+                      value={lateReason}
+                      onChange={(e) => setLateReason(e.target.value)}
+                      maxLength={LATE_REASON_MAX_LENGTH}
+                      rows={3}
+                      placeholder="Tulis alasan terlambat"
+                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12.5px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#163A22]/20"
+                    />
+                  </label>
+                </div>
+              )}
 
               <button
                 type="submit"
@@ -669,7 +815,9 @@ export default function MobileWorkerAttendancePage() {
         confirmLabel="Ambil Foto"
         includeLocation
         locationDisplayMode="label"
-        resolveLocationLabel={resolveLocationLabel}
+        resolveLocationLabel={
+          cameraTarget?.key === 'check_out_photo' ? resolveCheckOutLocationLabel : resolveLocationLabel
+        }
         onClose={() => setCameraTarget(null)}
         onCapture={(file, meta) => {
           const key = cameraTarget?.key;
@@ -680,6 +828,10 @@ export default function MobileWorkerAttendancePage() {
             return;
           }
           if (mode === 'replace_check_out') {
+            if (isOutsideMeta(meta)) {
+              setOutsideSheet({ mode: 'replace', file, meta });
+              return;
+            }
             submitReplacePhoto('check_out', file, meta);
             return;
           }
@@ -727,6 +879,21 @@ export default function MobileWorkerAttendancePage() {
                   className="w-full h-auto max-h-[60dvh] object-contain"
                 />
               </div>
+              {photoPreview.saved && photoPreview.kind === 'check_in' && isLateNow ? (
+                <label className="block rounded-[14px] border border-rose-200 bg-rose-50 p-3">
+                  <span className="text-[11px] font-semibold text-rose-700">
+                    Sudah lewat jam {WORK_START_TIME}. Alasan terlambat *
+                  </span>
+                  <textarea
+                    value={replaceLateReason}
+                    onChange={(e) => setReplaceLateReason(e.target.value)}
+                    maxLength={LATE_REASON_MAX_LENGTH}
+                    rows={3}
+                    placeholder="Tulis alasan terlambat"
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[12.5px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#163A22]/20"
+                  />
+                </label>
+              ) : null}
               {photoPreview.saved && photoPreview.kind ? (
                 <div className="grid grid-cols-2 gap-2">
                   <button
@@ -734,6 +901,10 @@ export default function MobileWorkerAttendancePage() {
                     disabled={photoActionBusy || submitting}
                     onClick={() => {
                       const kind = photoPreview.kind;
+                      if (kind === 'check_in' && isLateNow && !replaceLateReason.trim()) {
+                        setLateReasonAlertOpen(true);
+                        return;
+                      }
                       closePhotoPreview();
                       setCameraTarget({
                         key: kind === 'check_in' ? 'check_in_photo' : 'check_out_photo',
@@ -809,6 +980,28 @@ export default function MobileWorkerAttendancePage() {
         confirmLabel="Mengerti"
         onConfirm={() => setCheckoutPhotoRequirementAlertOpen(false)}
         onClose={() => setCheckoutPhotoRequirementAlertOpen(false)}
+      />
+
+      <CheckoutOutsideSheet
+        open={Boolean(outsideSheet)}
+        busy={submitting || photoActionBusy}
+        onClose={() => setOutsideSheet(null)}
+        onSubmit={(outside) =>
+          outsideSheet?.mode === 'replace'
+            ? submitReplacePhoto('check_out', outsideSheet.file, outsideSheet.meta, outside)
+            : submitCheckOut(outside)
+        }
+      />
+
+      <MobileConfirmDialog
+        open={lateReasonAlertOpen}
+        mode="alert"
+        title="Alasan Terlambat Wajib Diisi"
+        description="Absen masuk setelah jam 08:00 wajib menyertakan alasan terlambat."
+        variant="danger"
+        confirmLabel="Mengerti"
+        onConfirm={() => setLateReasonAlertOpen(false)}
+        onClose={() => setLateReasonAlertOpen(false)}
       />
 
       <MobileConfirmDialog

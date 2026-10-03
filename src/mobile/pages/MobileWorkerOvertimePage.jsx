@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Clock3 } from 'lucide-react';
 import api from '@shared/utils/api.js';
 import MobileWorkerBottomNav from '@mobile/components/MobileWorkerBottomNav.jsx';
@@ -99,6 +99,8 @@ function statusBadgeClass(status) {
 }
 
 export default function MobileWorkerOvertimePage() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const defaultCutoff = useMemo(() => getDefaultCutoff(), []);
   const [cutoffMonth, setCutoffMonth] = useState(defaultCutoff.cutoffMonth);
   const [cutoffYear, setCutoffYear] = useState(defaultCutoff.cutoffYear);
@@ -113,7 +115,13 @@ export default function MobileWorkerOvertimePage() {
   const [endTime, setEndTime] = useState('20:00');
   const [description, setDescription] = useState('');
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+  const [success, setSuccess] = useState(() => location.state?.flash || '');
+
+  useEffect(() => {
+    if (location.state?.flash) {
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }, [location.pathname, location.state, navigate]);
 
   const yearOptions = useMemo(() => {
     const y = new Date().getFullYear();

@@ -1,5 +1,7 @@
 export const HEAD_OFFICE_LABEL = 'Head Office Alora';
 export const OUTSIDE_LABEL = 'sedang tugas diluar';
+export const CHECKOUT_OUTSIDE_PHOTO_LABEL = 'diluar HO';
+export const OUTSIDE_OTHER_LABEL = 'diluar HO - urusan lain';
 export const DEFAULT_ABSEN_RADIUS_KM = 2;
 
 function toRadians(value) {

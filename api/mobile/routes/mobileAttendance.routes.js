@@ -12,6 +12,7 @@ import {
   replaceCheckOutPhoto,
   getTodayAttendanceStatus,
   getAbsenLocation,
+  getTodayServices,
   serveAttendanceFile,
   getRekapMonth,
   getRekapDay,
@@ -45,6 +46,7 @@ router.use(requireMobileWorker);
 
 router.get('/today-status', getTodayAttendanceStatus);
 router.get('/absen-location', getAbsenLocation);
+router.get('/today-services', getTodayServices);
 router.get('/rekap', getRekapMonth);
 router.get('/rekap/day', getRekapDay);
 router.post('/check-in', handleUpload, checkInAttendance);

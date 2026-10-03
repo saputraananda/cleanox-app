@@ -6,6 +6,11 @@ import { fileURLToPath } from 'url';
 import cleanoxPool from '../../shared/db/cleanox.js';
 import { isWorkerOffDay } from './mobileOffDay.controller.js';
 import { formatCalendarDateKey } from '../../shared/utils/posWorkerBusy.js';
+import {
+  WORK_START_TIME,
+  isLateCheckIn,
+  normalizeLateReason,
+} from '../../shared/utils/attendanceLate.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -40,6 +45,20 @@ const REQUIRED_CHECK_IN_PHOTOS = ['check_in_photo'];
 const REQUIRED_GROOMING_PHOTOS = GROOMING_FIELDS;
 const ABSEN_LOCATION_NAME = 'Head Office Alora';
 const ABSEN_RADIUS_KM = 2;
+const LATE_REASON_REQUIRED_MESSAGE = 'Absen masuk setelah jam 08:00 wajib mengisi alasan terlambat';
+const OUTSIDE_SERVICE_LOCATION_NAME = 'sedang tugas diluar';
+const OUTSIDE_OTHER_LOCATION_NAME = 'diluar HO - urusan lain';
+const CHECKOUT_OUTSIDE_TYPES = ['layanan', 'lainnya'];
+const CHECKOUT_OUTSIDE_NOTE_MAX_LENGTH = 1000;
+const CHECKOUT_OUTSIDE_REQUIRED_MESSAGE = 'Absen pulang di luar HO wajib mengisi keterangan';
+const TRANSACTION_STATUS_LABELS = {
+  Draft: 'Draft',
+  Assigned: 'Ditugaskan',
+  Waiting_Confirmation: 'Menunggu Konfirmasi',
+  Scheduled: 'Terjadwal',
+  In_Progress: 'Dikerjakan',
+  Completed: 'Selesai',
+};
 
 const PHOTO_TYPE_META = [
   { photo_type: 'full_body', label: 'Foto Satu Badan', field: 'full_body_photo', fileCol: 'full_body_photo_file', pathCol: 'full_body_photo_path' },
@@ -169,6 +188,90 @@ async function resolveAttendanceLocationName(connection, latitude, longitude) {
   return km <= ABSEN_RADIUS_KM ? ABSEN_LOCATION_NAME : 'sedang tugas diluar';
 }
 
+function parseOutsideServices(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function parseTransactionIds(raw) {
+  let list = raw;
+  if (typeof raw === 'string') {
+    try {
+      list = JSON.parse(raw);
+    } catch {
+      list = [];
+    }
+  }
+  if (!Array.isArray(list)) return [];
+  return [...new Set(list.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+}
+
+function outsideError(message, code) {
+  const error = new Error(message);
+  error.statusCode = 400;
+  error.code = code;
+  return error;
+}
+
+async function resolveCheckOutOutside(connection, { locationName, body, today }) {
+  if (locationName === ABSEN_LOCATION_NAME) {
+    return { locationName, type: null, note: null, services: null };
+  }
+
+  const type = String(body?.outside_type || '').trim();
+  if (!CHECKOUT_OUTSIDE_TYPES.includes(type)) {
+    throw outsideError(CHECKOUT_OUTSIDE_REQUIRED_MESSAGE, 'CHECKOUT_OUTSIDE_NOTE_REQUIRED');
+  }
+
+  const note = String(body?.outside_note ?? '').trim().slice(0, CHECKOUT_OUTSIDE_NOTE_MAX_LENGTH);
+  if (!note) {
+    throw outsideError(CHECKOUT_OUTSIDE_REQUIRED_MESSAGE, 'CHECKOUT_OUTSIDE_NOTE_REQUIRED');
+  }
+
+  if (type === 'lainnya') {
+    return { locationName: OUTSIDE_OTHER_LOCATION_NAME, type, note, services: null };
+  }
+
+  const ids = parseTransactionIds(body?.outside_transaction_ids);
+  if (ids.length === 0) {
+    throw outsideError(CHECKOUT_OUTSIDE_REQUIRED_MESSAGE, 'CHECKOUT_OUTSIDE_NOTE_REQUIRED');
+  }
+
+  const [rows] = await connection.query(
+    `SELECT id, transaction_no, customer_name
+     FROM tr_transactions
+     WHERE id IN (?)
+       AND DATE(service_date) = ?
+       AND status <> 'Cancelled'
+       AND COALESCE(is_history_entry, 0) = 0`,
+    [ids, today]
+  );
+  if ((rows || []).length !== ids.length) {
+    throw outsideError('Layanan yang dipilih tidak valid untuk hari ini', 'CHECKOUT_OUTSIDE_SERVICE_INVALID');
+  }
+
+  return {
+    locationName: OUTSIDE_SERVICE_LOCATION_NAME,
+    type,
+    note,
+    services: JSON.stringify(
+      rows.map((r) => ({
+        transaction_id: Number(r.id),
+        transaction_no: r.transaction_no,
+        customer_name: r.customer_name,
+      }))
+    ),
+  };
+}
+
 function buildGroomingPhotos(row) {
   return PHOTO_TYPE_META.map((meta) => ({
     photo_type: meta.photo_type,
@@ -219,6 +322,11 @@ export const getTodayAttendanceStatus = async (req, res) => {
       required_check_in_photos: REQUIRED_CHECK_IN_PHOTOS,
       required_grooming_photos: REQUIRED_GROOMING_PHOTOS,
       required_photos: REQUIRED_CHECK_IN_PHOTOS,
+      server_now_ms: Date.now(),
+      work_start_time: WORK_START_TIME,
+      check_in_is_late: isLateCheckIn(row?.check_in_at),
+      late_reason: row?.late_reason || null,
+      check_out_outside_services: parseOutsideServices(row?.check_out_outside_services),
     });
   } catch (error) {
     console.error('[mobileAttendance/getTodayAttendanceStatus]', error.message);
@@ -251,6 +359,65 @@ export const getAbsenLocation = async (req, res) => {
   }
 };
 
+export const getTodayServices = async (req, res) => {
+  const workerId = Number(req.user?.id);
+  const today = todayDateString();
+
+  try {
+    const [txRows] = await cleanoxPool.query(
+      `SELECT id, transaction_no, customer_name, total_people, status, service_mode, service_date
+       FROM tr_transactions
+       WHERE DATE(service_date) = ?
+         AND status <> 'Cancelled'
+         AND COALESCE(is_history_entry, 0) = 0
+       ORDER BY service_date ASC, id ASC`,
+      [today]
+    );
+
+    const txIds = (txRows || []).map((r) => Number(r.id));
+    const assignmentsByTx = new Map();
+    if (txIds.length > 0) {
+      const [assignmentRows] = await cleanoxPool.query(
+        `SELECT transaction_id, employee_id, employee_name
+         FROM tr_worker_assignments
+         WHERE transaction_id IN (?)
+           AND assignment_status NOT IN ('Cancelled', 'Rejected')`,
+        [txIds]
+      );
+      for (const a of assignmentRows || []) {
+        const txId = Number(a.transaction_id);
+        if (!assignmentsByTx.has(txId)) assignmentsByTx.set(txId, []);
+        assignmentsByTx.get(txId).push(a);
+      }
+    }
+
+    const services = (txRows || []).map((tx) => {
+      const assignments = assignmentsByTx.get(Number(tx.id)) || [];
+      const teamNames = [
+        ...new Set(assignments.map((a) => String(a.employee_name || '').trim()).filter(Boolean)),
+      ];
+      return {
+        transaction_id: Number(tx.id),
+        transaction_no: tx.transaction_no,
+        customer_name: tx.customer_name,
+        total_people: tx.total_people != null ? Number(tx.total_people) : null,
+        status: tx.status,
+        status_label: TRANSACTION_STATUS_LABELS[tx.status] || tx.status,
+        service_mode: tx.service_mode,
+        team_names: teamNames,
+        assigned_to_me: assignments.some((a) => Number(a.employee_id) === workerId),
+      };
+    });
+
+    services.sort((a, b) => Number(b.assigned_to_me) - Number(a.assigned_to_me));
+
+    return res.json({ date: today, services });
+  } catch (error) {
+    console.error('[mobileAttendance/getTodayServices]', error.message);
+    return res.status(500).json({ message: 'Gagal mengambil jadwal layanan hari ini' });
+  }
+};
+
 export const checkInAttendance = async (req, res) => {
   const workerId = req.user?.id;
   const today = todayDateString();
@@ -262,6 +429,13 @@ export const checkInAttendance = async (req, res) => {
 
   if (await isWorkerOffDay(workerId, today)) {
     return res.status(403).json({ message: 'Hari ini libur — absensi tidak diperlukan' });
+  }
+
+  const now = new Date();
+  const late = isLateCheckIn(now);
+  const lateReason = late ? normalizeLateReason(req.body.late_reason) : '';
+  if (late && !lateReason) {
+    return res.status(400).json({ message: LATE_REASON_REQUIRED_MESSAGE, code: 'LATE_REASON_REQUIRED' });
   }
 
   const connection = await cleanoxPool.getConnection();
@@ -290,18 +464,21 @@ export const checkInAttendance = async (req, res) => {
     if (existing) {
       await connection.query(
         `UPDATE tr_worker_attendance
-         SET check_in_at = NOW(),
+         SET check_in_at = ?,
              check_in_latitude = ?,
              check_in_longitude = ?,
              check_in_location_name = ?,
+             late_reason = ?,
              check_in_photo_file = ?,
              check_in_photo_path = ?,
              updated_at = NOW()
          WHERE id = ?`,
         [
+          now,
           latitude,
           longitude,
           locationName,
+          lateReason || null,
           checkInPhoto.file,
           checkInPhoto.path,
           existing.id,
@@ -311,14 +488,16 @@ export const checkInAttendance = async (req, res) => {
       await connection.query(
         `INSERT INTO tr_worker_attendance
           (worker_id, attendance_date, check_in_at, check_in_latitude, check_in_longitude,
-           check_in_location_name, check_in_photo_file, check_in_photo_path)
-         VALUES (?, ?, NOW(), ?, ?, ?, ?, ?)`,
+           check_in_location_name, late_reason, check_in_photo_file, check_in_photo_path)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           workerId,
           today,
+          now,
           latitude,
           longitude,
           locationName,
+          lateReason || null,
           checkInPhoto.file,
           checkInPhoto.path,
         ]
@@ -514,6 +693,7 @@ export const deleteCheckInPhoto = async (req, res) => {
            check_in_latitude = NULL,
            check_in_longitude = NULL,
            check_in_location_name = NULL,
+           late_reason = NULL,
            check_in_photo_file = NULL,
            check_in_photo_path = NULL,
            full_body_photo_file = NULL,
@@ -556,6 +736,13 @@ export const replaceCheckInPhoto = async (req, res) => {
     return res.status(403).json({ message: 'Hari ini libur — absensi tidak diperlukan' });
   }
 
+  const now = new Date();
+  const late = isLateCheckIn(now);
+  const lateReason = late ? normalizeLateReason(req.body.late_reason) : '';
+  if (late && !lateReason) {
+    return res.status(400).json({ message: LATE_REASON_REQUIRED_MESSAGE, code: 'LATE_REASON_REQUIRED' });
+  }
+
   const connection = await cleanoxPool.getConnection();
   try {
     await connection.beginTransaction();
@@ -595,10 +782,11 @@ export const replaceCheckInPhoto = async (req, res) => {
 
     await connection.query(
       `UPDATE tr_worker_attendance
-       SET check_in_at = NOW(),
+       SET check_in_at = ?,
            check_in_latitude = ?,
            check_in_longitude = ?,
            check_in_location_name = ?,
+           late_reason = ?,
            check_in_photo_file = ?,
            check_in_photo_path = ?,
            full_body_photo_file = NULL,
@@ -612,9 +800,11 @@ export const replaceCheckInPhoto = async (req, res) => {
            updated_at = NOW()
        WHERE id = ?`,
       [
+        now,
         latitude,
         longitude,
         locationName,
+        lateReason || null,
         checkInPhoto.file,
         checkInPhoto.path,
         existing.id,
@@ -672,6 +862,9 @@ export const deleteCheckOutPhoto = async (req, res) => {
            check_out_latitude = NULL,
            check_out_longitude = NULL,
            check_out_location_name = NULL,
+           check_out_outside_type = NULL,
+           check_out_outside_note = NULL,
+           check_out_outside_services = NULL,
            check_out_photo_file = NULL,
            check_out_photo_path = NULL,
            updated_at = NOW()
@@ -725,7 +918,12 @@ export const replaceCheckOutPhoto = async (req, res) => {
       return res.status(400).json({ message: 'GPS absensi wajib aktif untuk ambil ulang Foto Out' });
     }
 
-    const locationName = await resolveAttendanceLocationName(connection, latitude, longitude);
+    const baseLocationName = await resolveAttendanceLocationName(connection, latitude, longitude);
+    const outside = await resolveCheckOutOutside(connection, {
+      locationName: baseLocationName,
+      body: req.body,
+      today,
+    });
     const oldFile = existing.check_out_photo_file || null;
     const checkoutPhoto = await savePhoto(workerId, today, 'check_out', files.check_out_photo[0]);
 
@@ -735,6 +933,9 @@ export const replaceCheckOutPhoto = async (req, res) => {
            check_out_latitude = ?,
            check_out_longitude = ?,
            check_out_location_name = ?,
+           check_out_outside_type = ?,
+           check_out_outside_note = ?,
+           check_out_outside_services = ?,
            check_out_photo_file = ?,
            check_out_photo_path = ?,
            updated_at = NOW()
@@ -742,7 +943,10 @@ export const replaceCheckOutPhoto = async (req, res) => {
       [
         latitude,
         longitude,
-        locationName,
+        outside.locationName,
+        outside.type,
+        outside.note,
+        outside.services,
         checkoutPhoto.file,
         checkoutPhoto.path,
         existing.id,
@@ -770,6 +974,7 @@ export const replaceCheckOutPhoto = async (req, res) => {
     console.error('[mobileAttendance/replaceCheckOutPhoto]', error.message);
     return res.status(error.statusCode || 500).json({
       message: error.message || 'Gagal mengganti Foto Out',
+      ...(error.code ? { code: error.code } : {}),
     });
   } finally {
     connection.release();
@@ -793,8 +998,13 @@ export const checkOutAttendance = async (req, res) => {
       return res.status(400).json({ message: 'GPS absensi wajib aktif untuk absen pulang' });
     }
 
+    const baseLocationName = await resolveAttendanceLocationName(connection, latitude, longitude);
+    const outside = await resolveCheckOutOutside(connection, {
+      locationName: baseLocationName,
+      body: req.body,
+      today,
+    });
     const checkoutPhoto = await savePhoto(workerId, today, 'check_out', files.check_out_photo[0]);
-    const locationName = await resolveAttendanceLocationName(connection, latitude, longitude);
 
     const [result] = await connection.query(
       `UPDATE tr_worker_attendance
@@ -802,11 +1012,25 @@ export const checkOutAttendance = async (req, res) => {
            check_out_latitude = ?,
            check_out_longitude = ?,
            check_out_location_name = ?,
+           check_out_outside_type = ?,
+           check_out_outside_note = ?,
+           check_out_outside_services = ?,
            check_out_photo_file = ?,
            check_out_photo_path = ?,
            updated_at = NOW()
        WHERE worker_id = ? AND attendance_date = ? AND check_in_at IS NOT NULL`,
-      [latitude, longitude, locationName, checkoutPhoto.file, checkoutPhoto.path, workerId, today]
+      [
+        latitude,
+        longitude,
+        outside.locationName,
+        outside.type,
+        outside.note,
+        outside.services,
+        checkoutPhoto.file,
+        checkoutPhoto.path,
+        workerId,
+        today,
+      ]
     );
 
     if (result.affectedRows === 0) {
@@ -818,6 +1042,7 @@ export const checkOutAttendance = async (req, res) => {
     console.error('[mobileAttendance/checkOutAttendance]', error.message);
     return res.status(error.statusCode || 500).json({
       message: error.message || 'Gagal menyimpan check-out attendance',
+      ...(error.code ? { code: error.code } : {}),
     });
   } finally {
     connection.release();
