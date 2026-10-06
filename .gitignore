@@ -9,6 +9,10 @@ dist-ssr/
 .env.prod
 .env.local
 .env.*.local
+.env.example
+prisma.config.ts
+
+
 
 # Logs
 logs/
@@ -47,3 +51,7 @@ Thumbs.db
 .windsurf/
 docs/
 plans/
+prisma/
+database/
+sripts/
+
