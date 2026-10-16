@@ -11,7 +11,9 @@ export const CARE_REPORT_CATEGORIES = {
 
 export const CARE_REPORT_TIPS = {
   [CARE_REPORT_CATEGORIES.SOFA]: {
-    label: 'Deep Clean Sofa Kursi',
+    label: 'Deep Clean Sofa Kursi',          // Label untuk pill kategori
+    itemSubLabel: 'Deep Clean Sofa',         // Sublabel untuk item (berbeda dari label)
+    itemPrefix: 'Item',                      // Prefix "Item n" atau "Area n"
     title: 'Tips Perawatan Sofa di Rumah',
     tips: [
       'Jangan duduki sofa sebelum benar-benar kering. Ikuti estimasi waktu kering dari teknisi.',
@@ -24,6 +26,8 @@ export const CARE_REPORT_TIPS = {
   },
   [CARE_REPORT_CATEGORIES.KASUR]: {
     label: 'Deep Clean Kasur',
+    itemSubLabel: 'Deep Clean Kasur',
+    itemPrefix: 'Item',
     title: 'Tips Perawatan Kasur di Rumah',
     tips: [
       'Pastikan kasur kering sempurna sebelum dipasang sprei kembali.',
@@ -36,6 +40,8 @@ export const CARE_REPORT_TIPS = {
   },
   [CARE_REPORT_CATEGORIES.BATHROOM]: {
     label: 'General Cleaning',
+    itemSubLabel: 'General Cleaning',
+    itemPrefix: 'Area',                      // Perbedaan: gunakan "Area" bukan "Item"
     title: 'Tips Perawatan Kamar Mandi & Toilet',
     tips: [
       'Keringkan lantai setelah dipakai agar tidak licin dan tidak mudah berjamur.',
@@ -48,6 +54,8 @@ export const CARE_REPORT_TIPS = {
   },
   [CARE_REPORT_CATEGORIES.GENERAL]: {
     label: 'General Cleaning',
+    itemSubLabel: 'General Cleaning',
+    itemPrefix: 'Item',
     title: 'Tips Perawatan Rumah Bersih & Sehat',
     tips: [
       'Bersihkan perabotan secara berkala untuk mencegah penumpukan debu.',
