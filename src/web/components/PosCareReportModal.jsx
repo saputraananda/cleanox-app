@@ -3,6 +3,7 @@ import { X, FileText, Image as ImageIcon, Sparkles, Upload, Check, AlertCircle, 
 import BodyPortal from '@web/components/BodyPortal.jsx';
 import { CARE_REPORT_CATEGORIES, detectReportCategory } from '@web/utils/posCareReportTips.js';
 import { downloadPosCareReportPdf } from '@web/utils/posCareReportPdf.js';
+import cleanoxMascot from '../../assets/cleanox-mascot.png';
 
 function getDefaultNextMaintenance(serviceDateStr, addMonths = 3) {
   const baseDate = serviceDateStr ? new Date(serviceDateStr) : new Date();
@@ -298,8 +299,8 @@ export default function PosCareReportModal({
           {/* Header Modal */}
           <div className="flex items-center justify-between border-b border-slate-100 bg-gradient-to-r from-sky-50/60 via-white to-emerald-50/60 px-6 py-4">
             <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#0a3058] text-white shadow-md">
-                <FileText className="w-5 h-5 text-sky-300" />
+              <div className="relative flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-[#0a3058] to-[#164e87] p-1 shadow-md overflow-hidden border border-sky-200">
+                <img src={cleanoxMascot} alt="Maskot Cleanox" className="h-full w-full object-contain" />
               </div>
               <div>
                 <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">

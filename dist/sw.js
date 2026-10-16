@@ -90,7 +90,7 @@ define(['./workbox-7e5eb42b'], (function (workbox) { 'use strict';
     "revision": "1680140e482a035f2843838ddc5b5dfc"
   }, {
     "url": "index.html",
-    "revision": "58afbf5525bbbe639eef3954f87cf92a"
+    "revision": "1dc87922f23197bc9c502379b603a89b"
   }, {
     "url": "cleanox.png",
     "revision": "08f731ee9eb2f1d25464091426a14645"
@@ -101,13 +101,13 @@ define(['./workbox-7e5eb42b'], (function (workbox) { 'use strict';
     "url": "assets/purify.es-DP5U8-sc.js",
     "revision": null
   }, {
-    "url": "assets/index.es-BzjOBx67.js",
+    "url": "assets/index.es-ToW2pYhs.js",
     "revision": null
   }, {
-    "url": "assets/index-ByihX00I.css",
+    "url": "assets/index-pHzNFPV3.css",
     "revision": null
   }, {
-    "url": "assets/index-BmnSsLow.js",
+    "url": "assets/index-DNjt6afa.js",
     "revision": null
   }, {
     "url": "assets/html2canvas.esm-ezMWrafe.js",
@@ -134,7 +134,7 @@ define(['./workbox-7e5eb42b'], (function (workbox) { 'use strict';
     "url": "assets/CleanoxTeam-Dm1n6IuY.webp",
     "revision": null
   }, {
-    "url": "assets/cleanox-mascot-BMPge_Nc.png",
+    "url": "assets/cleanox-mascot-e6Hk8Igq.png",
     "revision": null
   }, {
     "url": "assets/cleanox-Dkplawwn.png",

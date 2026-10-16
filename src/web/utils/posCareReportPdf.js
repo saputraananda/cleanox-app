@@ -49,9 +49,28 @@ export function cropImageToSquareDataUrl(src) {
 /**
  * Memuat gambar apa adanya sebagai DataURL
  */
-export function loadImageAsDataUrl(src) {
+export async function loadImageAsDataUrl(src) {
+  if (!src) return null;
+  if (typeof src === 'string' && src.startsWith('data:')) return src;
+
+  // Coba fetch blob langsung (paling aman & reliable untuk file lokal / Vite assets)
+  try {
+    const res = await fetch(src);
+    if (res.ok) {
+      const blob = await res.blob();
+      const dataUrl = await new Promise((resolve) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(fr.result);
+        fr.onerror = () => resolve(null);
+        fr.readAsDataURL(blob);
+      });
+      if (dataUrl) return dataUrl;
+    }
+  } catch {
+    // fallback ke HTMLImageElement
+  }
+
   return new Promise((resolve) => {
-    if (!src) return resolve(null);
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
