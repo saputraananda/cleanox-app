@@ -14,6 +14,7 @@ import TablePagination, {
 export default function PosCustomersPage() {
   const [customers, setCustomers] = useState([]);
   const [search, setSearch] = useState('');
+  const [sourceFilter, setSourceFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -30,13 +31,19 @@ export default function PosCustomersPage() {
     total_pages: 1,
   });
 
-  const loadData = async ({ term = search, page = currentPage, size = pageSize } = {}) => {
+  const loadData = async ({
+    term = search,
+    source = sourceFilter,
+    page = currentPage,
+    size = pageSize,
+  } = {}) => {
     setLoading(true);
     setError('');
     try {
       const { data } = await api.get('/pos-customers', {
         params: {
           search: term,
+          source,
           page,
           page_size: size,
         },
@@ -62,17 +69,11 @@ export default function PosCustomersPage() {
   useEffect(() => {
     const timer = setTimeout(() => {
       setCurrentPage(1);
-      loadData({ term: search, page: 1, size: pageSize });
+      loadData({ term: search, source: sourceFilter, page: 1, size: pageSize });
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [search, pageSize]);
-
-  const getCustomerSourceLabel = (row) => {
-    if (row.source_system === 'smartlink') return 'Smartlink';
-    if (row.source_system === 'pos_legacy') return 'POS · Legacy';
-    return 'POS';
-  };
+  }, [search, sourceFilter, pageSize]);
 
   const canEditCustomer = (row) => Boolean(row.id) && !row.needs_ensure;
 
@@ -173,15 +174,32 @@ export default function PosCustomersPage() {
       </div>
 
       <div className="rounded-2xl border border-slate-100 bg-white p-0 shadow-sm overflow-hidden">
-        <div className="flex items-center justify-between gap-2 px-3 sm:px-4 py-3 border-b border-gray-50 flex-wrap">
-          <div className="relative flex-1 min-w-[160px] max-w-xs">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Cari nama, telepon, atau alamat..."
-              className="w-full rounded-[12px] border border-slate-200 bg-slate-50 pl-9 pr-3 py-2.5 text-xs sm:text-sm focus:bg-white focus:border-blue-400 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,.12)]"
-            />
+        <div className="flex items-center justify-between gap-3 px-3 sm:px-4 py-3 border-b border-gray-50 flex-wrap">
+          <div className="flex items-center gap-2.5 flex-1 min-w-[280px]">
+            <div className="relative flex-1 min-w-[160px] max-w-xs">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Cari nama, telepon, atau alamat..."
+                className="w-full rounded-[12px] border border-slate-200 bg-slate-50 pl-9 pr-3 py-2 text-xs sm:text-sm focus:bg-white focus:border-blue-400 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,.12)]"
+              />
+            </div>
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              <span className="text-slate-500 text-xs hidden sm:inline font-medium">Asal Data:</span>
+              <select
+                value={sourceFilter}
+                onChange={(e) => {
+                  setSourceFilter(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="rounded-[12px] border border-slate-200 bg-slate-50 px-3 py-2 text-xs sm:text-sm font-medium text-slate-700 focus:bg-white focus:border-blue-400 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,.12)]"
+              >
+                <option value="all">Semua Asal Data</option>
+                <option value="pos">POS</option>
+                <option value="smartlink">Smartlink</option>
+              </select>
+            </div>
           </div>
           <div className="flex items-center gap-2 text-sm flex-shrink-0">
             <span className="text-gray-400 text-xs hidden sm:inline">Baris:</span>
@@ -215,7 +233,7 @@ export default function PosCustomersPage() {
                   <th className="px-3 sm:px-4 py-3 text-left text-[12px] font-semibold text-white/90 uppercase tracking-wider">Nama</th>
                   <th className="px-3 sm:px-4 py-3 text-left text-[12px] font-semibold text-white/90 uppercase tracking-wider">Telepon</th>
                   <th className="px-3 sm:px-4 py-3 text-left text-[12px] font-semibold text-white/90 uppercase tracking-wider">Alamat</th>
-                  <th className="px-3 sm:px-4 py-3 text-left text-[12px] font-semibold text-white/90 uppercase tracking-wider">Asal Data</th>
+                  <th className="px-3 sm:px-4 py-3 text-left text-[12px] font-semibold text-white/90 uppercase tracking-wider">Sumber Informasi</th>
                   <th className="px-3 sm:px-4 py-3 text-left text-[12px] font-semibold text-white/90 uppercase tracking-wider">Transaksi</th>
                   <th className="px-3 sm:px-4 py-3 text-left text-[12px] font-semibold text-white/90 uppercase tracking-wider">Tier</th>
                   <th className="px-3 sm:px-4 py-3 text-left text-[12px] font-semibold text-white/90 uppercase tracking-wider">Status</th>
@@ -243,15 +261,13 @@ export default function PosCustomersPage() {
                         {row.address || '—'}
                       </td>
                       <td className="px-3 sm:px-4 py-2.5 text-sm text-gray-700">
-                        <span
-                          className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-                            row.source_system === 'smartlink'
-                              ? 'border-amber-200 bg-amber-50 text-amber-700'
-                              : 'border-blue-200 bg-blue-50 text-blue-700'
-                          }`}
-                        >
-                          {getCustomerSourceLabel(row)}
-                        </span>
+                        {row.referral_source_name ? (
+                          <span className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2.5 py-0.5 text-[10px] font-semibold text-sky-700">
+                            {row.referral_source_name}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 text-xs">—</span>
+                        )}
                       </td>
                       <td className="px-3 sm:px-4 py-2.5 text-sm font-semibold text-gray-800">
                         {row.transaction_count || 0}

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { authenticate } from '../../shared/middleware/auth.middleware.js';
+import { getMyKpi } from '../controllers/mobileKpi.controller.js';
 import {
   acceptTask,
   advanceTakehomeStage,
@@ -70,6 +71,7 @@ router.get('/takehome-file/:filename', authenticate, requireMobileWorker, serveM
 router.use(authenticate);
 router.use(requireMobileWorker);
 
+router.get('/my-kpi', getMyKpi);
 router.get('/', listMyTasks);
 router.get('/calendar', getMyCalendar);
 router.get('/notices', listScheduleNotices);

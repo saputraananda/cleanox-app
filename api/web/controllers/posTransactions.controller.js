@@ -3634,7 +3634,6 @@ export const reschedulePosTransaction = async (req, res) => {
   }
 
   const todayKey = todayDateStringJakarta();
-  const minOldServiceKey = addDaysToDateKey(todayKey, 1);
   let proofBuffers;
   try {
     proofBuffers = await compressScheduleProofPhotos(proofFiles);
@@ -3671,22 +3670,17 @@ export const reschedulePosTransaction = async (req, res) => {
       return res.status(400).json({ message: 'Tanggal layanan lama tidak valid' });
     }
 
-    if (oldDateKey < minOldServiceKey) {
+    if (oldDateKey < todayKey) {
       await connection.rollback();
       return res.status(400).json({
-        message: 'Reschedule hanya boleh minimal 1 hari sebelum tanggal layanan (tidak boleh di hari-H)',
+        message: 'Tanggal layanan lama sudah lewat dan tidak dapat di-reschedule',
       });
     }
 
-    if (newDateKey === oldDateKey) {
-      await connection.rollback();
-      return res.status(400).json({ message: 'Tanggal layanan baru harus berbeda dari tanggal lama' });
-    }
-
-    if (newDateKey < minOldServiceKey) {
+    if (newDateKey < todayKey) {
       await connection.rollback();
       return res.status(400).json({
-        message: 'Tanggal layanan baru minimal besok (H−1 dari hari ini)',
+        message: 'Tanggal layanan baru tidak boleh di masa lalu',
       });
     }
 
@@ -3719,6 +3713,17 @@ export const reschedulePosTransaction = async (req, res) => {
       newServiceDateValue = newServiceDateValue.replace('T', ' ').slice(0, 19);
     }
 
+    const oldDateTimeRaw = transaction.service_date instanceof Date
+      ? transaction.service_date.toISOString()
+      : String(transaction.service_date || '');
+    const oldDateTimeNormalized = oldDateTimeRaw.replace('T', ' ').slice(0, 16);
+    const newDateTimeNormalized = newServiceDateValue.replace('T', ' ').slice(0, 16);
+
+    if (newDateTimeNormalized === oldDateTimeNormalized) {
+      await connection.rollback();
+      return res.status(400).json({ message: 'Jadwal layanan baru harus berbeda dari jadwal lama' });
+    }
+
     await connection.query(
       `UPDATE tr_transactions
        SET service_date = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP(0)
@@ -3728,7 +3733,11 @@ export const reschedulePosTransaction = async (req, res) => {
 
     const oldLabel = formatDateLabelId(oldDateKey);
     const newLabel = formatDateLabelId(newDateKey);
-    const description = `Dari ${oldLabel} ke ${newLabel}`;
+    const oldTimeMatch = oldDateTimeNormalized.slice(11, 16);
+    const newTimeMatch = newDateTimeNormalized.slice(11, 16);
+    const description = newDateKey === oldDateKey
+      ? `Jam diubah dari ${oldTimeMatch || '-'} ke ${newTimeMatch || '-'}`
+      : `Dari ${oldLabel} ke ${newLabel}`;
 
     await createPosTracking(
       connection,

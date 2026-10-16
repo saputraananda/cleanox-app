@@ -22,6 +22,7 @@ import { downloadPosInternalInvoicePdf } from '@web/utils/posInternalInvoicePdf.
 import { downloadPosOrderFormPdf } from '@web/utils/posOrderFormPdf.js';
 import PosTakehomeStageTimeline from '@web/components/PosTakehomeStageTimeline.jsx';
 import PaymentMethodPicker from '@web/components/PaymentMethodPicker.jsx';
+import PosCareReportModal from '@web/components/PosCareReportModal.jsx';
 import cleanoxLogo from '../../assets/cleanox.png';
 
 const MAX_SCHEDULE_PROOFS = 5;
@@ -168,6 +169,7 @@ export default function PosTransactionDetailPage() {
   const [receiptLoading, setReceiptLoading] = useState(false);
   const [invoiceLoading, setInvoiceLoading] = useState(false);
   const [orderFormLoading, setOrderFormLoading] = useState(false);
+  const [careReportModalOpen, setCareReportModalOpen] = useState(false);
   const [evidencePreviewMap, setEvidencePreviewMap] = useState({});
   const evidencePreviewMapRef = useRef({});
   const [customerPreviewMap, setCustomerPreviewMap] = useState({});
@@ -803,7 +805,7 @@ export default function PosTransactionDetailPage() {
     !isHistoryEntry &&
     !isTerminalStatus &&
     Boolean(serviceDateKey) &&
-    serviceDateKey >= tomorrowKey &&
+    serviceDateKey >= todayKeyJakarta() &&
     !hasProgressOrDone;
   const canCancel = !isHistoryEntry && !isTerminalStatus;
   const canUploadCustomerPhotos =
@@ -1175,8 +1177,8 @@ export default function PosTransactionDetailPage() {
   let rescheduleBlockedReason = '';
   if (isTerminalStatus) rescheduleBlockedReason = 'Completed/cancelled transactions cannot be rescheduled.';
   else if (hasProgressOrDone) rescheduleBlockedReason = 'Cannot reschedule: a worker is On Progress or Done.';
-  else if (serviceDateKey && serviceDateKey < tomorrowKey) {
-    rescheduleBlockedReason = 'Reschedule is only allowed at least 1 day before the service date.';
+  else if (serviceDateKey && serviceDateKey < todayKeyJakarta()) {
+    rescheduleBlockedReason = 'Tanggal layanan sudah lewat dan tidak dapat di-reschedule.';
   }
 
   const clearScheduleProofs = (type) => {
@@ -1378,6 +1380,14 @@ export default function PosTransactionDetailPage() {
           >
             <FileSpreadsheet className="w-4 h-4" />
             {invoiceLoading ? 'Menyiapkan PDF...' : 'Invoice Internal A4'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setCareReportModalOpen(true)}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm font-semibold text-indigo-900 hover:bg-indigo-100 transition shadow-sm"
+          >
+            <FileText className="w-4 h-4 text-indigo-600" />
+            Care Report
           </button>
           <div className="rounded-2xl bg-slate-900 px-5 py-4 text-white">
             {pendingTotals ? (
@@ -1892,7 +1902,7 @@ export default function PosTransactionDetailPage() {
             <div>
               <p className="text-sm font-semibold text-slate-900">Ubah / Batalkan Jadwal</p>
               <p className="mt-1 text-xs text-slate-500">
-                Setelah konfirmasi customer via WA: pindahkan tanggal (minimal H−1) atau batalkan transaksi.
+                Setelah konfirmasi customer via WA: pindahkan jadwal layanan atau batalkan transaksi.
                 Reschedule tidak meminta accept ulang dari pekerja.
                 Wajib melampirkan minimal 1 foto bukti (mis. screenshot chat WA customer).
               </p>
@@ -1906,6 +1916,7 @@ export default function PosTransactionDetailPage() {
                   value={scheduleDateInput}
                   onChange={(e) => setScheduleDateInput(e.target.value)}
                   disabled={!canReschedule || scheduleSubmitting}
+                  min={`${todayKeyJakarta()}T00:00`}
                   className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm disabled:opacity-60"
                 />
               </div>
@@ -2976,6 +2987,20 @@ export default function PosTransactionDetailPage() {
             </div>
           </div>
         </BodyPortal>
+      )}
+
+      {careReportModalOpen && detail && (
+        <PosCareReportModal
+          isOpen={careReportModalOpen}
+          onClose={() => setCareReportModalOpen(false)}
+          transaction={transaction}
+          items={items}
+          customerPhotos={customerPhotos}
+          assignments={assignments}
+          legacyEvidence={legacyEvidence}
+          customerPreviewMap={customerPreviewMap}
+          evidencePreviewMap={evidencePreviewMap}
+        />
       )}
 
       {photoPreview && (

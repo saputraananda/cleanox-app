@@ -350,7 +350,9 @@ const UNIFIED_CUSTOMER_SELECT = `
   v.legacy_transaction_nominal,
   v.last_transaction_at,
   v.pos_transaction_count,
-  v.needs_ensure
+  v.needs_ensure,
+  rs.name AS referral_source_name,
+  rs.code AS referral_source_code
 `;
 
 function mapUnifiedCustomerRow(row) {
@@ -374,6 +376,8 @@ function mapUnifiedCustomerRow(row) {
     last_transaction_at: row.last_transaction_at || null,
     transaction_count: legacyCount + posCount,
     needs_ensure: Boolean(Number(row.needs_ensure || 0)),
+    referral_source_name: row.referral_source_name || null,
+    referral_source_code: row.referral_source_code || null,
   };
 }
 
@@ -507,6 +511,7 @@ export const getPosCustomers = async (req, res) => {
   try {
     const search = String(req.query.search || '').trim();
     const status = String(req.query.status || '').trim();
+    const source = String(req.query.source || 'all').trim().toLowerCase();
     const page = Math.max(1, Number(req.query.page || 1) || 1);
     const requestedPageSize = Number(req.query.page_size || 10) || 10;
     const pageSize = Math.min(50, Math.max(1, requestedPageSize));
@@ -514,9 +519,18 @@ export const getPosCustomers = async (req, res) => {
     const params = [];
     const conditions = [];
 
+    // Sembunyikan customer KMP secara default
+    conditions.push("v.name NOT LIKE '%kmp%'");
+
     if (status) {
       conditions.push(`COALESCE(v.status, 'Aktif') = ?`);
       params.push(status);
+    }
+
+    if (source === 'smartlink') {
+      conditions.push("v.source_system = 'smartlink'");
+    } else if (source === 'pos') {
+      conditions.push("v.source_system IN ('pos', 'pos_legacy')");
     }
 
     if (search) {
@@ -530,6 +544,12 @@ export const getPosCustomers = async (req, res) => {
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
+    const joins = `
+      FROM v_customers_unified v
+      LEFT JOIN mst_customers c ON c.id = v.id
+      LEFT JOIN mst_referral_sources rs ON rs.id = c.referral_source_id
+    `;
+
     const [countRows] = await cleanoxPool.query(
       `SELECT COUNT(*) AS total
        FROM v_customers_unified v
@@ -539,7 +559,7 @@ export const getPosCustomers = async (req, res) => {
 
     const [rows] = await cleanoxPool.query(
       `SELECT ${UNIFIED_CUSTOMER_SELECT}
-       FROM v_customers_unified v
+       ${joins}
        ${where}
        ORDER BY (COALESCE(v.legacy_transaction_count, 0) + COALESCE(v.pos_transaction_count, 0)) DESC,
                 v.name ASC
