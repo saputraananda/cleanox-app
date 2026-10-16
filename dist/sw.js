@@ -90,7 +90,7 @@ define(['./workbox-7e5eb42b'], (function (workbox) { 'use strict';
     "revision": "1680140e482a035f2843838ddc5b5dfc"
   }, {
     "url": "index.html",
-    "revision": "a57b3b268cefa0b02f5896dcf636a56c"
+    "revision": "75572ef7b90d6222b1a10268d17832e2"
   }, {
     "url": "cleanox.png",
     "revision": "08f731ee9eb2f1d25464091426a14645"
@@ -101,49 +101,13 @@ define(['./workbox-7e5eb42b'], (function (workbox) { 'use strict';
     "url": "assets/purify.es-DP5U8-sc.js",
     "revision": null
   }, {
-    "url": "assets/poppins-latin-ext-700-normal-cby-RkWa.woff2",
+    "url": "assets/index.es-Bc5_2ttZ.js",
     "revision": null
   }, {
-    "url": "assets/poppins-latin-ext-600-normal-CAhIAdZj.woff2",
+    "url": "assets/index-BwSI4C6A.css",
     "revision": null
   }, {
-    "url": "assets/poppins-latin-ext-500-normal-CK-6C4Hw.woff2",
-    "revision": null
-  }, {
-    "url": "assets/poppins-latin-ext-400-normal-by3JarPu.woff2",
-    "revision": null
-  }, {
-    "url": "assets/poppins-latin-700-normal-Qrb0O0WB.woff2",
-    "revision": null
-  }, {
-    "url": "assets/poppins-latin-600-normal-zEkxB9Mr.woff2",
-    "revision": null
-  }, {
-    "url": "assets/poppins-latin-500-normal-C8OXljZJ.woff2",
-    "revision": null
-  }, {
-    "url": "assets/poppins-latin-400-normal-cpxAROuN.woff2",
-    "revision": null
-  }, {
-    "url": "assets/poppins-devanagari-700-normal-O-jipLrW.woff2",
-    "revision": null
-  }, {
-    "url": "assets/poppins-devanagari-600-normal-STEjXBNN.woff2",
-    "revision": null
-  }, {
-    "url": "assets/poppins-devanagari-500-normal-BIdkeU1p.woff2",
-    "revision": null
-  }, {
-    "url": "assets/poppins-devanagari-400-normal-CJDn6rn8.woff2",
-    "revision": null
-  }, {
-    "url": "assets/index.es-DK1qPEHW.js",
-    "revision": null
-  }, {
-    "url": "assets/index-x1YL3aj8.css",
-    "revision": null
-  }, {
-    "url": "assets/index-gqo6xet7.js",
+    "url": "assets/index-BvtxyTZk.js",
     "revision": null
   }, {
     "url": "assets/html2canvas.esm-ezMWrafe.js",
