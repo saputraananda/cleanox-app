@@ -54,16 +54,15 @@ const LAYOUT = {
     lineWidth: 0.7,
   },
 
-  // Metadata boxes (4 kotak, PRD 4.2)
+  // Metadata boxes (3 kotak: Nama Customer, No. Nota, Tanggal Layanan)
   metadata: {
     y: 32.9,
     height: 14.6,
     radius: 2.8,
     boxes: [
-      { label: 'NAMA CUSTOMER', x: 13, width: 53.7 },
-      { label: 'NO. NOTA', x: 69.2, width: 41.1 },
-      { label: 'TANGGAL LAYANAN', x: 112.8, width: 41.1 },
-      { label: 'TEKNISI', x: 156.6, width: 41.6 },
+      { label: 'NAMA CUSTOMER', x: 13, width: 74 },
+      { label: 'NO. NOTA', x: 90, width: 52 },
+      { label: 'TANGGAL LAYANAN', x: 145, width: 52 },
     ],
     labelOffsetX: 3.2,
     labelBaselineY: 37.3,
@@ -511,16 +510,15 @@ function renderHeader(doc, { logoData }) {
 }
 
 /**
- * 2. Render Metadata Info (4 Kotak, PRD 4.2)
+ * 2. Render Metadata Info (3 Kotak)
  */
-function renderMetadata(doc, { transaction, technicianName }) {
+function renderMetadata(doc, { transaction }) {
   const metaLayout = LAYOUT.metadata;
 
   const infoList = [
     { label: 'NAMA CUSTOMER', value: transaction.customer_name || '-' },
     { label: 'NO. NOTA', value: transaction.transaction_no || `TRX-${transaction.id}` },
     { label: 'TANGGAL LAYANAN', value: formatDateId(transaction.service_date) },
-    { label: 'TEKNISI', value: technicianName || '-' },
   ];
 
   infoList.forEach((info, idx) => {
@@ -811,7 +809,6 @@ function renderCareReportPage(
     logoData,
     mascotData,
     qrData,
-    technicianName,
     categoryInfo,
     nextMaintenanceMonth,
   }
@@ -819,8 +816,8 @@ function renderCareReportPage(
   // 1. Header
   renderHeader(doc, { logoData });
 
-  // 2. Metadata (4 Kotak)
-  renderMetadata(doc, { transaction, technicianName });
+  // 2. Metadata (3 Kotak: Customer, Nota, Tanggal)
+  renderMetadata(doc, { transaction });
 
   // 3. Category Pill & Section Title
   renderCategoryAndTitle(doc, { categoryInfo });
@@ -860,7 +857,6 @@ export async function downloadPosCareReportPdf({
   transaction,
   items = [],
   reportItems = [],
-  technicianName = '',
   categoryKey = null,
   nextMaintenanceMonth = '',
   config = {},
@@ -917,7 +913,6 @@ export async function downloadPosCareReportPdf({
     logoData,
     mascotData,
     qrData,
-    technicianName: technicianName || '-',
     categoryInfo,
     nextMaintenanceMonth,
   });
@@ -932,7 +927,6 @@ export async function downloadPosCareReportPdf({
         logoData,
         mascotData,
         qrData,
-        technicianName: technicianName || '-',
         categoryInfo,
         nextMaintenanceMonth,
       });

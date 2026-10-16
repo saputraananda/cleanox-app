@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useMemo } from 'react';
-import { X, FileText, Image as ImageIcon, Sparkles, Upload, Check, AlertCircle, Calendar, User } from 'lucide-react';
+import { X, FileText, Image as ImageIcon, Sparkles, Upload, Check, AlertCircle, Calendar } from 'lucide-react';
 import BodyPortal from '@web/components/BodyPortal.jsx';
 import { CARE_REPORT_CATEGORIES, detectReportCategory } from '@web/utils/posCareReportTips.js';
 import { downloadPosCareReportPdf } from '@web/utils/posCareReportPdf.js';
@@ -118,7 +118,6 @@ export default function PosCareReportModal({
   evidencePreviewMap = {},
 }) {
   const [reportItems, setReportItems] = useState([]);
-  const [technicianName, setTechnicianName] = useState('');
   const [categoryKey, setCategoryKey] = useState(CARE_REPORT_CATEGORIES.SOFA);
   const [nextMaintenanceMonth, setNextMaintenanceMonth] = useState('');
   const [generating, setGenerating] = useState(false);
@@ -164,11 +163,6 @@ export default function PosCareReportModal({
   // Inisialisasi data ketika modal dibuka
   useEffect(() => {
     if (!isOpen || !transaction) return;
-
-    // Deteksi teknisi otomatis dari assignment Done atau Assigned
-    const doneWorker = (assignments || []).find((a) => a.assignment_status === 'Done');
-    const anyWorker = (assignments || []).find((a) => ['Assigned', 'On_Progress'].includes(a.assignment_status));
-    setTechnicianName(doneWorker?.employee_name || anyWorker?.employee_name || '');
 
     // Deteksi kategori tips
     const detected = detectReportCategory(items);
@@ -279,7 +273,6 @@ export default function PosCareReportModal({
         transaction,
         items,
         reportItems,
-        technicianName,
         categoryKey,
         nextMaintenanceMonth,
       });
@@ -335,22 +328,7 @@ export default function PosCareReportModal({
             )}
 
             {/* Pengaturan Global Laporan */}
-            <div className="grid gap-4 md:grid-cols-3 rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
-              {/* Teknisi */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5 flex items-center gap-1.5">
-                  <User className="w-3.5 h-3.5 text-slate-400" />
-                  Nama Teknisi
-                </label>
-                <input
-                  type="text"
-                  value={technicianName}
-                  onChange={(e) => setTechnicianName(e.target.value)}
-                  placeholder="Contoh: Budi Santoso"
-                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
-                />
-              </div>
-
+            <div className="grid gap-4 md:grid-cols-2 rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
               {/* Kategori Tips */}
               <div>
                 <label className="block text-xs font-semibold text-slate-600 uppercase tracking-wide mb-1.5">
