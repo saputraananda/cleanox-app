@@ -96,6 +96,11 @@ export default defineConfig({
         target: 'http://localhost:6000',
         changeOrigin: true,
       },
+      '/assets/avatars': {
+        target: 'https://api.waschenalora.com',
+        changeOrigin: true,
+        secure: false,
+      },
       '/socket.io': {
         target: 'http://localhost:6000',
         ws: true,

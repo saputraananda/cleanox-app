@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Camera, ClipboardList, Sparkles, ArrowRight, Clock3, XCircle, CalendarDays, FileText, UserRound, Lock, Banknote, Trophy } from 'lucide-react';
-import { getUser } from '@shared/utils/auth.js';
+import { getUser, getToken, setAuth } from '@shared/utils/auth.js';
+import { resolveAvatarUrl, getInitials } from '@shared/utils/avatar.js';
 import api from '@shared/utils/api.js';
 import MobileWorkerBottomNav from '@mobile/components/MobileWorkerBottomNav.jsx';
 import {
@@ -270,7 +271,8 @@ function buildTodayActivityCards({
 }
 
 export default function MobileWorkerHomePage() {
-  const user = getUser();
+  const [user, setUser] = useState(() => getUser());
+  const [avatarError, setAvatarError] = useState(false);
   const navigate = useNavigate();
   const [now, setNow] = useState(new Date());
   const [activityCards, setActivityCards] = useState([]);
@@ -280,7 +282,12 @@ export default function MobileWorkerHomePage() {
   const [morningUnlocked, setMorningUnlocked] = useState(false);
   const [requireKebersihanForUnlock, setRequireKebersihanForUnlock] = useState(true);
   const [todayOffDay, setTodayOffDay] = useState(null);
-  const [kpiData, setKpiData] = useState(null);
+
+  const avatarUrl = useMemo(() => resolveAvatarUrl(user?.avatar), [user?.avatar]);
+
+  useEffect(() => {
+    setAvatarError(false);
+  }, [user?.avatar]);
 
   const handleNoticeOpen = async (item) => {
     if (!item?.noticeId || !item?.to) return;
@@ -313,14 +320,16 @@ export default function MobileWorkerHomePage() {
         if (!cancelled) setTodayOffDay(null);
       });
 
-    api.get('/mobile-tasks/my-kpi')
+    api.get('/auth/me')
       .then((res) => {
-        if (!cancelled && res.data?.kpi) {
-          setKpiData(res.data.kpi);
+        if (!cancelled && res.data?.user) {
+          const token = getToken();
+          if (token) setAuth(token, res.data.user);
+          setUser(res.data.user);
         }
       })
-      .catch((err) => {
-        console.error('Failed to load KPI:', err);
+      .catch(() => {
+        // Biarkan data lokal jika network gagal
       });
 
     return () => { cancelled = true; };
@@ -507,19 +516,30 @@ export default function MobileWorkerHomePage() {
             />
 
             <div className="relative z-[1] flex items-center">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <div className="w-10 h-10 rounded-[12px] bg-white/15 border border-white/15 grid place-items-center text-[11px] font-bold text-white flex-shrink-0 backdrop-blur-xl">
-                  foto
+              <Link to="/mobile-worker/profile" className="flex items-center gap-2.5 min-w-0 group" title="Lihat profil">
+                <div className="w-10 h-10 rounded-[12px] bg-white/15 border border-white/20 overflow-hidden grid place-items-center text-[12px] font-bold text-white flex-shrink-0 backdrop-blur-xl shadow-sm">
+                  {avatarUrl && !avatarError ? (
+                    <img
+                      src={avatarUrl}
+                      alt={user?.name || 'Foto Profil'}
+                      className="w-full h-full object-cover"
+                      onError={() => setAvatarError(true)}
+                    />
+                  ) : (
+                    <span>{getInitials(user?.name)}</span>
+                  )}
                 </div>
                 <div className="min-w-0">
-                  <div className="text-[13px] font-extrabold text-white truncate">{user?.name || 'Karyawan'}</div>
+                  <div className="text-[13px] font-extrabold text-white truncate group-hover:text-white/90 transition-colors">
+                    {user?.name || 'Karyawan'}
+                  </div>
                   <div className="text-[10px] text-white/55 font-medium truncate mt-px">
                     {user?.employee_code
                       ? `Karyawan · ${user.employee_code}`
                       : 'Karyawan'}
                   </div>
                 </div>
-              </div>
+              </Link>
             </div>
 
             <div className="relative z-[1] mt-5 flex items-center justify-between gap-3">
@@ -544,73 +564,7 @@ export default function MobileWorkerHomePage() {
             </div>
           )}
 
-          {/* KPI Jam Kerja Widget */}
-          {kpiData && (
-            <section className="relative overflow-hidden rounded-[24px] bg-white border border-slate-100 p-4 shadow-[0_10px_28px_rgba(15,23,42,.06)]">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-[11px] bg-[#EEF8E3] text-[#163A22] grid place-items-center">
-                    <Clock3 className="w-4 h-4 text-[#163A22]" />
-                  </div>
-                  <div>
-                    <span className="text-[12px] font-extrabold text-slate-900">Capaian KPI Jam Kerja</span>
-                    <p className="text-[10px] text-slate-400">Target: 208 Jam / Bulan</p>
-                  </div>
-                </div>
-                <span
-                  className={`text-[11px] font-black px-2.5 py-0.5 rounded-full ${
-                    kpiData.achievement_pct >= 100
-                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                      : kpiData.achievement_pct >= 75
-                        ? 'bg-teal-50 text-teal-700 border border-teal-200'
-                        : kpiData.achievement_pct >= 50
-                          ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                          : 'bg-slate-100 text-slate-700'
-                  }`}
-                >
-                  {kpiData.achievement_pct}%
-                </span>
-              </div>
 
-              {/* Metric Numbers */}
-              <div className="mt-3 flex items-baseline justify-between">
-                <div>
-                  <span className="text-[26px] font-black text-slate-900 tracking-tight font-mono">
-                    {kpiData.total_hours}
-                  </span>
-                  <span className="text-[12px] font-semibold text-slate-400 ml-1">/ 208 Jam</span>
-                </div>
-                <span className="text-[11px] font-semibold text-slate-500">
-                  {kpiData.remaining_hours > 0 ? `Sisa ${kpiData.remaining_hours} jam` : '🎉 Target tercapai!'}
-                </span>
-              </div>
-
-              {/* Progress Bar */}
-              <div className="mt-2 h-2.5 w-full rounded-full bg-slate-100 overflow-hidden border border-slate-200/50">
-                <div
-                  className={`h-full rounded-full transition-all duration-500 ${
-                    kpiData.achievement_pct >= 100
-                      ? 'bg-gradient-to-r from-emerald-500 to-[#7BC32C]'
-                      : kpiData.achievement_pct >= 75
-                        ? 'bg-gradient-to-r from-teal-500 to-[#7BC32C]'
-                        : kpiData.achievement_pct >= 50
-                          ? 'bg-gradient-to-r from-amber-500 to-[#7BC32C]'
-                          : 'bg-gradient-to-r from-[#163A22] to-[#7BC32C]'
-                  }`}
-                  style={{ width: `${Math.min(kpiData.achievement_pct, 100)}%` }}
-                />
-              </div>
-
-              {/* Breakdown Detail */}
-              <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-400">
-                <span>Cleanox: <b className="text-slate-600 font-bold">{kpiData.breakdown?.cleanox_only?.hours || 0}j</b></span>
-                <span>•</span>
-                <span>Waschen: <b className="text-slate-600 font-bold">{kpiData.breakdown?.waschen?.hours || 0}j</b></span>
-                <span>•</span>
-                <span>Total: <b className="text-slate-700 font-bold">{Math.round(kpiData.total_minutes || 0)} mnt</b></span>
-              </div>
-            </section>
-          )}
 
           <section className="rounded-[24px] bg-white border border-slate-100 shadow-[0_10px_28px_rgba(15,23,42,.06)] px-4 pt-5 pb-4">
             <div className="grid grid-cols-2 gap-y-4 gap-x-2">

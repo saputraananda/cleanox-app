@@ -1,5 +1,7 @@
 import fs from 'fs';
 import path from 'path';
+import http from 'node:http';
+import https from 'node:https';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
 import sharp from 'sharp';
@@ -78,6 +80,52 @@ const MAX_PAYMENT_PROOFS = 10;
 const MAX_SCHEDULE_PROOFS = 5;
 export const MAX_SCHEDULE_PROOF_FILES = MAX_SCHEDULE_PROOFS;
 const PAYMENT_STATUSES = new Set(['belum_lunas', 'lunas']);
+
+const avatarBase64Cache = new Map();
+
+async function getAvatarDataUrlCached(rawPath) {
+  if (!rawPath || typeof rawPath !== 'string') return null;
+  const trimmed = rawPath.trim();
+  if (!trimmed) return null;
+  if (/^data:/i.test(trimmed)) return trimmed;
+
+  const cached = avatarBase64Cache.get(trimmed);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.dataUrl;
+  }
+
+  let targetUrl = trimmed;
+  if (!/^https?:\/\//i.test(targetUrl)) {
+    const clean = targetUrl.startsWith('/') ? targetUrl : `/${targetUrl}`;
+    targetUrl = `https://api.waschenalora.com${clean}`;
+  }
+
+  try {
+    const dataUrl = await new Promise((resolve) => {
+      const client = targetUrl.startsWith('https') ? https : http;
+      client.get(targetUrl, (res) => {
+        if (res.statusCode !== 200) return resolve(null);
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => {
+          const buf = Buffer.concat(chunks);
+          const mime = res.headers['content-type'] || 'image/jpeg';
+          resolve(`data:${mime};base64,${buf.toString('base64')}`);
+        });
+      }).on('error', () => resolve(null));
+    });
+
+    if (dataUrl) {
+      avatarBase64Cache.set(trimmed, {
+        dataUrl,
+        expiresAt: Date.now() + 60 * 60 * 1000, // cache for 1 hour
+      });
+    }
+    return dataUrl;
+  } catch {
+    return null;
+  }
+}
 
 async function loadPaymentMethod(connection, methodId) {
   const id = Number(methodId);
@@ -913,13 +961,23 @@ export const getPosTransactionDetail = async (req, res) => {
       const employeeIds = [...new Set(assignments.map((row) => row.employee_id).filter(Boolean))];
       const assignmentIds = assignments.map((row) => row.id).filter(Boolean);
       const [employeeRows] = await aloraPool.query(
-        `SELECT employee_id, phone_number
-         FROM mst_employee
-         WHERE employee_id IN (${employeeIds.map(() => '?').join(',')})`,
+        `SELECT e.employee_id, e.phone_number, e.employee_code, e.profile_path, e.profile_name, p.position_name, u.avatar
+         FROM mst_employee e
+         LEFT JOIN mst_position p ON p.position_id = e.position_id
+         LEFT JOIN users u ON (u.id = e.employee_id OR (u.email = e.email AND e.email IS NOT NULL))
+         WHERE e.employee_id IN (${employeeIds.map(() => '?').join(',')})`,
         employeeIds
       );
-      const phoneMap = new Map(
-        employeeRows.map((row) => [row.employee_id, row.phone_number || null])
+      const empMap = new Map(
+        employeeRows.map((row) => [
+          row.employee_id,
+          {
+            phone: row.phone_number || null,
+            employee_code: row.employee_code || null,
+            profile_path: row.profile_path || row.avatar || null,
+            position_name: row.position_name || 'Teknisi Deep Cleaning',
+          },
+        ])
       );
 
       const photosByAssignment = new Map();
@@ -938,11 +996,22 @@ export const getPosTransactionDetail = async (req, res) => {
         }
       }
 
-      enrichedAssignments = assignments.map((row) => ({
-        ...row,
-        employee_phone: phoneMap.get(row.employee_id) || null,
-        ...mapAssignmentEvidencePhotos(row, photosByAssignment.get(Number(row.id)) || []),
-      }));
+      enrichedAssignments = await Promise.all(
+        assignments.map(async (row) => {
+          const emp = empMap.get(row.employee_id) || {};
+          const profilePath = emp.profile_path || null;
+          const avatarDataUrl = profilePath ? await getAvatarDataUrlCached(profilePath) : null;
+          return {
+            ...row,
+            employee_phone: emp.phone || null,
+            employee_code: emp.employee_code || null,
+            profile_path: profilePath,
+            avatar_data_url: avatarDataUrl,
+            position_name: emp.position_name || 'Teknisi Deep Cleaning',
+            ...mapAssignmentEvidencePhotos(row, photosByAssignment.get(Number(row.id)) || []),
+          };
+        })
+      );
     }
 
     const [tracking] = await cleanoxPool.query(

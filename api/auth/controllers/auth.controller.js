@@ -2,13 +2,16 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import cleanoxPool, { aloraPool as pool } from '../../shared/db/cleanox.js';
 
-const getEmployeeContext = async (employeeId) => {
+const getEmployeeContext = async (employeeId, email = null) => {
   const [empRows] = await pool.query(
-    `SELECT e.company_id, e.exit_date, e.employee_code, c.company_name
+    `SELECT e.company_id, e.exit_date, e.employee_code, e.profile_path, e.profile_name, c.company_name
      FROM mst_employee e
      LEFT JOIN mst_company c ON c.company_id = e.company_id
-     WHERE e.employee_id = ?`,
-    [employeeId]
+     WHERE (e.employee_id = ? OR (e.email = ? AND ? IS NOT NULL))
+       AND (e.is_deleted = 0 OR e.is_deleted IS NULL)
+     ORDER BY (e.employee_id = ?) DESC
+     LIMIT 1`,
+    [employeeId, email, email, employeeId]
   );
 
   const employee = empRows[0] || null;
@@ -16,8 +19,10 @@ const getEmployeeContext = async (employeeId) => {
   const isManagement = companyId === 1 && employee?.exit_date === null;
   const employeeCode = employee?.employee_code || null;
   const companyName = employee?.company_name || null;
+  const profilePath = employee?.profile_path || null;
+  const profileName = employee?.profile_name || null;
 
-  return { companyId, isManagement, employeeCode, companyName };
+  return { companyId, isManagement, employeeCode, companyName, profilePath, profileName };
 };
 
 
@@ -111,7 +116,18 @@ export const login = async (req, res) => {
       return res.status(401).json({ message: 'Username atau password salah' });
     }
 
-    const { companyId, isManagement, employeeCode, companyName } = await getEmployeeContext(user.id);
+    const empCtx = await getEmployeeContext(user.id, user.email);
+    const finalAvatar = empCtx.profilePath || user.avatar || null;
+
+    // Sinkronisasi otomatis ke users.avatar jika mst_employee memiliki foto yang lebih baru
+    if (empCtx.profilePath && empCtx.profilePath !== user.avatar) {
+      try {
+        await pool.query('UPDATE users SET avatar = ? WHERE id = ?', [empCtx.profilePath, user.id]);
+        user.avatar = empCtx.profilePath;
+      } catch (syncErr) {
+        console.error('[avatarSync:login]', syncErr.message);
+      }
+    }
 
     const [roleRows] = await cleanoxPool.query(
       'SELECT role FROM mst_role WHERE employee_id = ?',
@@ -126,10 +142,10 @@ export const login = async (req, res) => {
         role: userRole,
         name: user.name,
         username: user.username,
-        isManagement,
-        company_id: companyId,
-        company_name: companyName,
-        employee_code: employeeCode,
+        isManagement: empCtx.isManagement,
+        company_id: empCtx.companyId,
+        company_name: empCtx.companyName,
+        employee_code: empCtx.employeeCode,
       },
       process.env.SESSION_SECRET,
       { expiresIn: '7d' }
@@ -143,11 +159,11 @@ export const login = async (req, res) => {
         email: user.email,
         username: user.username,
         role: userRole,
-        avatar: user.avatar,
-        isManagement,
-        company_id: companyId,
-        company_name: companyName,
-        employee_code: employeeCode,
+        avatar: finalAvatar,
+        isManagement: empCtx.isManagement,
+        company_id: empCtx.companyId,
+        company_name: empCtx.companyName,
+        employee_code: empCtx.employeeCode,
       },
     });
   } catch (err) {
@@ -168,7 +184,18 @@ export const getMe = async (req, res) => {
     }
     const user = rows[0];
 
-    const { companyId, isManagement, employeeCode, companyName } = await getEmployeeContext(user.id);
+    const empCtx = await getEmployeeContext(user.id, user.email);
+    const finalAvatar = empCtx.profilePath || user.avatar || null;
+
+    // Sinkronisasi otomatis ke users.avatar jika mst_employee memiliki foto yang lebih baru
+    if (empCtx.profilePath && empCtx.profilePath !== user.avatar) {
+      try {
+        await pool.query('UPDATE users SET avatar = ? WHERE id = ?', [empCtx.profilePath, user.id]);
+        user.avatar = empCtx.profilePath;
+      } catch (syncErr) {
+        console.error('[avatarSync:getMe]', syncErr.message);
+      }
+    }
 
     const [roleRows] = await cleanoxPool.query(
       'SELECT role FROM mst_role WHERE employee_id = ?',
@@ -179,11 +206,12 @@ export const getMe = async (req, res) => {
     return res.json({
       user: {
         ...user,
+        avatar: finalAvatar,
         role: userRole,
-        isManagement,
-        company_id: companyId,
-        company_name: companyName,
-        employee_code: employeeCode,
+        isManagement: empCtx.isManagement,
+        company_id: empCtx.companyId,
+        company_name: empCtx.companyName,
+        employee_code: empCtx.employeeCode,
       },
     });
   } catch (err) {

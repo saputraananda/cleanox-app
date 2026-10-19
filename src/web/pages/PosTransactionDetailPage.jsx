@@ -24,6 +24,7 @@ import PosTakehomeStageTimeline from '@web/components/PosTakehomeStageTimeline.j
 import PaymentMethodPicker from '@web/components/PaymentMethodPicker.jsx';
 import PosCareReportModal from '@web/components/PosCareReportModal.jsx';
 import cleanoxLogo from '../../assets/cleanox.png';
+import cleanoxMascot from '../../assets/cleanox-mascot.png';
 
 const MAX_SCHEDULE_PROOFS = 5;
 
@@ -669,15 +670,23 @@ export default function PosTransactionDetailPage() {
     setError('');
     try {
       let logo = null;
+      let mascot = null;
       try {
         logo = await loadImageAsDataUrl(cleanoxLogo);
       } catch {
         logo = null;
       }
+      try {
+        mascot = await loadImageAsDataUrl(cleanoxMascot);
+      } catch {
+        mascot = null;
+      }
       await downloadPosOrderFormPdf({
         transaction: detail.transaction,
         items: detail.items || [],
+        assignments: detail.assignments || [],
         logoDataUrl: logo,
+        mascotDataUrl: mascot,
       });
     } catch (err) {
       setError(err.message || 'Gagal membuat Cleanox Order Form PDF');

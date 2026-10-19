@@ -589,7 +589,7 @@ function renderCategoryAndTitle(doc, { categoryInfo }) {
  * 4. Render Items (Before/After Photos, PRD 4.5)
  * @returns {number} bottomY
  */
-function renderItems(doc, { reportItems, categoryInfo }) {
+function renderItems(doc, { reportItems, categoryInfo, isSingleService = false }) {
   const itemsLayout = LAYOUT.items;
   let bottomY = itemsLayout.firstItemY;
 
@@ -597,10 +597,15 @@ function renderItems(doc, { reportItems, categoryInfo }) {
     const itemTop = itemsLayout.firstItemY + itemIdx * itemsLayout.itemPitch;
     const itemPrefix = categoryInfo.itemPrefix || 'Item';
 
-    // Label "Item n" / "Area n"
+    // Label "Item n" / "Area n" atau jika 1 layanan dengan multi foto: "Item 1 (Foto n)"
     setFont(doc, CARE_REPORT_FONTS.itemLabel);
     doc.setTextColor(...COLORS.textLight);
-    doc.text(`${itemPrefix} ${itemIdx + 1}`, LAYOUT.margin, itemTop + itemsLayout.labelOffset);
+    const itemLabelText =
+      isSingleService && reportItems.length > 1
+        ? `${itemPrefix} 1 (Foto ${itemIdx + 1})`
+        : item.customLabel || `${itemPrefix} ${itemIdx + 1}`;
+    doc.text(itemLabelText, LAYOUT.margin, itemTop + itemsLayout.labelOffset);
+
 
     // Judul Item (maksimal 2 baris)
     setFont(doc, CARE_REPORT_FONTS.itemTitle);
@@ -811,6 +816,7 @@ function renderCareReportPage(
     qrData,
     categoryInfo,
     nextMaintenanceMonth,
+    isSingleService = false,
   }
 ) {
   // 1. Header
@@ -823,7 +829,8 @@ function renderCareReportPage(
   renderCategoryAndTitle(doc, { categoryInfo });
 
   // 4. Items (Before & After Photos)
-  const itemsBottomY = renderItems(doc, { reportItems, categoryInfo });
+  const itemsBottomY = renderItems(doc, { reportItems, categoryInfo, isSingleService });
+
 
   // 5. Tips Box (dimulai di bawah item, nilai dasar 204.4)
   const tipsStartY = Math.max(LAYOUT.tips.defaultY, itemsBottomY + 14.5);
@@ -858,6 +865,8 @@ export async function downloadPosCareReportPdf({
   items = [],
   reportItems = [],
   categoryKey = null,
+  categoryInfo = null,
+  pageCategories = [],
   nextMaintenanceMonth = '',
   config = {},
 }) {
@@ -902,24 +911,29 @@ export async function downloadPosCareReportPdf({
     })
   );
 
-  // Kategori tips & teks
-  const activeCategoryKey = categoryKey || detectReportCategory(items);
-  const categoryInfo = CARE_REPORT_TIPS[activeCategoryKey] || CARE_REPORT_TIPS.general;
+  // Kategori tips & teks fallback
+  const defaultCategoryKey = categoryKey || detectReportCategory(items);
+  const defaultCategoryInfo = categoryInfo || CARE_REPORT_TIPS[defaultCategoryKey] || CARE_REPORT_TIPS.general;
+  const isSingleService = (items || []).length === 1;
 
   // Render halaman pertama (maksimal 2 item per halaman)
+  const page1CategoryInfo = pageCategories[0] || defaultCategoryInfo;
   renderCareReportPage(doc, {
     transaction,
     reportItems: processedReportItems.slice(0, 2),
     logoData,
     mascotData,
     qrData,
-    categoryInfo,
+    categoryInfo: page1CategoryInfo,
     nextMaintenanceMonth,
+    isSingleService,
   });
 
   // Render halaman berikutnya bila item > 2
   if (processedReportItems.length > 2) {
     for (let i = 2; i < processedReportItems.length; i += 2) {
+      const pageIndex = Math.floor(i / 2);
+      const pageNCategoryInfo = pageCategories[pageIndex] || defaultCategoryInfo;
       doc.addPage();
       renderCareReportPage(doc, {
         transaction,
@@ -927,11 +941,13 @@ export async function downloadPosCareReportPdf({
         logoData,
         mascotData,
         qrData,
-        categoryInfo,
+        categoryInfo: pageNCategoryInfo,
         nextMaintenanceMonth,
+        isSingleService,
       });
     }
   }
+
 
   // Unduh PDF
   const safeNota = String(transaction.transaction_no || transaction.id || 'trx').replace(/[^a-zA-Z0-9_-]/g, '_');

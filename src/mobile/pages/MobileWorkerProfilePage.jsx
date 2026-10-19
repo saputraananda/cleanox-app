@@ -12,28 +12,26 @@ import {
 } from 'lucide-react';
 import api from '@shared/utils/api.js';
 import { clearAuth, getToken, getUser, setAuth } from '@shared/utils/auth.js';
+import { resolveAvatarUrl, getInitials } from '@shared/utils/avatar.js';
 import MobileConfirmDialog from '@mobile/components/MobileConfirmDialog.jsx';
 import MobileWorkerBottomNav from '@mobile/components/MobileWorkerBottomNav.jsx';
 import useMobilePwaInstall from '@mobile/hooks/useMobilePwaInstall.js';
 
-const initials = (name) => {
-  if (!name) return '?';
-  return name
-    .split(' ')
-    .slice(0, 2)
-    .map((word) => word[0])
-    .join('')
-    .toUpperCase();
-};
-
 export default function MobileWorkerProfilePage() {
   const navigate = useNavigate();
   const [user, setUser] = useState(() => getUser());
+  const [avatarError, setAvatarError] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [installBusy, setInstallBusy] = useState(false);
   const [installFailOpen, setInstallFailOpen] = useState(false);
   const { isInstalled, promptInstall } = useMobilePwaInstall();
+
+  const avatarUrl = resolveAvatarUrl(user?.avatar);
+
+  useEffect(() => {
+    setAvatarError(false);
+  }, [user?.avatar]);
 
   const handleInstallClick = async () => {
     if (installBusy || isInstalled) return;
@@ -134,10 +132,15 @@ export default function MobileWorkerProfilePage() {
               <div className="mt-3 flex flex-col items-center">
                 <div className="w-[88px] h-[88px] rounded-full bg-white p-[3px] shadow-[0_12px_28px_rgba(0,0,0,.18)]">
                   <div className="w-full h-full rounded-full bg-[#EEF8E3] text-[#163A22] text-[26px] font-extrabold grid place-items-center overflow-hidden">
-                    {user?.avatar ? (
-                      <img src={user.avatar} alt="foto" className="w-full h-full object-cover" />
+                    {avatarUrl && !avatarError ? (
+                      <img
+                        src={avatarUrl}
+                        alt={name}
+                        className="w-full h-full object-cover"
+                        onError={() => setAvatarError(true)}
+                      />
                     ) : (
-                      initials(name)
+                      getInitials(name)
                     )}
                   </div>
                 </div>

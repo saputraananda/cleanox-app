@@ -40,8 +40,10 @@ import {
   clearPosTakehomeStage,
   uploadPosTakehomeStageEvidence,
 } from '../controllers/posTransactions.controller.js';
+import { getCareReportTips } from '../controllers/posMaster.controller.js';
 
 const router = Router();
+
 
 const authorizePosAccess = (req, res, next) => {
   const role = req.user?.role;
@@ -121,8 +123,10 @@ router.get('/customer-photo/:filename', servePosCustomerPhoto);
 router.get('/payment-proof/:filename', servePosPaymentProof);
 router.get('/schedule-proof/:filename', servePosScheduleProof);
 router.get('/takehome-evidence/:filename', servePosTakehomeEvidenceFile);
+router.get('/care-report/tips', getCareReportTips);
 router.get('/', getPosTransactions);
 router.get('/:id', getPosTransactionDetail);
+
 router.post('/', createPosTransaction);
 router.patch('/:id/status', updatePosTransactionStatus);
 router.patch('/:id/payment', updatePosTransactionPayment);

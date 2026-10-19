@@ -20,6 +20,8 @@ import PosBundleBalancesPage from '@web/pages/PosBundleBalancesPage.jsx';
 import PosAgendaPage from '@web/pages/PosAgendaPage.jsx';
 import PosAgendaCreatePage from '@web/pages/PosAgendaCreatePage.jsx';
 import PosAgendaDetailPage from '@web/pages/PosAgendaDetailPage.jsx';
+import PosCareReportTipsPage from '@web/pages/PosCareReportTipsPage.jsx';
+
 
 const RedirectPosDetail = () => {
   const { id } = useParams();
@@ -182,7 +184,19 @@ const webRoutes = [
     }
   />,
   <Route
+    key="co-care-report-tips"
+    path="/cleanox-only/care-report-tips"
+    element={
+      <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>
+        <Layout>
+          <PosCareReportTipsPage />
+        </Layout>
+      </PrivateRoute>
+    }
+  />,
+  <Route
     key="co-bundles"
+
     path="/cleanox-only/bundles"
     element={
       <PrivateRoute roles={['admin', 'management']} companyIds={[1]}>

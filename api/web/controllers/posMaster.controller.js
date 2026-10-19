@@ -773,3 +773,133 @@ export const updateDiscount = async (req, res) => {
     return res.status(500).json({ message: 'Gagal memperbarui diskon' });
   }
 };
+
+export const getCareReportTips = async (req, res) => {
+  const includeAll = req.query.all === 'true';
+  try {
+    let sql = `
+      SELECT
+        id,
+        category_key,
+        category_id,
+        label,
+        item_sub_label,
+        item_prefix,
+        title,
+        keywords,
+        tips,
+        sort_order,
+        is_active,
+        created_at,
+        updated_at
+       FROM mst_care_report_tips
+    `;
+    if (!includeAll) {
+      sql += ` WHERE is_active = 1`;
+    }
+    sql += ` ORDER BY sort_order ASC, id ASC`;
+    const [rows] = await cleanoxPool.query(sql);
+
+    const data = rows.map((row) => ({
+      ...row,
+      keywords: typeof row.keywords === 'string' ? JSON.parse(row.keywords) : (row.keywords || []),
+      tips: typeof row.tips === 'string' ? JSON.parse(row.tips) : (row.tips || []),
+    }));
+
+    return res.json({ success: true, tips: data });
+  } catch (error) {
+    console.error('[pos-master/getCareReportTips]', error.message);
+    return res.status(500).json({ success: false, message: 'Gagal mengambil tips perawatan care report' });
+  }
+};
+
+export const createCareReportTip = async (req, res) => {
+  const { category_key, category_id, label, item_sub_label, item_prefix, title, keywords, tips, sort_order, is_active } = req.body;
+  if (!category_key || !label || !title || !Array.isArray(tips)) {
+    return res.status(400).json({ message: 'Kolom category_key, label, title, dan tips wajib diisi' });
+  }
+  try {
+    const key = String(category_key).trim().toLowerCase().replace(/\s+/g, '_');
+    const [[existing]] = await cleanoxPool.query(`SELECT id FROM mst_care_report_tips WHERE category_key = ? LIMIT 1`, [key]);
+    if (existing) {
+      return res.status(400).json({ message: `Kategori key "${key}" sudah digunakan` });
+    }
+    const [result] = await cleanoxPool.query(
+      `INSERT INTO mst_care_report_tips
+       (category_key, category_id, label, item_sub_label, item_prefix, title, keywords, tips, sort_order, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        key,
+        category_id ? Number(category_id) : null,
+        String(label).trim(),
+        String(item_sub_label || label).trim(),
+        String(item_prefix || 'Item').trim(),
+        String(title).trim(),
+        JSON.stringify(Array.isArray(keywords) ? keywords : []),
+        JSON.stringify(tips),
+        Number(sort_order || 0),
+        is_active != null ? Number(is_active) : 1,
+      ]
+    );
+    return res.status(201).json({ success: true, id: result.insertId, message: 'Tips kategori baru berhasil ditambahkan' });
+  } catch (error) {
+    console.error('[pos-master/createCareReportTip]', error.message);
+    return res.status(500).json({ message: 'Gagal menambahkan tips kategori' });
+  }
+};
+
+export const updateCareReportTip = async (req, res) => {
+  const { id } = req.params;
+  const { label, item_sub_label, item_prefix, title, keywords, tips, sort_order, is_active } = req.body;
+  try {
+    const [[existing]] = await cleanoxPool.query(`SELECT id FROM mst_care_report_tips WHERE id = ? LIMIT 1`, [id]);
+    if (!existing) {
+      return res.status(404).json({ message: 'Tips tidak ditemukan' });
+    }
+    await cleanoxPool.query(
+      `UPDATE mst_care_report_tips
+       SET label = COALESCE(?, label),
+           item_sub_label = COALESCE(?, item_sub_label),
+           item_prefix = COALESCE(?, item_prefix),
+           title = COALESCE(?, title),
+           keywords = COALESCE(?, keywords),
+           tips = COALESCE(?, tips),
+           sort_order = COALESCE(?, sort_order),
+           is_active = COALESCE(?, is_active),
+           updated_at = CURRENT_TIMESTAMP(0)
+       WHERE id = ?`,
+      [
+        label != null ? String(label).trim() : null,
+        item_sub_label != null ? String(item_sub_label).trim() : null,
+        item_prefix != null ? String(item_prefix).trim() : null,
+        title != null ? String(title).trim() : null,
+        keywords ? JSON.stringify(keywords) : null,
+        tips ? JSON.stringify(tips) : null,
+        sort_order != null ? Number(sort_order) : null,
+        is_active != null ? Number(is_active) : null,
+        id
+      ]
+    );
+    return res.json({ success: true, message: 'Tips berhasil diperbarui' });
+  } catch (error) {
+    console.error('[pos-master/updateCareReportTip]', error.message);
+    return res.status(500).json({ message: 'Gagal memperbarui tips' });
+  }
+};
+
+export const deleteCareReportTip = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [[existing]] = await cleanoxPool.query(`SELECT id FROM mst_care_report_tips WHERE id = ? LIMIT 1`, [id]);
+    if (!existing) {
+      return res.status(404).json({ message: 'Tips tidak ditemukan' });
+    }
+    await cleanoxPool.query(`DELETE FROM mst_care_report_tips WHERE id = ?`, [id]);
+    return res.json({ success: true, message: 'Tips kategori berhasil dihapus' });
+  } catch (error) {
+    console.error('[pos-master/deleteCareReportTip]', error.message);
+    return res.status(500).json({ message: 'Gagal menghapus tips kategori' });
+  }
+};
+
+

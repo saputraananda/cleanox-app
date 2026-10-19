@@ -15,7 +15,12 @@ import {
   createDiscount,
   updateDiscount,
   listPaymentMethods,
+  getCareReportTips,
+  createCareReportTip,
+  updateCareReportTip,
+  deleteCareReportTip,
 } from '../controllers/posMaster.controller.js';
+
 
 const router = Router();
 
@@ -56,4 +61,11 @@ router.get('/discounts/:id', getDiscountDetail);
 router.post('/discounts', createDiscount);
 router.put('/discounts/:id', updateDiscount);
 
+router.get('/care-report-tips', getCareReportTips);
+router.post('/care-report-tips', createCareReportTip);
+router.put('/care-report-tips/:id', updateCareReportTip);
+router.delete('/care-report-tips/:id', deleteCareReportTip);
+
 export default router;
+
+

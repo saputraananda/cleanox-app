@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import http from 'node:http';
+import https from 'node:https';
 import { fileURLToPath } from 'url';
 import { Server as SocketServer } from 'socket.io';
 
@@ -82,6 +83,29 @@ app.use('/api/mobile-leave', mobileLeaveRoutes);
 app.use('/api/mobile-off-day', mobileOffDayRoutes);
 app.use('/api/mobile-kasbon', mobileKasbonRoutes);
 app.use('/api/mobile-overtime', mobileOvertimeRoutes);
+
+/* ── Avatar Image Proxy (Bypasses CORS for PDF & Client Images) ── */
+app.get('/api/avatar-proxy', (req, res) => {
+  const rawPath = req.query.path || req.query.url;
+  if (!rawPath) return res.status(400).send('Missing path parameter');
+  let targetUrl = String(rawPath).trim();
+  if (!/^https?:\/\//i.test(targetUrl)) {
+    const clean = targetUrl.startsWith('/') ? targetUrl : `/${targetUrl}`;
+    targetUrl = `https://api.waschenalora.com${clean}`;
+  }
+  const client = targetUrl.startsWith('https') ? https : http;
+  client.get(targetUrl, (upstream) => {
+    if (upstream.statusCode !== 200) {
+      return res.status(upstream.statusCode).send('Upstream image error');
+    }
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Content-Type', upstream.headers['content-type'] || 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    upstream.pipe(res);
+  }).on('error', (err) => {
+    res.status(502).send('Error proxying avatar');
+  });
+});
 
 /* ── Serve built React app in production ─────────────── */
 if (process.env.NODE_ENV === 'production') {

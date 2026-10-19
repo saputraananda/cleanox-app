@@ -18,8 +18,10 @@ import {
   Package,
   ShoppingBag,
   Wallet,
+  FileText,
   X,
 } from 'lucide-react';
+
 import cleanoxLogo from '../../assets/cleanox.png';
 import { getUser } from '@shared/utils/auth.js';
 
@@ -49,7 +51,9 @@ const NAV_TREE = [
       { label: 'Prices', icon: Tag, to: '/cleanox-only/prices' },
       { label: 'Promo', icon: BadgePercent, to: '/cleanox-only/promos' },
       { label: 'Diskon', icon: CircleDollarSign, to: '/cleanox-only/discounts' },
+      { label: 'Tips Care Report', icon: FileText, to: '/cleanox-only/care-report-tips' },
       { label: 'Paket Bundle', icon: Package, to: '/cleanox-only/bundles' },
+
       { label: 'Beli Paket Bundle', icon: ShoppingBag, to: '/cleanox-only/bundles/purchase' },
       { label: 'Saldo Paket', icon: Wallet, to: '/cleanox-only/bundles/saldo' },
     ],
