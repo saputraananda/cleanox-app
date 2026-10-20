@@ -15,6 +15,18 @@ export const cleanoxPool = mysql.createPool({
   ssl: { rejectUnauthorized: false },
 });
 
+export const cleanoxPosPool = mysql.createPool({
+  host: process.env.DB_HOST_CLEANOX,
+  port: Number(process.env.DB_PORT_CLEANOX) || 3306,
+  user: process.env.DB_USER_CLEANOX,
+  password: process.env.DB_PASS_CLEANOX,
+  database: process.env.DB_NAME_CLEANOX_POS || 'cleanox_pos_prod',
+  waitForConnections: true,
+  connectionLimit: 10,
+  timezone: '+07:00',
+  ssl: { rejectUnauthorized: false },
+});
+
 export const aloraPool = mysql.createPool({
   host: process.env.DB_HOST,
   port: Number(process.env.DB_PORT) || 3306,

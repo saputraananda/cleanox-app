@@ -98,7 +98,8 @@ export const login = async (req, res) => {
       'SELECT company_id, exit_date FROM mst_employee WHERE employee_id = ?',
       [user.id]
     );
-    const isManagement = empRows.length > 0 && empRows[0].company_id === 1 && empRows[0].exit_date === null;
+    const companyId = empRows.length > 0 ? empRows[0].company_id : null;
+    const isManagement = empRows.length > 0 && companyId === 1 && empRows[0].exit_date === null;
 
     const [roleRows] = await cleanoxPool.query(
       'SELECT role FROM mst_role WHERE employee_id = ?',
@@ -107,7 +108,15 @@ export const login = async (req, res) => {
     const userRole = roleRows.length > 0 ? roleRows[0].role : 'frontliner';
 
     const token = jwt.sign(
-      { id: user.id, email: user.email, role: userRole, name: user.name, username: user.username, isManagement },
+      {
+        id: user.id,
+        email: user.email,
+        role: userRole,
+        name: user.name,
+        username: user.username,
+        company_id: companyId,
+        isManagement,
+      },
       process.env.SESSION_SECRET,
       { expiresIn: '7d' }
     );
@@ -121,6 +130,7 @@ export const login = async (req, res) => {
         username: user.username,
         role: userRole,
         avatar: user.avatar,
+        company_id: companyId,
         isManagement,
       },
     });
@@ -147,7 +157,8 @@ export const getMe = async (req, res) => {
       'SELECT company_id, exit_date FROM mst_employee WHERE employee_id = ?',
       [user.id]
     );
-    const isManagement = empRows.length > 0 && empRows[0].company_id === 1 && empRows[0].exit_date === null;
+    const companyId = empRows.length > 0 ? empRows[0].company_id : null;
+    const isManagement = empRows.length > 0 && companyId === 1 && empRows[0].exit_date === null;
 
     const [roleRows] = await cleanoxPool.query(
       'SELECT role FROM mst_role WHERE employee_id = ?',
@@ -159,6 +170,7 @@ export const getMe = async (req, res) => {
       user: {
         ...user,
         role: userRole,
+        company_id: companyId,
         isManagement,
       },
     });

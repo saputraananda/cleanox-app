@@ -3,6 +3,7 @@ import {
   LayoutDashboard,
   Sparkles,
   Factory,
+  Truck,
   Users,
   TrendingUp,
   X,
@@ -13,6 +14,7 @@ import { getUser } from '../utils/auth.js';
 const NAV_ITEMS = [
   { label: 'Beranda',            icon: LayoutDashboard, to: '/dashboard',                     roles: ['admin', 'management', 'produksi', 'frontliner'] },
   { label: 'Cleanox',            icon: Sparkles,        to: '/cleanox',                       roles: ['admin', 'management'] },
+  { label: 'Cleanox Take Home',  icon: Truck,           to: '/cleanox-takehome',               roles: ['admin', 'management', 'produksi', 'frontliner', 'cleanox'] },
   { label: 'Cleanox By Waschen', icon: Factory,         to: '/cleanox-by-waschen-production',  roles: ['admin', 'management', 'produksi', 'frontliner'] },
 ];
 
@@ -22,7 +24,8 @@ export default function Sidebar({ collapsed, mobileOpen, onMobileClose }) {
     (item) =>
       !item.roles ||
       item.roles.includes(user?.role) ||
-      (item.roles.includes('management') && user?.isManagement)
+      (item.roles.includes('management') && user?.isManagement) ||
+      (item.to === '/cleanox-takehome' && [1, 3].includes(user?.company_id))
   );
   return (
     <aside

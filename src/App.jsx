@@ -4,6 +4,7 @@ import LoginPage from './pages/LoginPage.jsx';
 import RegisterPage from './pages/RegisterPage.jsx';
 import DashboardPage from './pages/DashboardPage.jsx';
 import CleanoxByWaschenProductionPage from './pages/CleanoxByWaschenProductionPage.jsx';
+import CleanoxTakeHomePage from './pages/CleanoxTakeHomePage.jsx';
 import Layout from './components/Layout.jsx';
 
 const PrivateRoute = ({ children, roles }) => {
@@ -59,6 +60,14 @@ export default function App() {
                 <p className="text-gray-400 mt-2">Coming soon…</p>
               </div>
             </Layout>
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/cleanox-takehome"
+        element={
+          <PrivateRoute>
+            <Layout><CleanoxTakeHomePage /></Layout>
           </PrivateRoute>
         }
       />

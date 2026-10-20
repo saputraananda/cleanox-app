@@ -8,6 +8,7 @@ import authRoutes from './api/routes/auth.routes.js';
 import cleanoxByWaschenProductionRoutes from './api/routes/cleanoxByWaschenProduction.routes.js';
 import evidanceRoutes from './api/routes/evidance.routes.js';
 import dashboardCleanoxRoutes from './api/routes/DashboardCleanox.routes.js';
+import cleanoxTakeHomeRoutes from './api/routes/cleanoxTakeHome.routes.js';
 
 dotenv.config();
 
@@ -30,6 +31,12 @@ app.use('/api/auth', authRoutes);
 app.use('/api/cleanox-by-waschen-production', cleanoxByWaschenProductionRoutes);
 app.use('/api/evidance', evidanceRoutes);
 app.use('/api/dashboard-cleanox', dashboardCleanoxRoutes);
+app.use('/api/cleanox-takehome', cleanoxTakeHomeRoutes);
+// Alias route for direct compatibility with DB photo_path (/pos-transactions/takehome-evidence/:filename)
+app.use('/api/pos-transactions/takehome-evidence', (req, res, next) => {
+  req.url = `/evidence${req.url}`;
+  cleanoxTakeHomeRoutes(req, res, next);
+});
 
 /* ── Serve built React app in production ─────────────── */
 if (process.env.NODE_ENV === 'production') {
