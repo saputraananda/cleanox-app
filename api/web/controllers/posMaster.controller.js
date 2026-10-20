@@ -55,6 +55,7 @@ export const listServices = async (req, res) => {
         s.satuan_name,
         s.duration_value,
         s.duration_unit,
+        s.takehome_days,
         s.status,
         sp.price,
         sp.coret_price,
@@ -151,6 +152,10 @@ function parseServiceBody(body, { includeSatuan = true } = {}) {
       ? duration_unit_raw
       : null
     : null;
+  const takehome_days =
+    body?.takehome_days === '' || body?.takehome_days == null
+      ? null
+      : Number(body.takehome_days);
   const status = normalizeStatus(body?.status);
   const coretParsed = normalizeCoretPrice(body?.coret_price);
 
@@ -177,6 +182,9 @@ function parseServiceBody(body, { includeSatuan = true } = {}) {
   if (duration_unit_raw && !duration_unit) {
     return { error: 'Satuan durasi tidak valid' };
   }
+  if (takehome_days != null && (!Number.isFinite(takehome_days) || takehome_days < 0)) {
+    return { error: 'Estimasi hari Take Home tidak valid' };
+  }
   if (category_id != null && !Number.isFinite(category_id)) {
     return { error: 'Kategori tidak valid' };
   }
@@ -190,6 +198,7 @@ function parseServiceBody(body, { includeSatuan = true } = {}) {
       satuan_id,
       duration_value,
       duration_unit,
+      takehome_days,
       status,
     },
   };
@@ -221,8 +230,8 @@ export const createService = async (req, res) => {
 
     const [result] = await connection.query(
       `INSERT INTO mst_services
-        (name, price, satuan_id, satuan_name, category_id, duration_value, duration_unit, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(0), CURRENT_TIMESTAMP(0))`,
+        (name, price, satuan_id, satuan_name, category_id, duration_value, duration_unit, takehome_days, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP(0), CURRENT_TIMESTAMP(0))`,
       [
         parsed.data.name,
         toMoney(parsed.data.price),
@@ -231,6 +240,7 @@ export const createService = async (req, res) => {
         parsed.data.category_id,
         parsed.data.duration_value,
         parsed.data.duration_unit,
+        parsed.data.takehome_days,
         parsed.data.status,
       ]
     );
@@ -305,6 +315,7 @@ export const updateService = async (req, res) => {
            category_id = ?,
            duration_value = ?,
            duration_unit = ?,
+           takehome_days = ?,
            status = ?,
            updated_at = CURRENT_TIMESTAMP(0)
        WHERE id = ?`,
@@ -316,6 +327,7 @@ export const updateService = async (req, res) => {
         parsed.data.category_id,
         parsed.data.duration_value,
         parsed.data.duration_unit,
+        parsed.data.takehome_days,
         parsed.data.status,
         serviceId,
       ]

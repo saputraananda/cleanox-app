@@ -1925,6 +1925,38 @@ export default function PosTransactionCreatePage() {
                       {form.items.length} item ·{' '}
                       {form.service_mode === 'take_home' ? 'Take Home' : 'Home Service'}
                     </p>
+                    {form.service_mode === 'take_home' && (() => {
+                      let maxDays = 0;
+                      for (const it of form.items) {
+                        const srv = services.find((s) => Number(s.id) === Number(it.service_id));
+                        if (srv?.takehome_days != null && Number(srv.takehome_days) > 0) {
+                          maxDays = Math.max(maxDays, Number(srv.takehome_days));
+                        }
+                      }
+                      if (maxDays <= 0) return null;
+                      let estDateStr = null;
+                      if (scheduleDate) {
+                        const d = new Date(scheduleDate);
+                        if (!Number.isNaN(d.getTime())) {
+                          d.setDate(d.getDate() + maxDays);
+                          estDateStr = d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+                        }
+                      }
+                      return (
+                        <div className="mt-2.5 rounded-xl bg-white/10 p-2.5 text-[11.5px] border border-white/10 text-amber-200">
+                          <p className="font-semibold flex items-center justify-between">
+                            <span>Estimasi Pengerjaan:</span>
+                            <span className="font-bold text-white">{maxDays} hari</span>
+                          </p>
+                          {estDateStr && (
+                            <p className="mt-1 flex items-center justify-between text-blue-100 text-[11px]">
+                              <span>Perkiraan Selesai:</span>
+                              <span className="font-medium text-amber-200">{estDateStr}</span>
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()}
                     <p className="mt-4 text-[11.5px] text-blue-100">Subtotal (non-GC)</p>
                     <p className="font-sans text-[22px] font-extrabold tracking-[-0.01em]">
                       Rp {selectedTotals.subtotal.toLocaleString('id-ID')}
@@ -2369,7 +2401,11 @@ export default function PosTransactionCreatePage() {
                     const selected = Number(itemDraft.service_id) === Number(service.id);
                     const metaParts = [];
                     if (service.satuan_name) metaParts.push(service.satuan_name);
-                    if (service.duration_value && service.duration_unit) {
+                    if (isTakeHome) {
+                      if (service.takehome_days != null) {
+                        metaParts.push(`Take Home: ${service.takehome_days} hari`);
+                      }
+                    } else if (service.duration_value && service.duration_unit) {
                       metaParts.push(`${service.duration_value} ${service.duration_unit}`);
                     }
                     return (

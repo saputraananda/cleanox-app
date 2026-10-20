@@ -19,6 +19,7 @@ const emptyForm = {
   legacySatuanName: '',
   duration_value: '',
   duration_unit: '',
+  takehome_days: '',
   price: '',
   coret_price: '',
   status: 'Aktif',
@@ -63,6 +64,7 @@ function rowToForm(row, satuans) {
     satuan_id,
     duration_value: row.duration_value == null ? '' : String(row.duration_value),
     duration_unit: row.duration_unit || '',
+    takehome_days: row.takehome_days == null ? '' : String(row.takehome_days),
     price: row.price == null ? '' : String(row.price),
     coret_price: row.coret_price == null ? '' : String(row.coret_price),
     status: row.status || 'Aktif',
@@ -164,6 +166,7 @@ export default function PosPricesPage() {
         category_id: form.category_id || null,
         duration_value: form.duration_value === '' ? null : Number(form.duration_value),
         duration_unit: form.duration_unit || null,
+        takehome_days: form.takehome_days === '' ? null : Number(form.takehome_days),
         price: Number(form.price),
         coret_price: form.coret_price === '' ? null : Number(form.coret_price),
         status: form.status,
@@ -316,7 +319,21 @@ export default function PosPricesPage() {
                 ) : (
                   pagination.items.map((row) => (
                     <tr key={row.id} className="border-b border-gray-50 hover:bg-slate-50/40 transition-colors even:bg-slate-50/20">
-                      <td className="px-3 sm:px-4 py-2.5 font-medium text-gray-900">{row.name}</td>
+                      <td className="px-3 sm:px-4 py-2.5 font-medium text-gray-900">
+                        <div>{row.name}</div>
+                        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                          {row.duration_value && (
+                            <span className="text-[10.5px] text-slate-500 font-normal">
+                              HS: {row.duration_value} {row.duration_unit}
+                            </span>
+                          )}
+                          {row.takehome_days != null && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                              Take Home: {row.takehome_days} hari
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-3 sm:px-4 py-2.5 text-sm text-gray-700">{row.category_name || '—'}</td>
                       <td className="px-3 sm:px-4 py-2.5 text-sm text-gray-700">{row.satuan_name || '—'}</td>
                       <td className="px-3 sm:px-4 py-2.5 font-sans text-sm font-bold text-gray-800 whitespace-nowrap">
@@ -458,7 +475,7 @@ export default function PosPricesPage() {
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <label className="block space-y-1.5">
                   <span className="text-[9.5px] font-semibold uppercase tracking-[.14em] text-slate-400">
-                    Durasi
+                    Durasi Home Service
                   </span>
                   <input
                     type="number"
@@ -473,7 +490,7 @@ export default function PosPricesPage() {
                 </label>
                 <label className="block space-y-1.5">
                   <span className="text-[9.5px] font-semibold uppercase tracking-[.14em] text-slate-400">
-                    Satuan Durasi
+                    Satuan Durasi Home Service
                   </span>
                   <select
                     value={form.duration_unit}
@@ -488,6 +505,32 @@ export default function PosPricesPage() {
                     <option value="minggu">minggu</option>
                     <option value="bulan">bulan</option>
                   </select>
+                </label>
+              </div>
+
+              <div>
+                <label className="block space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9.5px] font-semibold uppercase tracking-[.14em] text-slate-400">
+                      Estimasi Take Home (Hari)
+                    </span>
+                    <span className="text-[10px] text-amber-600 font-semibold bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+                      Khusus Take Home
+                    </span>
+                  </div>
+                  <input
+                    type="number"
+                    min="0"
+                    value={form.takehome_days}
+                    onChange={(e) =>
+                      setForm((prev) => ({ ...prev, takehome_days: e.target.value }))
+                    }
+                    className={inputClass}
+                    placeholder="Contoh: 7 (hari selesai)"
+                  />
+                  <p className="text-[10.5px] text-slate-400">
+                    Estimasi berapa hari pengerjaan di workshop hingga siap diantar kembali ke customer.
+                  </p>
                 </label>
               </div>
 
