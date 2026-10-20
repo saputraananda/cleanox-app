@@ -475,6 +475,8 @@ function TrackingModal({ show, onClose, row, canUpdate, onStageUpdated, onPhotoP
     }));
   };
 
+  const txId = row.transaction_id || row.id;
+
   const handleSave = async (stageKey, isCorrection = false) => {
     if (!canUpdate) {
       Swal.fire({ icon: 'warning', title: 'Akses Ditolak', text: 'Hanya user company_id 1 atau 3 yang diizinkan mengupdate.' });
@@ -494,7 +496,7 @@ function TrackingModal({ show, onClose, row, canUpdate, onStageUpdated, onPhotoP
       if (form.timestamp) formData.append('timestamp', form.timestamp);
       if (photoFiles[stageKey]) formData.append('photo', photoFiles[stageKey]);
 
-      const { data } = await api.post(`/cleanox-takehome/${row.id}/stages/${stageKey}`, formData, {
+      const { data } = await api.post(`/cleanox-takehome/${txId}/stages/${stageKey}`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
 
@@ -528,7 +530,7 @@ function TrackingModal({ show, onClose, row, canUpdate, onStageUpdated, onPhotoP
     if (!canUpdate) return;
     setSaving(`del-${stageKey}`);
     try {
-      await api.post(`/cleanox-takehome/${row.id}/stages/${stageKey}/clear`);
+      await api.post(`/cleanox-takehome/${txId}/stages/${stageKey}/clear`);
       Swal.fire({
         icon: 'success',
         title: 'Berhasil Dihapus',
@@ -575,7 +577,7 @@ function TrackingModal({ show, onClose, row, canUpdate, onStageUpdated, onPhotoP
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <span className="text-gray-400">No Nota</span>
-                <p className="font-mono font-semibold text-gray-800">{row.transaction_no || `#${row.id}`}</p>
+                <p className="font-mono font-semibold text-gray-800">{row.transaction_no || `#${txId}`}</p>
               </div>
               <div>
                 <span className="text-gray-400">Status</span>
@@ -591,14 +593,38 @@ function TrackingModal({ show, onClose, row, canUpdate, onStageUpdated, onPhotoP
                 <span className="text-gray-400">Telepon</span>
                 <p className="font-semibold text-gray-800">{row.customer_phone || '—'}</p>
               </div>
+              <div>
+                <span className="text-gray-400">Tgl Layanan</span>
+                <p className="font-semibold text-gray-800">{fmtDate(row.service_date)}</p>
+              </div>
+              <div>
+                <span className="text-gray-400">Estimasi Selesai</span>
+                <p className="font-semibold text-gray-800">
+                  {row.estimated_completion_date ? (
+                    <span className="text-amber-700 font-bold">
+                      {fmtDate(row.estimated_completion_date)}
+                      {row.estimated_days ? ` (${row.estimated_days} hari)` : ''}
+                    </span>
+                  ) : (
+                    '—'
+                  )}
+                </p>
+              </div>
               <div className="col-span-2">
                 <span className="text-gray-400">Alamat Customer</span>
                 <p className="font-semibold text-gray-800">{row.customer_address || '—'}</p>
               </div>
             </div>
             <div className="pt-2 border-t border-gray-200">
-              <span className="text-gray-400">Layanan / Item</span>
-              <p className="font-semibold text-gray-800">{itemsSummary}</p>
+              <span className="text-gray-400">Layanan Dipilih</span>
+              <p className="font-semibold text-brand-700">
+                {row.service_name ? `${row.service_name} (${row.item_qty} ${row.item_unit || ''})` : itemsSummary}
+              </p>
+              {row.items && row.items.length > 1 && (
+                <p className="text-[11px] text-gray-400 mt-0.5">
+                  Semua layanan dalam nota: {itemsSummary}
+                </p>
+              )}
             </div>
           </div>
 
@@ -1153,9 +1179,9 @@ export default function CleanoxTakeHomePage() {
     { key: 'no', label: 'No', align: 'center', w: 'w-10' },
     { key: 'no_nota', label: 'No Nota', align: 'left' },
     { key: 'customer_nama', label: 'Customer', align: 'left' },
-    { key: 'customer_address', label: 'Alamat', align: 'left' },
     { key: 'layanan', label: 'Layanan / Item', align: 'left' },
     { key: 'tgl_layanan', label: 'Tgl Layanan', align: 'left' },
+    { key: 'tgl_selesai', label: 'Tgl Selesai', align: 'left' },
     { key: 'status', label: 'Status', align: 'center' },
     { key: 'lacak', label: 'Lacak', align: 'center', w: 'w-20' },
   ];
@@ -1250,8 +1276,8 @@ export default function CleanoxTakeHomePage() {
           {[
             {
               icon: FileText,
-              label: isAllData ? 'Total Seluruh Transaksi' : 'Transaksi di Periode Ini',
-              value: loading ? null : `${pagination.total} transaksi`,
+              label: isAllData ? 'Total Seluruh Item Layanan' : 'Item Layanan di Periode Ini',
+              value: loading ? null : `${pagination.total} item`,
               color: 'text-brand-600',
               bg: 'bg-brand-50'
             },
@@ -1403,7 +1429,9 @@ export default function CleanoxTakeHomePage() {
                     const rowNum = (pagination.page - 1) * pagination.limit + idx + 1;
                     const progress = row.takehome_progress || {};
                     const waLink = formatWaLink(row.customer_phone);
-                    const itemsText = (row.items || []).map((it) => `${it.service_name} (${it.qty} ${it.unit || ''})`).join(', ') || '—';
+                    const serviceText = row.service_name
+                      ? `${row.service_name} (${Number(row.item_qty || 1).toLocaleString('id-ID')} ${row.item_unit || ''})`
+                      : ((row.items || []).map((it) => `${it.service_name} (${it.qty} ${it.unit || ''})`).join(', ') || '—');
 
                     return (
                       <tr
@@ -1417,7 +1445,7 @@ export default function CleanoxTakeHomePage() {
 
                         {/* No Nota */}
                         <td className="px-3 sm:px-4 py-2.5 font-mono text-xs text-gray-700 whitespace-nowrap">
-                          {row.transaction_no || `#${row.id}`}
+                          {row.transaction_no || `#${row.transaction_id || row.id}`}
                         </td>
 
                         {/* Customer */}
@@ -1436,19 +1464,33 @@ export default function CleanoxTakeHomePage() {
                           )}
                         </td>
 
-                        {/* Alamat */}
-                        <td className="px-3 sm:px-4 py-2.5 text-gray-500 max-w-xs truncate text-xs" title={row.customer_address}>
-                          {row.customer_address || '—'}
-                        </td>
 
                         {/* Layanan */}
-                        <td className="px-3 sm:px-4 py-2.5 text-gray-700 text-xs max-w-xs truncate" title={itemsText}>
-                          {itemsText}
+                        <td className="px-3 sm:px-4 py-2.5 text-gray-800 font-medium text-xs max-w-xs truncate" title={serviceText}>
+                          {serviceText}
                         </td>
 
                         {/* Tgl Layanan */}
                         <td className="px-3 sm:px-4 py-2.5 text-gray-500 whitespace-nowrap text-xs">
                           {fmtDateTime(row.service_date)}
+                        </td>
+
+                        {/* Tgl Selesai */}
+                        <td className="px-3 sm:px-4 py-2.5 whitespace-nowrap text-xs">
+                          {row.estimated_completion_date ? (
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-semibold text-gray-800">
+                                {fmtDate(row.estimated_completion_date)}
+                              </span>
+                              {row.estimated_days != null && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                                  {row.estimated_days} hari
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-gray-300 font-mono">—</span>
+                          )}
                         </td>
 
                         {/* Status */}

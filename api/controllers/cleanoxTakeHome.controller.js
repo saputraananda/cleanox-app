@@ -187,9 +187,10 @@ export const getTakeHomeTransactions = async (req, res) => {
         `(LOWER(COALESCE(t.transaction_no, '')) LIKE ? 
           OR LOWER(COALESCE(t.customer_name, '')) LIKE ? 
           OR LOWER(COALESCE(t.customer_phone, '')) LIKE ?
-          OR LOWER(COALESCE(t.customer_address, '')) LIKE ?)`
+          OR LOWER(COALESCE(t.customer_address, '')) LIKE ?
+          OR LOWER(COALESCE(s.name, '')) LIKE ?)`
       );
-      params.push(q, q, q, q);
+      params.push(q, q, q, q, q);
     }
 
     if (status && status.trim()) {
@@ -213,19 +214,21 @@ export const getTakeHomeTransactions = async (req, res) => {
 
     const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
-    // Count Query
+    // Count Query (per service item)
     const countSql = `
       SELECT COUNT(*) AS total
       FROM tr_transactions t
+      LEFT JOIN tr_transaction_items i ON i.transaction_id = t.id
+      LEFT JOIN mst_services s ON s.id = i.service_id
       LEFT JOIN tr_takehome_progress p ON p.transaction_id = t.id
       ${whereSql}
     `;
     const [[{ total }]] = await cleanoxPosPool.query(countSql, params);
 
-    // Data Query
+    // Data Query (per service item)
     const dataSql = `
       SELECT
-        t.id,
+        t.id AS transaction_id,
         t.transaction_no,
         t.customer_id,
         t.customer_name,
@@ -240,6 +243,16 @@ export const getTakeHomeTransactions = async (req, res) => {
         t.notes,
         t.created_at,
         t.updated_at,
+        i.id AS item_id,
+        i.service_id,
+        i.qty,
+        i.meter,
+        i.unit_label,
+        COALESCE(s.name, 'Layanan') AS service_name,
+        s.takehome_days,
+        s.sla_hari,
+        s.duration_value,
+        s.duration_unit,
         p.id AS progress_id,
         p.status AS progress_status,
         p.diambil_by, p.diambil_at, p.diambil_photo_file, p.diambil_photo_path,
@@ -249,20 +262,23 @@ export const getTakeHomeTransactions = async (req, res) => {
         p.pengantaran_by, p.pengantaran_at, p.pengantaran_photo_file, p.pengantaran_photo_path,
         p.updated_at AS progress_updated_at
       FROM tr_transactions t
+      LEFT JOIN tr_transaction_items i ON i.transaction_id = t.id
+      LEFT JOIN mst_services s ON s.id = i.service_id
       LEFT JOIN tr_takehome_progress p ON p.transaction_id = t.id
       ${whereSql}
-      ORDER BY t.service_date DESC, t.id DESC
+      ORDER BY t.service_date DESC, t.id DESC, i.id ASC
       LIMIT ? OFFSET ?
     `;
 
     const [rows] = await cleanoxPosPool.query(dataSql, [...params, limitNum, offset]);
 
-    // Fetch items for current page transactions
-    const txIds = rows.map((r) => r.id);
+    // Fetch items for current page transactions (for modal & details)
+    const txIds = [...new Set(rows.map((r) => r.transaction_id).filter(Boolean))];
     let itemsMap = new Map();
     if (txIds.length > 0) {
       const [itemRows] = await cleanoxPosPool.query(
-        `SELECT i.transaction_id, i.qty, i.unit_label, COALESCE(s.name, 'Layanan') AS service_name
+        `SELECT i.transaction_id, i.id AS item_id, i.qty, i.unit_label, COALESCE(s.name, 'Layanan') AS service_name,
+                s.takehome_days, s.sla_hari, s.duration_value, s.duration_unit
          FROM tr_transaction_items i
          LEFT JOIN mst_services s ON s.id = i.service_id
          WHERE i.transaction_id IN (?)
@@ -272,16 +288,50 @@ export const getTakeHomeTransactions = async (req, res) => {
       for (const item of itemRows || []) {
         const id = Number(item.transaction_id);
         if (!itemsMap.has(id)) itemsMap.set(id, []);
+
+        let thDays = null;
+        if (item.takehome_days != null && Number(item.takehome_days) > 0) {
+          thDays = Number(item.takehome_days);
+        } else if (item.sla_hari != null && Number(item.sla_hari) > 0) {
+          thDays = Number(item.sla_hari);
+        } else if (String(item.duration_unit || '').toLowerCase() === 'hari' && Number(item.duration_value) > 0) {
+          thDays = Number(item.duration_value);
+        }
+
         itemsMap.get(id).push({
+          item_id: item.item_id,
           service_name: item.service_name,
           qty: item.qty,
           unit: item.unit_label,
+          takehome_days: thDays,
         });
       }
     }
 
     // Format rows with timeline stages
     const transactions = rows.map((r) => {
+      // Calculate estimated days specifically for THIS service item
+      let itemEstimatedDays = null;
+      if (r.takehome_days != null && Number(r.takehome_days) > 0) {
+        itemEstimatedDays = Number(r.takehome_days);
+      } else if (r.sla_hari != null && Number(r.sla_hari) > 0) {
+        itemEstimatedDays = Number(r.sla_hari);
+      } else if (String(r.duration_unit || '').toLowerCase() === 'hari' && Number(r.duration_value) > 0) {
+        itemEstimatedDays = Number(r.duration_value);
+      }
+
+      // Calculate estimated completion date: service_date + itemEstimatedDays
+      let estimatedCompletionDate = null;
+      if (itemEstimatedDays != null && r.service_date) {
+        const d = new Date(r.service_date);
+        if (!Number.isNaN(d.getTime())) {
+          d.setDate(d.getDate() + itemEstimatedDays);
+          estimatedCompletionDate = d.toISOString();
+        }
+      }
+
+      const txItems = itemsMap.get(Number(r.transaction_id)) || [];
+
       const stages = TAKEHOME_STAGE_ORDER.map((stg) => {
         const cols = stageColumns(stg);
         const photoFile = r[cols.file] || null;
@@ -304,18 +354,26 @@ export const getTakeHomeTransactions = async (req, res) => {
       const isAllComplete = stages.every((s) => s.filled);
 
       return {
-        id: r.id,
+        id: r.item_id ? `${r.transaction_id}_${r.item_id}` : r.transaction_id,
+        transaction_id: r.transaction_id,
+        item_id: r.item_id,
         transaction_no: r.transaction_no,
         customer_name: r.customer_name,
         customer_phone: r.customer_phone,
         customer_address: r.customer_address,
         service_date: r.service_date,
+        service_name: r.service_name,
+        item_qty: r.qty,
+        item_unit: r.unit_label,
+        item_meter: r.meter,
+        estimated_days: itemEstimatedDays,
+        estimated_completion_date: estimatedCompletionDate,
         transaction_status: r.transaction_status,
         service_mode: r.service_mode,
         total_people: r.total_people,
         total_price: r.total_price,
         notes: r.notes,
-        items: itemsMap.get(Number(r.id)) || [],
+        items: txItems,
         takehome_progress: {
           id: r.progress_id,
           status: r.progress_status || (isAllComplete ? 'pengantaran' : (nextStageObj?.key || null)),
