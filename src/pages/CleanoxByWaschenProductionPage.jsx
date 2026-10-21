@@ -93,19 +93,19 @@ const cutoffEnd = (year, month) => {
   return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-25`;
 };
 const now = new Date();
-// If today is past the 25th, the billing period has rolled over to the next month
+// If today is past the 25th, the billing period has rolled over to the next month test
 const _curMonth = now.getMonth() + 1; // 1-based
-const _curYear  = now.getFullYear();
+const _curYear = now.getFullYear();
 let periodMonth, periodYear;
 if (now.getDate() > 25) {
   if (_curMonth === 12) { periodMonth = 1; periodYear = _curYear + 1; }
   else { periodMonth = _curMonth + 1; periodYear = _curYear; }
 } else {
   periodMonth = _curMonth;
-  periodYear  = _curYear;
+  periodYear = _curYear;
 }
 const DEFAULT_START = cutoffStart(periodYear, periodMonth);
-const DEFAULT_END   = cutoffEnd(periodYear, periodMonth);
+const DEFAULT_END = cutoffEnd(periodYear, periodMonth);
 
 const MONTHS_ID = [
   'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
@@ -114,7 +114,7 @@ const MONTHS_ID = [
 
 const buildStaticRanges = () => [
   { label: 'Semua Data', range: () => ({ date_start: '2000-01-01', date_end: '2099-12-31' }) },
-  { label: 'Hari Ini',  range: () => ({ date_start: today, date_end: today }) },
+  { label: 'Hari Ini', range: () => ({ date_start: today, date_end: today }) },
   {
     label: 'Kemarin',
     range: () => {
@@ -1042,7 +1042,8 @@ function TrackingModal({ show, onClose, row, userRole, isManagement }) {
     }
   };
 
-  const handleDecision = async (decision) => {    setSavingDecision(true);
+  const handleDecision = async (decision) => {
+    setSavingDecision(true);
     try {
       await api.patch('/cleanox-by-waschen-production/cuci-jemur/decision', {
         id: row.id,
@@ -1499,21 +1500,21 @@ function TrackingModal({ show, onClose, row, userRole, isManagement }) {
                                 itemId={row.id}
                                 stage={
                                   stage.key === 'Pickup' ? 'pickup' :
-                                  stage.key === 'Cuci Jemur' ? 'cuci_jemur' :
-                                  stage.key === 'Packing' ? 'packing' :
-                                  'pengantaran'
+                                    stage.key === 'Cuci Jemur' ? 'cuci_jemur' :
+                                      stage.key === 'Packing' ? 'packing' :
+                                        'pengantaran'
                                 }
                                 evidancePath={
                                   stage.key === 'Pickup' ? tracking.pickup_evidance_path :
-                                  stage.key === 'Cuci Jemur' ? tracking.cuci_jemur_path :
-                                  stage.key === 'Packing' ? tracking.packing_evidance_path :
-                                  tracking.pengantaran_path
+                                    stage.key === 'Cuci Jemur' ? tracking.cuci_jemur_path :
+                                      stage.key === 'Packing' ? tracking.packing_evidance_path :
+                                        tracking.pengantaran_path
                                 }
                                 evidanceFile={
                                   stage.key === 'Pickup' ? tracking.pickup_evidance_file :
-                                  stage.key === 'Cuci Jemur' ? tracking.cuci_jemur_file :
-                                  stage.key === 'Packing' ? tracking.packing_evidance_file :
-                                  tracking.pengantaran_file
+                                    stage.key === 'Cuci Jemur' ? tracking.cuci_jemur_file :
+                                      stage.key === 'Packing' ? tracking.packing_evidance_file :
+                                        tracking.pengantaran_file
                                 }
                                 userRole={userRole}
                                 isManagement={isManagement}
