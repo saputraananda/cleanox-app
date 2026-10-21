@@ -40,7 +40,7 @@ import {
   Cell
 } from 'recharts';
 
-// Currency and date formatting helpers
+// Currency and date formatting helpers test
 const formatRp = (val) => {
   if (val === undefined || val === null || isNaN(val)) return 'Rp 0';
   return new Intl.NumberFormat('id-ID', {
@@ -1395,8 +1395,8 @@ export default function DashboardPage() {
                                   <td className="px-4 py-2.5 text-slate-450 font-medium">{formatDateTime(row.waktu_pembayaran)}</td>
                                   <td className="px-4 py-2.5">
                                     <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-bold ${row.jenis_bayar === 'Tunai'
-                                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
-                                        : 'bg-violet-50 text-violet-700 border border-violet-100'
+                                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                                      : 'bg-violet-50 text-violet-700 border border-violet-100'
                                       }`}>
                                       {row.jenis_bayar}
                                     </span>
@@ -1437,8 +1437,8 @@ export default function DashboardPage() {
                                   key={pg}
                                   onClick={() => setCleanoxCurrentPage(pg)}
                                   className={`w-6 h-6 flex items-center justify-center rounded-lg text-[10px] font-bold border transition-all ${cleanoxCurrentPage === pg
-                                      ? 'bg-indigo-600 border-indigo-650 text-white shadow-sm'
-                                      : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                                    ? 'bg-indigo-600 border-indigo-650 text-white shadow-sm'
+                                    : 'border-slate-200 text-slate-600 hover:bg-slate-50'
                                     }`}
                                 >
                                   {pg}
