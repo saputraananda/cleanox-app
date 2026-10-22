@@ -722,11 +722,11 @@ export async function downloadPosOrderFormPdf({
 
   drawShieldIconVector(doc, margin + 2.8, y + 2.2, 2.8, COLOR_AMBER_TEXT);
 
-  applyFont(doc, 'normal', 6.7);
+  applyFont(doc, 'normal', 6.0);
   doc.setTextColor(...COLOR_AMBER_TEXT);
   const disclaimerNote =
     'Harga final akan diinformasikan setelah teknisi melakukan pengecekan di lokasi, sebelum pengerjaan dimulai.';
-  doc.text(disclaimerNote, margin + 7.5, y + 5.6);
+  doc.text(disclaimerNote, margin + 7.2, y + 5.6, { maxWidth: contentW - 10 });
 
   y += disclaimerH + 3.8;
 
