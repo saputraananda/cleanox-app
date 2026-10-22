@@ -1,6 +1,6 @@
 import { jsPDF } from 'jspdf';
 import QRCode from 'qrcode';
-import { resolveAvatarUrl } from '../../shared/utils/avatar.js';
+import { registerCareReportFonts } from './posCareReportFonts.js';
 import { formatServiceDateParts } from './posCustomerOrderMessage.js';
 import {
   isGeneralCleaningCategory,
@@ -17,26 +17,45 @@ import {
   wrap,
 } from './posPdfLayout.js';
 
-// ── COLOR PALETTE (Strictly Matched to Konfirmasi_Jadwal_Cleanox_3-5_Layanan.pdf) ──
-const COLOR_PRIMARY_NAVY = [13, 46, 92];       // #0D2E5C (Deep Navy for titles, total, and main accents)
-const COLOR_CARD_NAVY    = [15, 53, 114];      // #0F3572 (Schedule Card Background)
-const COLOR_CARD_MUTED   = [147, 197, 253];    // #93C5FD (Schedule Card Label)
-const COLOR_TEXT_DARK    = [15, 23, 42];       // #0F172A (Slate 900)
-const COLOR_TEXT_BODY    = [51, 65, 85];       // #334155 (Slate 700)
-const COLOR_TEXT_MUTED   = [100, 116, 139];    // #64748B (Slate 500)
-const COLOR_BORDER       = [226, 232, 240];    // #E2E8F0 (Slate 200)
-const COLOR_BORDER_LIGHT = [241, 245, 249];    // #F1F5F9 (Slate 100)
-
-const COLOR_GREEN_BADGE_BG   = [235, 248, 238]; // #EBF8EE
-const COLOR_GREEN_BADGE_BRD  = [187, 247, 208]; // #BBF7D0
-const COLOR_GREEN_TEXT       = [22, 163, 74];   // #16A34A (Green 600)
-
-const COLOR_AMBER_BOX_BG  = [254, 249, 231];    // #FEF9E7
-const COLOR_AMBER_BOX_BRD = [254, 240, 199];    // #FEF0C7
-const COLOR_AMBER_TEXT    = [146, 64, 14];      // #92400E (Amber 800)
+// ── COLOR PALETTE (From Spesifikasi Template — Konfirmasi Jadwal Cleanox) ──
+const COLOR_NAVY_CLEANOX   = [2, 65, 108];    // #02416C (Judul, kotak jadwal, nama customer & teknisi, garis header, TOTAL)
+const COLOR_HIJAU_CLEANOX  = [147, 194, 15];  // #93C20F (Ikon judul section, bulatan centang Persiapan)
+const COLOR_TEXT_MAIN      = [31, 42, 55];    // #1F2A37 (Isi tabel, kalimat sapaan, poin persiapan)
+const COLOR_TEXT_MUTED     = [107, 119, 133]; // #6B7785 (No. Nota, header tabel, jabatan & ID teknisi, catatan kecil)
+const COLOR_TEXT_SUBTOTAL  = [75, 85, 99];    // #4B5563 (Baris Subtotal)
+const COLOR_LINE           = [227, 232, 238]; // #E3E8EE (Garis tabel, border kartu teknisi)
+const COLOR_GREEN_TEXT     = [46, 158, 79];   // #2E9E4F (Teks badge Jadwal Terkonfirmasi & Terverifikasi)
+const COLOR_GREEN_BG       = [230, 246, 234]; // #E6F6EA (Latar badge)
+const COLOR_TOTAL_BG       = [238, 244, 250]; // #EEF4FA (Baris TOTAL)
+const COLOR_AMBER_TEXT     = [154, 91, 18];   // #9A5B12 (Teks kotak "Harga final…")
+const COLOR_AMBER_BG       = [255, 248, 236]; // #FFF8EC (Latar kotak catatan)
+const COLOR_AMBER_BORDER   = [243, 217, 168]; // #F3D9A8 (Border kotak catatan)
+const COLOR_WHITE          = [255, 255, 255]; // #FFFFFF (Latar halaman, teks di kotak navy)
+const COLOR_CARD_MUTED     = [186, 230, 253]; // #BAE6FD (Label Tanggal / Jam / Alamat di kotak navy)
 
 const DEFAULT_WA_NUMBER = '0851-2233-3381';
 const DEFAULT_WA_LINK   = 'https://wa.me/6285122333381';
+
+// ── HELPER: Typography (100% Poppins with fallback) ─────────────────────────
+
+function applyFont(doc, weight = 'normal', size = 8, charSpace = 0) {
+  const fontList = doc.getFontList ? doc.getFontList() : {};
+  const hasPoppins = Boolean(fontList && fontList.Poppins);
+  const family = hasPoppins ? 'Poppins' : 'helvetica';
+
+  let style = 'normal';
+  if (weight === 'bold' || weight === 700 || weight === '700') {
+    style = 'bold';
+  } else if (weight === 'medium' || weight === 500 || weight === '500') {
+    style = hasPoppins ? 'medium' : 'normal';
+  } else if (weight === 'italic') {
+    style = hasPoppins ? 'normal' : 'italic';
+  }
+
+  doc.setFont(family, style);
+  if (size != null) doc.setFontSize(size);
+  if (doc.setCharSpace) doc.setCharSpace(charSpace || 0);
+}
 
 // ── HELPER: Image & Avatar Loaders ──────────────────────────────────────────
 
@@ -84,7 +103,7 @@ function cropRoundedAvatar(dataUrl) {
         // Portrait photos have faces near the top; capture with headroom so head sits lower
         const sy = natH > natW ? Math.max(0, (natH - size) * 0.15) : Math.max(0, (natH - size) / 2);
 
-        const radius = size * 0.16; // 16% rounded corner
+        const radius = size * 0.133; // 2mm / 15mm ≈ 13.3% rounded corner
         ctx.beginPath();
         ctx.moveTo(radius, 0);
         ctx.lineTo(size - radius, 0);
@@ -115,21 +134,21 @@ function cropRoundedAvatar(dataUrl) {
 function createPersonPlaceholderDataUrl() {
   try {
     const canvas = document.createElement('canvas');
-    canvas.width = 160;
-    canvas.height = 160;
+    canvas.width = 150;
+    canvas.height = 150;
     const ctx = canvas.getContext('2d');
 
     // Light grey rounded background
     ctx.fillStyle = '#F8FAFC';
-    const radius = 24;
+    const radius = 20;
     ctx.beginPath();
     ctx.moveTo(radius, 0);
-    ctx.lineTo(160 - radius, 0);
-    ctx.quadraticCurveTo(160, 0, 160, radius);
-    ctx.lineTo(160, 160 - radius);
-    ctx.quadraticCurveTo(160, 160, 160 - radius, 160);
-    ctx.lineTo(radius, 160);
-    ctx.quadraticCurveTo(0, 160, 0, 160 - radius);
+    ctx.lineTo(150 - radius, 0);
+    ctx.quadraticCurveTo(150, 0, 150, radius);
+    ctx.lineTo(150, 150 - radius);
+    ctx.quadraticCurveTo(150, 150, 150 - radius, 150);
+    ctx.lineTo(radius, 150);
+    ctx.quadraticCurveTo(0, 150, 0, 150 - radius);
     ctx.lineTo(0, radius);
     ctx.quadraticCurveTo(0, 0, radius, 0);
     ctx.closePath();
@@ -137,28 +156,28 @@ function createPersonPlaceholderDataUrl() {
 
     // Subtle border
     ctx.strokeStyle = '#E2E8F0';
-    ctx.lineWidth = 4;
+    ctx.lineWidth = 3;
     ctx.stroke();
 
     // Person head outline
     ctx.strokeStyle = '#94A3B8';
-    ctx.lineWidth = 6;
+    ctx.lineWidth = 5;
     ctx.fillStyle = '#FFFFFF';
     ctx.beginPath();
-    ctx.arc(80, 56, 22, 0, Math.PI * 2);
+    ctx.arc(75, 52, 20, 0, Math.PI * 2);
     ctx.stroke();
 
     // Person shoulders outline
     ctx.beginPath();
-    ctx.arc(80, 134, 38, Math.PI * 1.15, Math.PI * 1.85);
+    ctx.arc(75, 126, 36, Math.PI * 1.15, Math.PI * 1.85);
     ctx.stroke();
 
     // Small text "Foto"
+    applyFont(ctx, 'normal', 14);
     ctx.fillStyle = '#94A3B8';
-    ctx.font = '500 20px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('Foto', 80, 142);
+    ctx.fillText('Foto', 75, 134);
 
     return canvas.toDataURL('image/png');
   } catch {
@@ -169,11 +188,10 @@ function createPersonPlaceholderDataUrl() {
 /**
  * Robust technician avatar loader:
  * 1. Uses preloaded base64 from backend if available (worker.avatar_data_url).
- * 2. Fetches via /api/avatar-proxy with Blob -> FileReader to bypass any browser CORS tainted canvas limitations.
+ * 2. Fetches via /api/avatar-proxy with Blob -> FileReader to bypass any browser CORS limitations.
  * 3. Falls back gracefully to the clean person outline placeholder.
  */
 async function loadWorkerAvatar(worker) {
-  // 1. Check if backend already sent the preloaded base64 data URL
   if (
     worker?.avatar_data_url &&
     typeof worker.avatar_data_url === 'string' &&
@@ -192,10 +210,8 @@ async function loadWorkerAvatar(worker) {
     return createPersonPlaceholderDataUrl();
   }
 
-  // 2. Fetch via proxy or same-origin endpoint
   let targetUrl = String(rawPath).trim();
   if (!targetUrl.startsWith('data:')) {
-    // If it's a relative path or an absolute SuperApp URL, use the avatar proxy
     targetUrl = `/api/avatar-proxy?path=${encodeURIComponent(targetUrl)}`;
   }
 
@@ -212,7 +228,6 @@ async function loadWorkerAvatar(worker) {
     const cropped = await cropRoundedAvatar(dataUrl);
     return cropped || dataUrl;
   } catch {
-    // Fallback if network or proxy unavailable
     return createPersonPlaceholderDataUrl();
   }
 }
@@ -223,7 +238,7 @@ async function generateQrDataUrl(text) {
       margin: 1,
       width: 180,
       color: {
-        dark: '#0D2E5C',
+        dark: '#02416C',
         light: '#FFFFFF',
       },
     });
@@ -261,51 +276,50 @@ function formatItemQty(item, pendingGc) {
 
 // ── VECTOR DRAWING UTILITIES ────────────────────────────────────────────────
 
-function drawGreenCheckCircle(doc, cx, cy, radius = 2.4) {
-  doc.setFillColor(...COLOR_GREEN_TEXT);
+function drawGreenCheckCircle(doc, cx, cy, radius = 1.4, color = COLOR_HIJAU_CLEANOX) {
+  doc.setFillColor(...color);
   doc.circle(cx, cy, radius, 'F');
 
-  // Checkmark symbol inside
   doc.setDrawColor(255, 255, 255);
-  doc.setLineWidth(0.42);
+  doc.setLineWidth(0.3);
   doc.line(cx - radius * 0.45, cy - radius * 0.05, cx - radius * 0.1, cy + radius * 0.35);
   doc.line(cx - radius * 0.1, cy + radius * 0.35, cx + radius * 0.5, cy - radius * 0.35);
 }
 
-function drawCalendarIconVector(doc, x, y, size = 3.6) {
+function drawCalendarIconVector(doc, x, y, size = 3.2) {
   doc.setDrawColor(...COLOR_CARD_MUTED);
-  doc.setLineWidth(0.3);
-  doc.roundedRect(x, y + size * 0.2, size, size * 0.8, 0.4, 0.4, 'S');
+  doc.setLineWidth(0.28);
+  doc.roundedRect(x, y + size * 0.2, size, size * 0.8, 0.35, 0.35, 'S');
   doc.line(x, y + size * 0.45, x + size, y + size * 0.45);
   doc.line(x + size * 0.28, y, x + size * 0.28, y + size * 0.2);
   doc.line(x + size * 0.72, y, x + size * 0.72, y + size * 0.2);
 }
 
-function drawClockIconVector(doc, x, y, size = 3.6) {
+function drawClockIconVector(doc, x, y, size = 3.2) {
   const r = size / 2;
   const cx = x + r;
   const cy = y + r;
   doc.setDrawColor(...COLOR_CARD_MUTED);
-  doc.setLineWidth(0.3);
+  doc.setLineWidth(0.28);
   doc.circle(cx, cy, r, 'S');
   doc.line(cx, cy, cx, cy - r * 0.6);
   doc.line(cx, cy, cx + r * 0.5, cy);
 }
 
-function drawPinIconVector(doc, x, y, size = 3.6) {
+function drawPinIconVector(doc, x, y, size = 3.2) {
   const r = size * 0.38;
   const cx = x + size / 2;
   const cy = y + r + 0.2;
   doc.setDrawColor(...COLOR_CARD_MUTED);
-  doc.setLineWidth(0.3);
+  doc.setLineWidth(0.28);
   doc.circle(cx, cy, r, 'S');
   doc.line(cx - r * 0.8, cy + r * 0.5, cx, y + size);
   doc.line(cx + r * 0.8, cy + r * 0.5, cx, y + size);
 }
 
-function drawShieldIconVector(doc, x, y, size = 3.8, rgb = COLOR_PRIMARY_NAVY) {
+function drawShieldIconVector(doc, x, y, size = 3.2, rgb = COLOR_NAVY_CLEANOX) {
   doc.setDrawColor(...rgb);
-  doc.setLineWidth(0.35);
+  doc.setLineWidth(0.3);
   const w = size;
   const h = size * 1.15;
   const cx = x + w / 2;
@@ -320,16 +334,42 @@ function drawShieldIconVector(doc, x, y, size = 3.8, rgb = COLOR_PRIMARY_NAVY) {
     cx,
     y
   );
-  // Centang kecil di dalam perisai
-  doc.line(cx - 0.7, y + h * 0.5, cx - 0.1, y + h * 0.72);
-  doc.line(cx - 0.1, y + h * 0.72, cx + 0.8, y + h * 0.38);
+  doc.line(cx - 0.6, y + h * 0.5, cx - 0.1, y + h * 0.7);
+  doc.line(cx - 0.1, y + h * 0.7, cx + 0.7, y + h * 0.35);
+}
+
+function drawSectionHeader(doc, iconType, title, x, y) {
+  // Green accent square (11px ≈ 2.9mm)
+  const iconSize = 3.0;
+  doc.setFillColor(...COLOR_HIJAU_CLEANOX);
+  doc.roundedRect(x, y - 0.2, iconSize, iconSize, 0.7, 0.7, 'F');
+
+  if (iconType === 'dollar') {
+    applyFont(doc, 'bold', 6.5);
+    doc.setTextColor(255, 255, 255);
+    doc.text('$', x + 1.0, y + 2.1);
+  } else if (iconType === 'check') {
+    doc.setDrawColor(255, 255, 255);
+    doc.setLineWidth(0.35);
+    doc.line(x + 0.7, y + 1.4, x + 1.3, y + 2.2);
+    doc.line(x + 1.3, y + 2.2, x + 2.3, y + 0.8);
+  } else if (iconType === 'shield') {
+    doc.setDrawColor(255, 255, 255);
+    doc.setLineWidth(0.3);
+    doc.line(x + 0.7, y + 1.3, x + 1.3, y + 2.1);
+    doc.line(x + 1.3, y + 2.1, x + 2.3, y + 0.8);
+  }
+
+  applyFont(doc, 'bold', 9);
+  doc.setTextColor(...COLOR_NAVY_CLEANOX);
+  doc.text(title, x + iconSize + 2.2, y + 2.2);
 }
 
 // ── MAIN EXPORT: downloadPosOrderFormPdf ─────────────────────────────────────
 
 /**
- * Cleanox Order Form — Formulir Konfirmasi Jadwal (Portrait A4).
- * Desain presisi 100% identik dengan Konfirmasi_Jadwal_Cleanox_3-5_Layanan.pdf.
+ * Cleanox Order Form — Formulir Konfirmasi Jadwal (Portrait A5).
+ * Desain presisi 100% identik dengan Spesifikasi_Template_Konfirmasi_Jadwal_Cleanox.xlsx
  *
  * @param {{
  *   transaction: object,
@@ -348,16 +388,19 @@ export async function downloadPosOrderFormPdf({
 }) {
   if (!transaction) throw new Error('Data transaksi tidak tersedia');
 
+  // Spesifikasi Kertas: A5 portrait (148 x 210 mm)
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
-    format: 'a4',
+    format: 'a5',
   });
 
-  const pageW = doc.internal.pageSize.getWidth();
-  const pageH = doc.internal.pageSize.getHeight();
-  const margin = 14;
-  const contentW = pageW - margin * 2;
+  const pageW = doc.internal.pageSize.getWidth();   // 148 mm
+  const pageH = doc.internal.pageSize.getHeight();  // 210 mm
+  const margin = 8;                                 // Margin kiri & kanan: 8 mm
+  const marginTop = 7;                              // Margin atas: 7 mm
+  const contentW = 132;                             // Lebar area konten: 132 mm (148 - 8 - 8)
+  const rightEdge = margin + contentW;              // 140 mm
 
   const itemRows = Array.isArray(items) ? items : [];
   const pendingGc = isGcPricingPending(transaction, itemRows);
@@ -365,7 +408,7 @@ export async function downloadPosOrderFormPdf({
   const formattedDate = formatLongDateId(transaction.service_date);
   const serviceTimeLabel = timeLine && timeLine !== '-' ? `${timeLine} WIB` : '09.00 WIB';
 
-  // 1. Preload Assets (Logo, Mascot, QR, & Worker Avatars)
+  // 1. Preload Poppins Fonts, Assets (Logo, Mascot, QR, & Worker Avatars)
   const [logoBase64, mascotBase64, qrBase64] = await Promise.all([
     loadImageDataUrl(typeof logoDataUrl === 'string' ? logoDataUrl : logoDataUrl?.dataUrl),
     loadImageDataUrl(typeof mascotDataUrl === 'string' ? mascotDataUrl : mascotDataUrl?.dataUrl),
@@ -374,6 +417,7 @@ export async function downloadPosOrderFormPdf({
         `Halo Admin Cleanox, saya ingin menanyakan jadwal pesanan No. ${transaction.transaction_no || transaction.id || ''}`
       )}`
     ),
+    registerCareReportFonts(doc),
   ]);
 
   // Preload worker avatars (up to 4 technicians)
@@ -387,197 +431,181 @@ export async function downloadPosOrderFormPdf({
     })
   );
 
-  let y = margin;
+  let y = marginTop;
 
-  // ── 1. HEADER SECTION ─────────────────────────────────────────────────────
-  // Logo Cleanox di kiri atas
+  // ── 1. HEADER SECTION (Spesifikasi Baris 5-8) ──────────────────────────────
+  // Logo Cleanox (HD) di kiri: x=8, y=7, w=25.5, h=13.5 mm (tinggi dikunci 13.5 mm)
   if (logoBase64) {
     try {
-      doc.addImage(logoBase64, 'PNG', margin, y - 2, 34, 15);
+      doc.addImage(logoBase64, 'PNG', margin, y, 25.5, 13.5);
     } catch {
       // fallback
     }
   }
 
-  // Judul "KONFIRMASI JADWAL" & No. Nota di kanan atas
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(15);
-  doc.setTextColor(...COLOR_PRIMARY_NAVY);
-  doc.text('KONFIRMASI JADWAL', pageW - margin, y + 4, { align: 'right' });
+  // Judul "KONFIRMASI JADWAL": Poppins Bold 12 pt, #02416C, rata kanan di x=140 mm
+  applyFont(doc, 'bold', 12, 0.15);
+  doc.setTextColor(...COLOR_NAVY_CLEANOX);
+  doc.text('KONFIRMASI JADWAL', rightEdge, y + 6.5, { align: 'right' });
+  if (doc.setCharSpace) doc.setCharSpace(0);
 
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
+  // No. Nota: Poppins Regular 6.6 pt, #6B7785, rata kanan di x=140 mm
+  applyFont(doc, 'normal', 6.6);
   doc.setTextColor(...COLOR_TEXT_MUTED);
   const notaText = `Cleanox Indonesia · No. Nota ${transaction.transaction_no || '-'}`;
-  doc.text(notaText, pageW - margin, y + 9.5, { align: 'right' });
+  doc.text(notaText, rightEdge, y + 11.5, { align: 'right' });
 
-  y += 18;
+  // Garis bawah header: x=8..140 mm, y=24 mm, tebal 0.32 mm (0.9 px), #02416C
+  y = 24;
+  doc.setDrawColor(...COLOR_NAVY_CLEANOX);
+  doc.setLineWidth(0.32);
+  doc.line(margin, y, rightEdge, y);
 
-  // Thin separator line below header matching template
-  doc.setDrawColor(...COLOR_BORDER);
-  doc.setLineWidth(0.3);
-  doc.line(margin, y, pageW - margin, y);
-
-  y += 5;
-
-  // ── 2. GREETING & STATUS BADGE ────────────────────────────────────────────
-  const customerName = transaction.customer_name || 'Customer';
-
-  // Mascot with proper 4:5 aspect ratio (width: 12mm, height: 15mm)
+  // ── 2. GREETING & BADGE (Spesifikasi Baris 9-11) ───────────────────────────
+  // Maskot kucing: x=8, y=27.4, w=13, h=13.7 mm
+  const mascotY = 27.4;
   if (mascotBase64) {
     try {
-      doc.addImage(mascotBase64, 'PNG', margin, y - 1, 12, 15);
+      doc.addImage(mascotBase64, 'PNG', margin, mascotY, 13, 13.7);
     } catch {
       // fallback
     }
   }
 
-  const textStartX = mascotBase64 ? margin + 15 : margin;
+  // Kalimat sapaan: x=24 mm, jarak 3 mm dari maskot (100% Poppins)
+  const textStartX = 24;
+  const customerName = transaction.customer_name || 'Customer';
 
-  // Greeting Lines (No unicode emoji to avoid broken characters)
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.setTextColor(...COLOR_TEXT_DARK);
-  doc.text('Halo Kak ', textStartX, y + 4.5);
+  // Baris 1: Halo Kak [Nama Customer],
+  applyFont(doc, 'normal', 8.4);
+  doc.setTextColor(...COLOR_TEXT_MAIN);
+  doc.text('Halo Kak ', textStartX, 31.8);
+  const prefixW = doc.getTextWidth('Halo Kak ');
 
-  doc.setFont('helvetica', 'bold');
-  const greetingPrefixW = doc.getTextWidth('Halo Kak ');
-  doc.text(customerName, textStartX + greetingPrefixW, y + 4.5);
+  applyFont(doc, 'bold', 11);
+  doc.setTextColor(...COLOR_NAVY_CLEANOX);
+  doc.text(customerName, textStartX + prefixW, 31.8);
+  const nameW = doc.getTextWidth(customerName);
 
-  doc.setFont('helvetica', 'normal');
-  const fullGreetingLine1 = `Halo Kak ${customerName}`;
-  const greetingLine1W = doc.getTextWidth(fullGreetingLine1);
-  doc.text(
-    ', jadwal layanan Cleanox untuk Kakak sudah',
-    textStartX + greetingLine1W,
-    y + 4.5
-  );
+  // Baris 2 & 3: sapaan & jadwal layanan terkonfirmasi
+  applyFont(doc, 'normal', 8.4);
+  doc.setTextColor(...COLOR_TEXT_MAIN);
 
-  doc.text('terkonfirmasi. Sampai jumpa!', textStartX, y + 9.5);
+  if (textStartX + prefixW + nameW + doc.getTextWidth(', jadwal layanan Cleanox') <= 98) {
+    doc.text(', jadwal layanan Cleanox', textStartX + prefixW + nameW, 31.8);
+    doc.text('untuk Kakak sudah terkonfirmasi. Sampai jumpa!', textStartX, 36.5);
+  } else {
+    doc.text('jadwal layanan Cleanox untuk Kakak sudah', textStartX, 36.2);
+    doc.text('terkonfirmasi. Sampai jumpa!', textStartX, 40.5);
+  }
 
-  // Status Badge "✓ Jadwal Terkonfirmasi" di kanan
-  const badgeW = 44;
-  const badgeH = 7;
-  const badgeX = pageW - margin - badgeW;
-  const badgeY = y + 2.5;
+  // Badge "Jadwal Terkonfirmasi": Poppins Bold 6.8 pt, #2E9E4F
+  const badgeW = 36;
+  const badgeH = 5.4;
+  const badgeX = rightEdge - badgeW;
+  const badgeY = 32.5;
 
-  doc.setFillColor(...COLOR_GREEN_BADGE_BG);
-  doc.setDrawColor(...COLOR_GREEN_BADGE_BRD);
-  doc.setLineWidth(0.3);
-  doc.roundedRect(badgeX, badgeY, badgeW, badgeH, 3.5, 3.5, 'FD');
+  doc.setFillColor(...COLOR_GREEN_BG);
+  doc.setDrawColor(...COLOR_GREEN_TEXT);
+  doc.setLineWidth(0.2);
+  doc.roundedRect(badgeX, badgeY, badgeW, badgeH, 2.7, 2.7, 'FD');
 
-  drawGreenCheckCircle(doc, badgeX + 4.5, badgeY + badgeH / 2, 1.8);
+  drawGreenCheckCircle(doc, badgeX + 3.2, badgeY + badgeH / 2, 1.3, COLOR_GREEN_TEXT);
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.5);
+  applyFont(doc, 'bold', 6.8);
   doc.setTextColor(...COLOR_GREEN_TEXT);
-  doc.text('Jadwal Terkonfirmasi', badgeX + 8.2, badgeY + 4.7);
+  doc.text('Jadwal Terkonfirmasi', badgeX + 6.0, badgeY + 3.7);
 
-  y += 17;
+  // ── 3. KOTAK JADWAL NAVY (Spesifikasi Baris 12) ────────────────────────────
+  y = 44;
+  const cardPadX = 4.5;
+  const cardColW = (contentW - cardPadX * 2) / 2; // ≈ 61.5 mm
 
-  // ── 3. SCHEDULE & LOCATION CARD (NAVY THEME) ──────────────────────────────
-  const cardH = 35;
-  doc.setFillColor(...COLOR_CARD_NAVY);
-  doc.roundedRect(margin, y, contentW, cardH, 4.5, 4.5, 'F');
+  applyFont(doc, 'normal', 8.6);
+  const addrLines = wrap(doc, transaction.customer_address || '-', contentW - cardPadX * 2, 8.6);
+  const isMultiLineAddr = addrLines.length > 1;
+  const cardH = isMultiLineAddr ? 29.5 : 26.1;
 
-  const cardPadX = 7;
-  const cardColW = (contentW - cardPadX * 2) / 2;
+  doc.setFillColor(...COLOR_NAVY_CLEANOX);
+  doc.roundedRect(margin, y, contentW, cardH, 3.5, 3.5, 'F');
 
-  // Tanggal Layanan
-  drawCalendarIconVector(doc, margin + cardPadX, y + 5.5, 3.5);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7.5);
+  // Tanggal Layanan (Col 1)
+  const col1X = margin + cardPadX;
+  drawCalendarIconVector(doc, col1X, y + 3.8, 3.0);
+  applyFont(doc, 'normal', 6.6);
   doc.setTextColor(...COLOR_CARD_MUTED);
-  doc.text('Tanggal', margin + cardPadX + 5, y + 8.5);
+  doc.text('Tanggal', col1X + 4.2, y + 6.2);
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10.5);
+  applyFont(doc, 'bold', 9.6);
   doc.setTextColor(255, 255, 255);
-  doc.text(formattedDate, margin + cardPadX, y + 14.5);
+  doc.text(formattedDate, col1X, y + 11.2);
 
-  // Jam Layanan
-  const col2X = margin + cardPadX + cardColW + 4;
-  drawClockIconVector(doc, col2X, y + 5.5, 3.5);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7.5);
+  // Jam Layanan (Col 2)
+  const col2X = margin + cardPadX + cardColW + 2;
+  drawClockIconVector(doc, col2X, y + 3.8, 3.0);
+  applyFont(doc, 'normal', 6.6);
   doc.setTextColor(...COLOR_CARD_MUTED);
-  doc.text('Jam layanan', col2X + 5, y + 8.5);
+  doc.text('Jam layanan', col2X + 4.2, y + 6.2);
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10.5);
+  applyFont(doc, 'bold', 9.6);
   doc.setTextColor(255, 255, 255);
-  doc.text(serviceTimeLabel, col2X, y + 14.5);
+  doc.text(serviceTimeLabel, col2X, y + 11.2);
 
   // Alamat Lengkap
-  const addrStartY = y + 21.5;
-  drawPinIconVector(doc, margin + cardPadX, addrStartY, 3.5);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7.5);
+  const addrStartY = y + 15.5;
+  drawPinIconVector(doc, col1X, addrStartY, 3.0);
+  applyFont(doc, 'normal', 6.6);
   doc.setTextColor(...COLOR_CARD_MUTED);
-  doc.text('Alamat', margin + cardPadX + 5, addrStartY + 2.8);
+  doc.text('Alamat', col1X + 4.2, addrStartY + 2.3);
 
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
+  applyFont(doc, 'normal', 8.6);
   doc.setTextColor(255, 255, 255);
-  const addrLines = wrap(doc, transaction.customer_address || '-', contentW - cardPadX * 2, 8.5);
-  doc.text(addrLines.slice(0, 2), margin + cardPadX, addrStartY + 7.5);
+  doc.text(addrLines[0] || '-', col1X, addrStartY + 6.5);
+  if (isMultiLineAddr) {
+    doc.text(addrLines[1], col1X, addrStartY + 10.0);
+  }
 
-  y += cardH + 7;
+  y += cardH + 4.0;
 
-  // ── 4. RINCIAN LAYANAN & HARGA (TABLE) ────────────────────────────────────
-  // Title with green money badge
-  doc.setFillColor(...COLOR_GREEN_BADGE_BG);
-  doc.roundedRect(margin, y - 0.5, 5, 5, 1.2, 1.2, 'F');
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.5);
-  doc.setTextColor(...COLOR_GREEN_TEXT);
-  doc.text('$', margin + 1.6, y + 3.2);
+  // ── 4. RINCIAN LAYANAN & HARGA (Spesifikasi Baris 13-15) ───────────────────
+  drawSectionHeader(doc, 'dollar', 'Rincian Layanan & Harga', margin, y);
+  y += 5.5;
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10.5);
-  doc.setTextColor(...COLOR_PRIMARY_NAVY);
-  doc.text('Rincian Layanan & Harga', margin + 7.5, y + 3.5);
-
-  y += 7;
-
-  // Table Columns Setup
-  const colItemW = contentW * 0.48;
-  const colQtyW  = contentW * 0.12;
-  const colHrgW  = contentW * 0.20;
-  const colSubW  = contentW * 0.20;
+  // Table Columns Setup: ITEM: 64 mm, QTY: 16 mm, HARGA: 26 mm, SUBTOTAL: 26 mm
+  const colItemW = 64;
+  const colQtyW  = 16;
+  const colHrgW  = 26;
+  const colSubW  = 26;
 
   const colItemX = margin;
   const colQtyX  = colItemX + colItemW;
   const colHrgX  = colQtyX + colQtyW;
   const colSubX  = colHrgX + colHrgW;
 
-  // Table Header Line
-  doc.setDrawColor(...COLOR_BORDER);
-  doc.setLineWidth(0.3);
-  doc.line(margin, y, pageW - margin, y);
+  // Table Header Line: #E3E8EE
+  doc.setDrawColor(...COLOR_LINE);
+  doc.setLineWidth(0.25);
+  doc.line(margin, y, rightEdge, y);
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.5);
+  applyFont(doc, 'normal', 6.2, 0.1);
   doc.setTextColor(...COLOR_TEXT_MUTED);
-  doc.text('ITEM', colItemX + 1, y + 4);
-  doc.text('QTY', colQtyX + colQtyW / 2, y + 4, { align: 'center' });
-  doc.text('HARGA', colHrgX + colHrgW - 2, y + 4, { align: 'right' });
-  doc.text('SUBTOTAL', colSubX + colSubW - 1, y + 4, { align: 'right' });
+  doc.text('ITEM', colItemX + 1, y + 3.8);
+  doc.text('QTY', colQtyX + colQtyW / 2, y + 3.8, { align: 'center' });
+  doc.text('HARGA', colHrgX + colHrgW - 1, y + 3.8, { align: 'right' });
+  doc.text('SUBTOTAL', rightEdge - 1, y + 3.8, { align: 'right' });
+  if (doc.setCharSpace) doc.setCharSpace(0);
 
-  y += 6;
-  doc.line(margin, y, pageW - margin, y);
+  y += 5.2;
+  doc.line(margin, y, rightEdge, y);
 
-  // Table Rows
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
-  doc.setTextColor(...COLOR_TEXT_BODY);
+  // Table Rows: Poppins Regular 7.4 pt, #1F2A37
+  applyFont(doc, 'normal', 7.4);
+  doc.setTextColor(...COLOR_TEXT_MAIN);
 
-  const rowHeight = 7;
+  const rowBaseHeight = 6.0;
   let computedSubtotalSum = 0;
 
   itemRows.forEach((item) => {
-    y += rowHeight;
-
     const isGcPending = pendingGc && isGeneralCleaningCategory(item.category_name);
     const isMeterPending = isMeterPricingPending({
       satuanName: item.satuan_name,
@@ -594,179 +622,180 @@ export async function downloadPosOrderFormPdf({
     computedSubtotalSum += lineTotalVal;
     const itemTotal = isGcPending || isMeterPending ? 'Pending' : formatMoney(lineTotalVal);
 
-    const wrappedName = wrap(doc, itemName, colItemW - 4, 8.5);
-    doc.text(wrappedName[0] || itemName, colItemX + 1, y - 1.5);
+    const wrappedName = wrap(doc, itemName, colItemW - 3, 7.4);
+    const isMultiLine = wrappedName.length > 1;
+    const currentRowH = isMultiLine ? 8.5 : rowBaseHeight;
+
+    y += currentRowH;
+
+    if (isMultiLine) {
+      doc.text(wrappedName[0], colItemX + 1, y - 4.6);
+      doc.text(wrappedName[1], colItemX + 1, y - 1.4);
+    } else {
+      doc.text(wrappedName[0] || itemName, colItemX + 1, y - 1.5);
+    }
     doc.text(itemQty, colQtyX + colQtyW / 2, y - 1.5, { align: 'center' });
-    doc.text(itemPrice, colHrgX + colHrgW - 2, y - 1.5, { align: 'right' });
-    doc.text(itemTotal, colSubX + colSubW - 1, y - 1.5, { align: 'right' });
+    doc.text(itemPrice, colHrgX + colHrgW - 1, y - 1.5, { align: 'right' });
+    doc.text(itemTotal, rightEdge - 1, y - 1.5, { align: 'right' });
 
     // Subtle divider
-    doc.setDrawColor(...COLOR_BORDER_LIGHT);
-    doc.setLineWidth(0.2);
-    doc.line(margin, y, pageW - margin, y);
+    doc.setDrawColor(...COLOR_LINE);
+    doc.setLineWidth(0.18);
+    doc.line(margin, y, rightEdge, y);
   });
 
   if (itemRows.length === 0) {
-    y += rowHeight;
+    y += rowBaseHeight;
     doc.setTextColor(...COLOR_TEXT_MUTED);
     doc.text('Tidak ada item layanan.', colItemX + 1, y - 1.5);
-    doc.line(margin, y, pageW - margin, y);
+    doc.line(margin, y, rightEdge, y);
   }
 
-  y += 4;
+  y += 2.5;
 
-  // ── TOTALS SUMMARY ────────────────────────────────────────────────────────
+  // ── TOTALS SUMMARY & BARIS TOTAL ──────────────────────────────────────────
   const summary = buildTotalsSummary({
     transaction,
     gcPending: pendingGc,
     meterPending: transactionHasMeterPending(itemRows),
   });
 
-  const summaryLabelX = colHrgX + colHrgW - 4;
-  const summaryValueX = colSubX + colSubW - 1;
+  const summaryLabelX = colHrgX + colHrgW - 2;
+  const summaryValueX = rightEdge - 1;
 
-  // Subtotal row (guaranteed non-zero if items exist)
   const subtotalAmount =
     Number(transaction.subtotal) ||
     (computedSubtotalSum > 0 ? computedSubtotalSum : Number(summary.subtotal) || 0);
 
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
-  doc.setTextColor(...COLOR_TEXT_MUTED);
-  doc.text('Subtotal', summaryLabelX, y, { align: 'right' });
-  doc.setTextColor(...COLOR_TEXT_DARK);
-  doc.text(formatMoney(subtotalAmount), summaryValueX, y, { align: 'right' });
-  y += 5;
-
-  // Biaya Transport row (jika ada)
   const transportAmount = Number(transaction.shipping_cost || transaction.transport_fee || 0);
-  if (transportAmount > 0) {
-    doc.setTextColor(...COLOR_TEXT_MUTED);
-    doc.text('Biaya transport', summaryLabelX, y, { align: 'right' });
-    doc.setTextColor(...COLOR_TEXT_DARK);
-    doc.text(formatMoney(transportAmount), summaryValueX, y, { align: 'right' });
-    y += 5;
+  const discountAmount = Number(transaction.discount_total || transaction.discount_amount || 0);
+
+  // Subtotal row
+  if (transportAmount > 0 || discountAmount > 0) {
+    applyFont(doc, 'normal', 7.4);
+    doc.setTextColor(...COLOR_TEXT_SUBTOTAL);
+    doc.text('Subtotal', summaryLabelX, y + 2.5, { align: 'right' });
+    doc.setTextColor(...COLOR_TEXT_MAIN);
+    doc.text(formatMoney(subtotalAmount), summaryValueX, y + 2.5, { align: 'right' });
+    y += 4.5;
   }
 
-  // Diskon row (jika ada)
-  const discountAmount = Number(transaction.discount_total || transaction.discount_amount || 0);
+  // Biaya Transport row
+  if (transportAmount > 0) {
+    applyFont(doc, 'normal', 7.4);
+    doc.setTextColor(...COLOR_TEXT_SUBTOTAL);
+    doc.text('Biaya transport', summaryLabelX, y + 2.5, { align: 'right' });
+    doc.setTextColor(...COLOR_TEXT_MAIN);
+    doc.text(formatMoney(transportAmount), summaryValueX, y + 2.5, { align: 'right' });
+    y += 4.5;
+  }
+
+  // Diskon row
   if (discountAmount > 0) {
     const promoName = transaction.promo_name || 'promo';
-    doc.setTextColor(...COLOR_TEXT_MUTED);
-    doc.text(`Diskon [${promoName}]`, summaryLabelX, y, { align: 'right' });
-    doc.setTextColor(220, 38, 38); // merah
-    doc.text(`- ${formatMoney(discountAmount)}`, summaryValueX, y, { align: 'right' });
-    y += 5;
+    applyFont(doc, 'normal', 7.4);
+    doc.setTextColor(...COLOR_TEXT_SUBTOTAL);
+    doc.text(`Diskon [${promoName}]`, summaryLabelX, y + 2.5, { align: 'right' });
+    doc.setTextColor(220, 38, 38);
+    doc.text(`- ${formatMoney(discountAmount)}`, summaryValueX, y + 2.5, { align: 'right' });
+    y += 4.5;
   }
 
-  // Grand Total Row
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
-  doc.setTextColor(...COLOR_PRIMARY_NAVY);
-  doc.text('TOTAL', summaryLabelX, y + 1, { align: 'right' });
-  doc.setFontSize(12.5);
-  doc.text(formatMoney(summary.totalAmount), summaryValueX, y + 1, { align: 'right' });
-  y += 8;
+  // Baris TOTAL: Poppins Bold 8.8 pt, #02416C, latar #EEF4FA
+  const totalBoxH = 7.8;
+  doc.setFillColor(...COLOR_TOTAL_BG);
+  doc.roundedRect(margin, y + 1, contentW, totalBoxH, 1.8, 1.8, 'F');
 
-  // ── 5. DISCLAIMER NOTE BOX ────────────────────────────────────────────────
-  const disclaimerH = 8.5;
-  doc.setFillColor(...COLOR_AMBER_BOX_BG);
-  doc.setDrawColor(...COLOR_AMBER_BOX_BRD);
-  doc.setLineWidth(0.3);
-  doc.roundedRect(margin, y, contentW, disclaimerH, 2.5, 2.5, 'FD');
+  applyFont(doc, 'bold', 8.8);
+  doc.setTextColor(...COLOR_NAVY_CLEANOX);
+  doc.text('TOTAL', summaryLabelX, y + 5.8, { align: 'right' });
+  doc.text(formatMoney(summary.totalAmount), summaryValueX, y + 5.8, { align: 'right' });
 
-  drawShieldIconVector(doc, margin + 3.5, y + 2.2, 3.2, COLOR_AMBER_TEXT);
+  y += totalBoxH + 3.2;
 
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7.5);
+  // ── 5. KOTAK CATATAN HARGA (Spesifikasi Baris 16) ──────────────────────────
+  const disclaimerH = 9.2;
+  doc.setFillColor(...COLOR_AMBER_BG);
+  doc.setDrawColor(...COLOR_AMBER_BORDER);
+  doc.setLineWidth(0.25);
+  doc.roundedRect(margin, y, contentW, disclaimerH, 2.0, 2.0, 'FD');
+
+  drawShieldIconVector(doc, margin + 2.8, y + 2.2, 2.8, COLOR_AMBER_TEXT);
+
+  applyFont(doc, 'normal', 6.7);
   doc.setTextColor(...COLOR_AMBER_TEXT);
   const disclaimerNote =
     'Harga final akan diinformasikan setelah teknisi melakukan pengecekan di lokasi, sebelum pengerjaan dimulai.';
-  doc.text(disclaimerNote, margin + 9, y + 5.5);
+  doc.text(disclaimerNote, margin + 7.5, y + 5.6);
 
-  y += disclaimerH + 6;
+  y += disclaimerH + 3.8;
 
-  // ── 6. PERSIAPAN SEBELUM TIM DATANG ───────────────────────────────────────
-  drawGreenCheckCircle(doc, margin + 2.5, y + 2.5, 2.2);
+  // ── 6. PERSIAPAN SEBELUM TIM DATANG (Spesifikasi Baris 17-18) ──────────────
+  drawSectionHeader(doc, 'check', 'Persiapan Sebelum Tim Datang', margin, y);
+  y += 5.2;
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.setTextColor(...COLOR_PRIMARY_NAVY);
-  doc.text('Persiapan Sebelum Tim Datang', margin + 7, y + 3.2);
-
-  y += 7;
-
-  // 4 Checklist items horizontal
   const checklistItems = [
-    'Kosongkan area sekitar\nitem',
-    'Siapkan akses listrik &\nair',
-    'Info lokasi parkir / akses\nmasuk',
+    'Kosongkan area\nsekitar item',
+    'Siapkan akses\nlistrik & air',
+    'Info lokasi parkir\n/ akses masuk',
     'Amankan hewan\npeliharaan',
   ];
 
-  const checkColW = contentW / 4;
-  checklistItems.forEach((text, idx) => {
-    const itemX = margin + idx * checkColW;
-    drawGreenCheckCircle(doc, itemX + 2.2, y + 2.2, 1.8);
+  const checkColW = 31.5;
+  const checkGap  = 2.0;
 
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7.5);
-    doc.setTextColor(...COLOR_TEXT_BODY);
+  checklistItems.forEach((text, idx) => {
+    const itemX = margin + idx * (checkColW + checkGap);
+    drawGreenCheckCircle(doc, itemX + 1.6, y + 1.8, 1.3, COLOR_HIJAU_CLEANOX);
+
+    applyFont(doc, 'normal', 6.6);
+    doc.setTextColor(...COLOR_TEXT_MAIN);
     const lines = text.split('\n');
-    doc.text(lines[0], itemX + 5.5, y + 2.2);
+    doc.text(lines[0], itemX + 4.2, y + 2.2);
     if (lines[1]) {
-      doc.text(lines[1], itemX + 5.5, y + 5.5);
+      doc.text(lines[1], itemX + 4.2, y + 5.4);
     }
   });
 
-  y += 13;
+  y += 9.5;
 
-  // ── 7. TIM TEKNISI YANG AKAN DATANG ───────────────────────────────────────
-  drawShieldIconVector(doc, margin + 0.5, y, 3.6, COLOR_PRIMARY_NAVY);
+  // ── 7. TIM TEKNISI YANG AKAN DATANG (Spesifikasi Baris 19-22) ──────────────
+  drawSectionHeader(doc, 'shield', 'Tim Teknisi yang Akan Datang', margin, y);
+  y += 4.8;
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.setTextColor(...COLOR_PRIMARY_NAVY);
-  doc.text('Tim Teknisi yang Akan Datang', margin + 6.5, y + 3.2);
-
-  y += 6;
-
-  // Technician Cards Grid (2 columns x up to 2 rows)
-  const cardGridGap = 4;
-  const techCardW = (contentW - cardGridGap) / 2;
-  const techCardH = 23; // Roomy height matching template
+  const techCardW = 64.8;
+  const techCardH = 20.4;
+  const techCardGap = 2.4;
 
   if (activeAssignments.length === 0) {
-    // Placeholder jika belum ada teknisi yang di-assign
     doc.setFillColor(248, 250, 252);
-    doc.setDrawColor(...COLOR_BORDER);
-    doc.setLineWidth(0.3);
-    doc.roundedRect(margin, y, contentW, 14, 3, 3, 'FD');
+    doc.setDrawColor(...COLOR_LINE);
+    doc.setLineWidth(0.25);
+    doc.roundedRect(margin, y, contentW, 12, 2.6, 2.6, 'FD');
 
-    doc.setFont('helvetica', 'italic');
-    doc.setFontSize(8.5);
+    applyFont(doc, 'italic', 7.4);
     doc.setTextColor(...COLOR_TEXT_MUTED);
-    doc.text('Teknisi akan segera ditugaskan oleh Admin Cleanox.', margin + 6, y + 8.5);
-    y += 18;
+    doc.text('Teknisi akan segera ditugaskan oleh Admin Cleanox.', margin + 4, y + 7.2);
+    y += 15;
   } else {
     activeAssignments.forEach((worker, idx) => {
       const colIdx = idx % 2;
       const rowIdx = Math.floor(idx / 2);
 
-      const cardX = margin + colIdx * (techCardW + cardGridGap);
-      const cardY = y + rowIdx * (techCardH + 3.5);
+      const cardX = margin + colIdx * (techCardW + techCardGap);
+      const cardY = y + rowIdx * (techCardH + 2.5);
 
-      // Card Container
-      doc.setFillColor(255, 255, 255);
-      doc.setDrawColor(...COLOR_BORDER);
-      doc.setLineWidth(0.35);
-      doc.roundedRect(cardX, cardY, techCardW, techCardH, 3, 3, 'FD');
+      // Kartu Container: putih, border #E3E8EE
+      doc.setFillColor(...COLOR_WHITE);
+      doc.setDrawColor(...COLOR_LINE);
+      doc.setLineWidth(0.25);
+      doc.roundedRect(cardX, cardY, techCardW, techCardH, 2.6, 2.6, 'FD');
 
-      // Foto Avatar Teknisi (posisi agak ke bawah sedikit agar seimbang vertikal)
+      // Foto Avatar Teknisi: 15 x 15 mm, sudut 2 mm
       const avatarDataUrl = workerAvatars[idx];
-      const avatarSize = 16.5;
-      const avatarX = cardX + 3.2;
-      const avatarY = cardY + 3.25;
+      const avatarSize = 15.0;
+      const avatarX = cardX + 2.7;
+      const avatarY = cardY + 2.6;
 
       if (avatarDataUrl) {
         try {
@@ -777,99 +806,90 @@ export async function downloadPosOrderFormPdf({
       }
 
       // Border halus di sekitar avatar
-      doc.setDrawColor(...COLOR_BORDER);
+      doc.setDrawColor(...COLOR_LINE);
       doc.setLineWidth(0.2);
-      doc.roundedRect(avatarX, avatarY, avatarSize, avatarSize, 2, 2, 'S');
+      doc.roundedRect(avatarX, avatarY, avatarSize, avatarSize, 2.0, 2.0, 'S');
 
-      // Informasi Pekerja di samping foto
-      const infoX = avatarX + avatarSize + 4;
+      // Informasi Pekerja: 100% Poppins
+      const infoX = cardX + 20.2;
       const wName = worker.employee_name || 'Teknisi';
-      const wRole = worker.position_name || 'Teknisi Deep Cleaning';
-      const wCode = worker.employee_code ? `ID: [${worker.employee_code}]` : `ID: [CLX-${String(worker.employee_id || idx + 1).padStart(3, '0')}]`;
+      const wRole = 'Teknisi Cleanox'; // Sesuai instruksi: selalu "Teknisi Cleanox"
+      const rawCode = worker.employee_code || (worker.employee_id ? `CLX-${String(worker.employee_id).padStart(3, '0')}` : `${idx + 1}`);
+      const cleanCode = String(rawCode).replace(/^\[|\]$/g, '');
+      const wCode = `ID: ${cleanCode}`;
 
-      // 1. Nama Teknisi (Bold Navy)
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9.5);
-      doc.setTextColor(...COLOR_PRIMARY_NAVY);
-      const shortName = wrap(doc, wName, techCardW - avatarSize - 9, 9.5)[0] || wName;
-      doc.text(shortName, infoX, cardY + 5.8);
+      // 1. Nama Teknisi: Poppins Bold 7.8 pt, #02416C
+      applyFont(doc, 'bold', 7.8);
+      doc.setTextColor(...COLOR_NAVY_CLEANOX);
+      const shortName = wrap(doc, wName, techCardW - avatarSize - 7, 7.8)[0] || wName;
+      doc.text(shortName, infoX, cardY + 5.2);
 
-      // 2. Role / Posisi
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(7.5);
+      // 2. Role / Jabatan: Poppins Regular 6.2 pt, #6B7785
+      applyFont(doc, 'normal', 6.2);
       doc.setTextColor(...COLOR_TEXT_MUTED);
-      doc.text(wRole, infoX, cardY + 9.8);
+      doc.text(wRole, infoX, cardY + 8.8);
 
-      // 3. ID Karyawan
-      doc.setFontSize(7);
-      doc.setTextColor(148, 163, 184); // #94A3B8
-      doc.text(wCode, infoX, cardY + 13.8);
+      // 3. ID Karyawan: Poppins Regular 6.2 pt, #6B7785
+      doc.text(wCode, infoX, cardY + 12.2);
 
-      // 4. Pill Badge Terverifikasi
-      const vBadgeW = 23;
-      const vBadgeH = 4.6;
+      // 4. Badge "Terverifikasi": Poppins Bold 5.8 pt, #2E9E4F
+      const vBadgeW = 20.0;
+      const vBadgeH = 3.8;
       const vBadgeX = infoX;
-      const vBadgeY = cardY + 15.6;
+      const vBadgeY = cardY + 13.8;
 
-      doc.setFillColor(...COLOR_GREEN_BADGE_BG);
-      doc.setDrawColor(...COLOR_GREEN_BADGE_BRD);
-      doc.setLineWidth(0.2);
-      doc.roundedRect(vBadgeX, vBadgeY, vBadgeW, vBadgeH, 1.8, 1.8, 'FD');
+      doc.setFillColor(...COLOR_GREEN_BG);
+      doc.setDrawColor(...COLOR_GREEN_TEXT);
+      doc.setLineWidth(0.18);
+      doc.roundedRect(vBadgeX, vBadgeY, vBadgeW, vBadgeH, 1.9, 1.9, 'FD');
 
-      drawGreenCheckCircle(doc, vBadgeX + 2.3, vBadgeY + vBadgeH / 2, 1.2);
+      drawGreenCheckCircle(doc, vBadgeX + 2.0, vBadgeY + vBadgeH / 2, 0.9, COLOR_GREEN_TEXT);
 
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(6.2);
+      applyFont(doc, 'bold', 5.8);
       doc.setTextColor(...COLOR_GREEN_TEXT);
-      doc.text('Terverifikasi', vBadgeX + 4.8, vBadgeY + 3.2);
+      doc.text('Terverifikasi', vBadgeX + 4.2, vBadgeY + 2.7);
     });
 
     const totalRows = Math.ceil(activeAssignments.length / 2);
-    y += totalRows * (techCardH + 3.5) + 2;
+    y += totalRows * (techCardH + 2.5) + 1.0;
   }
 
-  // Subtext teknisi
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7.5);
+  // Catatan jumlah teknisi: Poppins Regular 6.4 pt, #6B7785
+  applyFont(doc, 'normal', 6.4);
   doc.setTextColor(...COLOR_TEXT_MUTED);
-  doc.text('Jumlah teknisi 2–4 orang sesuai order. Mohon cocokkan nama & foto saat tim tiba.', margin, y + 2.5);
+  doc.text('Jumlah teknisi 2–4 orang sesuai order. Mohon cocokkan nama & foto saat tim tiba.', margin, y + 2.2);
 
-  y += 8;
+  // ── 8. FOOTER / KONTAK WHATSAPP (Spesifikasi Baris 23-24) ──────────────────
+  const footerY = Math.max(189, y + 4.5);
 
-  // ── 8. FOOTER / KONTAK WHATSAPP ───────────────────────────────────────────
-  // Anchored safely at bottom
-  const footerY = Math.max(y + 2, pageH - 25);
-
-  // QR Code di kiri
-  const qrSize = 17.5;
+  // QR WhatsApp: x=9, y=189, w=15, h=15 mm
+  const qrSize = 15.0;
   if (qrBase64) {
     try {
-      doc.addImage(qrBase64, 'PNG', margin, footerY - 1, qrSize, qrSize);
+      doc.addImage(qrBase64, 'PNG', 9, footerY, qrSize, qrSize);
     } catch {
       // fallback
     }
   }
 
-  const contactX = qrBase64 ? margin + qrSize + 4.5 : margin;
+  // Teks footer (100% Poppins): x=28, y=189, w=112, h=15 mm
+  const contactX = 28;
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8.5);
-  doc.setTextColor(...COLOR_PRIMARY_NAVY);
-  doc.text('Perlu ubah jadwal atau ada pertanyaan?', contactX, footerY + 5.5);
+  // Baris 1: Poppins Bold 7.6 pt, #02416C
+  applyFont(doc, 'bold', 7.6);
+  doc.setTextColor(...COLOR_NAVY_CLEANOX);
+  doc.text('Perlu ubah jadwal atau ada pertanyaan?', contactX, footerY + 5.0);
 
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
-  doc.setTextColor(...COLOR_TEXT_BODY);
+  // Baris 2: Poppins Regular 7.6 pt, #1F2A37; Nomor WA: Poppins Bold #02416C
+  applyFont(doc, 'normal', 7.6);
+  doc.setTextColor(...COLOR_TEXT_MAIN);
   const promptText = 'Hubungi Admin Cleanox via WhatsApp ';
-  doc.text(promptText, contactX, footerY + 10.5);
+  const promptW = doc.getTextWidth(promptText);
+  doc.text(promptText, contactX, footerY + 9.5);
 
-  doc.setFont('helvetica', 'bold');
-  doc.setTextColor(...COLOR_PRIMARY_NAVY);
-  doc.text(
-    DEFAULT_WA_NUMBER,
-    contactX + doc.getTextWidth(promptText),
-    footerY + 10.5
-  );
+  applyFont(doc, 'bold', 7.6);
+  doc.setTextColor(...COLOR_NAVY_CLEANOX);
+  doc.text(DEFAULT_WA_NUMBER, contactX + promptW, footerY + 9.5);
 
   // Simpan File PDF
   const filename = `Konfirmasi_Jadwal_Cleanox_${transaction.transaction_no || transaction.id || 'order'}.pdf`;

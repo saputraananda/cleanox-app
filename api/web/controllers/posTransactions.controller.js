@@ -4,7 +4,6 @@ import http from 'node:http';
 import https from 'node:https';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
-import sharp from 'sharp';
 import cleanoxPool, { aloraPool } from '../../shared/db/cleanox.js';
 import { buildCustomerOrderMessage } from '../../shared/utils/posCustomerOrderMessage.js';
 import { buildGroupOrderMessage } from '../../shared/utils/posGroupOrderMessage.js';
@@ -213,19 +212,10 @@ function toAdminTakehomePhotoPath(photoFile) {
   return `/pos-transactions/takehome-evidence/${path.basename(String(photoFile))}`;
 }
 
-async function compressTakehomePhoto(buffer) {
-  return sharp(buffer)
-    .rotate()
-    .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
-    .jpeg({ quality: 82, mozjpeg: true })
-    .toBuffer();
-}
-
 async function saveTakehomePhotoFile(transactionId, stage, file) {
   const fileName = `${transactionId}_${stage}_${Date.now()}.jpg`;
   const filePath = path.join(TAKEHOME_EVIDENCE_BASE, fileName);
-  const buffer = await compressTakehomePhoto(file.buffer);
-  fs.writeFileSync(filePath, buffer);
+  fs.writeFileSync(filePath, file.buffer);
   return {
     file: fileName,
     path: toAdminTakehomePhotoPath(fileName),
@@ -292,19 +282,10 @@ function parseJobDateTime(value) {
   return { mysql: formatted.length === 16 ? `${formatted}:00` : formatted.slice(0, 19), date: parsed };
 }
 
-async function compressCustomerPhoto(buffer) {
-  return sharp(buffer)
-    .rotate()
-    .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
-    .jpeg({ quality: 82, mozjpeg: true })
-    .toBuffer();
-}
-
 async function saveCustomerPhotoFile(transactionId, file) {
   const fileName = `${transactionId}_${Date.now()}.jpg`;
   const filePath = path.join(CUSTOMER_PHOTO_BASE, fileName);
-  const buffer = await compressCustomerPhoto(file.buffer);
-  fs.writeFileSync(filePath, buffer);
+  fs.writeFileSync(filePath, file.buffer);
   return {
     file: fileName,
     path: `/pos-transactions/customer-photo/${fileName}`,
@@ -939,6 +920,8 @@ export const getPosTransactionDetail = async (req, res) => {
         i.*,
         s.name AS service_name,
         s.satuan_name,
+        s.total_durasi_kerja_menit,
+        s.delay_time_menit,
         c.name AS category_name
        FROM tr_transaction_items i
        INNER JOIN mst_services s ON s.id = i.service_id
@@ -1910,6 +1893,77 @@ export const updatePosTransactionTransportFee = async (req, res) => {
   }
 };
 
+export const updatePosTransactionWaktuJalan = async (req, res) => {
+  const transactionId = Number(req.params.id);
+  if (!transactionId) {
+    return res.status(400).json({ message: 'ID transaksi tidak valid' });
+  }
+
+  const connection = await cleanoxPool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    const [[transaction]] = await connection.query(
+      `SELECT id, transaction_no, service_mode, waktu_jalan_menit, status
+       FROM tr_transactions
+       WHERE id = ?
+       LIMIT 1
+       FOR UPDATE`,
+      [transactionId]
+    );
+    if (!transaction) {
+      await connection.rollback();
+      return res.status(404).json({ message: 'Transaksi POS tidak ditemukan' });
+    }
+    if (transaction.status === 'Cancelled') {
+      await connection.rollback();
+      return res.status(409).json({ message: 'Transaksi yang dibatalkan tidak dapat diubah' });
+    }
+
+    const raw = req.body?.waktu_jalan_menit;
+    let waktuJalan = 40;
+    if (raw != null && raw !== '') {
+      const parsed = Number(raw);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        await connection.rollback();
+        return res.status(400).json({ message: 'Waktu perjalanan tidak boleh negatif' });
+      }
+      waktuJalan = Math.round(parsed);
+    }
+
+    await connection.query(
+      `UPDATE tr_transactions
+       SET waktu_jalan_menit = ?,
+           updated_by = ?,
+           updated_at = NOW()
+       WHERE id = ?`,
+      [waktuJalan, req.user?.id || null, transactionId]
+    );
+
+    await createPosTracking(
+      connection,
+      transactionId,
+      transaction.status || 'Draft',
+      'Waktu Perjalanan Diperbarui',
+      `Waktu perjalanan diubah menjadi ${waktuJalan} menit`,
+      req.user?.id || null
+    );
+
+    await connection.commit();
+
+    return res.json({
+      message: 'Waktu perjalanan berhasil diperbarui',
+      waktu_jalan_menit: waktuJalan,
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[pos/updatePosTransactionWaktuJalan]', error.message);
+    return res.status(500).json({ message: 'Gagal memperbarui waktu perjalanan' });
+  } finally {
+    connection.release();
+  }
+};
+
 export const uploadPosPaymentProof = async (req, res) => {
   const transactionId = Number(req.params.id);
   if (!transactionId) {
@@ -2584,6 +2638,10 @@ export const createPosTransaction = async (req, res) => {
     });
 
     const initialStatus = isHistoryEntry ? 'Completed' : 'Scheduled';
+    const resolvedWaktuJalan =
+      req.body.waktu_jalan_menit !== undefined && req.body.waktu_jalan_menit !== null && req.body.waktu_jalan_menit !== ''
+        ? Math.max(0, Number(req.body.waktu_jalan_menit) || 0)
+        : (service_mode === 'take_home' ? 0 : 40);
 
     const [result] = await connection.query(
       `INSERT INTO tr_transactions
@@ -2591,10 +2649,10 @@ export const createPosTransaction = async (req, res) => {
          subtotal_amount, discount_amount, transport_fee, promo_id, promo_name_snapshot, promo_type_snapshot, promo_value_snapshot,
          discount_id, discount_name_snapshot, discount_type_snapshot, discount_value_snapshot,
          final_amount, billing_hours, pricing_finalized_at, notes,
-         group_message_template, customer_message_template, service_mode, is_history_entry,
+         group_message_template, customer_message_template, service_mode, waktu_jalan_menit, is_history_entry,
          entry_kind, customer_bundle_id,
          payment_method_id, payment_status, payment_settled_date, status, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'service', ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'service', ?, ?, ?, ?, ?, ?, ?)`,
       [
         transactionNo,
         customer.id,
@@ -2621,6 +2679,7 @@ export const createPosTransaction = async (req, res) => {
         groupMessageTemplate,
         customerMessageTemplate,
         service_mode,
+        resolvedWaktuJalan,
         isHistoryEntry ? 1 : 0,
         customerBundleId,
         paymentMethodId,

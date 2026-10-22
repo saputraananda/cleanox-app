@@ -14,6 +14,7 @@
     "prisma:seed:customers": "node prisma/seed/seed-test-customers.js"
   },
   "dependencies": {
+    "@fontsource/poppins": "^5.3.0",
     "@prisma/client": "^7.9.1",
     "@vitejs/plugin-react": "^4.3.0",
     "autoprefixer": "^10.4.19",
@@ -36,7 +37,6 @@
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.30.4",
     "recharts": "^3.8.1",
-    "sharp": "^0.34.5",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
     "sweetalert2": "^11.26.25",

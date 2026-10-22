@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import api from '@shared/utils/api.js';
+import { compressImageClient } from '@shared/utils/clientImageCompressor.js';
 
 const STAGES = [
   { key: 'diambil', label: 'Diambil', icon: HandMetal, color: 'blue' },
@@ -322,8 +323,9 @@ export default function PosTakehomeStageTimeline({
     setSaving(`upload-${stageKey}`);
     setError('');
     try {
+      const compressedFile = await compressImageClient(file);
       const formData = new FormData();
-      formData.append('photo', file);
+      formData.append('photo', compressedFile);
       formData.append('workers', JSON.stringify(selectedWorkers));
       const timestamp = getTimestamp(stageKey);
       if (timestamp) formData.append('timestamp', timestamp);

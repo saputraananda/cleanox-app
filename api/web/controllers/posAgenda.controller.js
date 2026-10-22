@@ -2,7 +2,6 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
-import sharp from 'sharp';
 import cleanoxPool, { aloraPool } from '../../shared/db/cleanox.js';
 import {
   getBusyWorkerDetails,
@@ -41,9 +40,6 @@ export const activityPhotoUploadMiddleware = multer({
   },
 }).array('photos', MAX_ACTIVITY_PHOTOS);
 
-async function compressToJpg(buffer) {
-  return sharp(buffer).rotate().jpeg({ quality: 82 }).toBuffer();
-}
 
 function toActivityPhotoPath(fileName) {
   return `/pos-agenda/activity-photo/${path.basename(String(fileName))}`;
@@ -601,8 +597,7 @@ export const uploadAgendaActivityPhotos = async (req, res) => {
     for (const file of toSave) {
       const fileName = `${agendaId}_${Date.now()}_${Math.floor(Math.random() * 1000)}.jpg`;
       const absPath = path.join(ACTIVITY_PHOTO_BASE, fileName);
-      const buffer = await compressToJpg(file.buffer);
-      fs.writeFileSync(absPath, buffer);
+      fs.writeFileSync(absPath, file.buffer);
       await cleanoxPool.query(
         `INSERT INTO tr_agenda_activity_photos (agenda_id, photo_file, photo_path, created_by)
          VALUES (?, ?, ?, ?)`,

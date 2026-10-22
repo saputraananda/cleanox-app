@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import multer from 'multer';
-import sharp from 'sharp';
 import { fileURLToPath } from 'url';
 import cleanoxPool from '../../shared/db/cleanox.js';
 import { formatCalendarDateKey } from '../../shared/utils/posWorkerBusy.js';
@@ -48,21 +47,12 @@ function sanitizeName(value) {
     .slice(0, 80);
 }
 
-async function compressToJpg(buffer) {
-  return sharp(buffer)
-    .rotate()
-    .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
-    .jpeg({ quality: 82, mozjpeg: true })
-    .toBuffer();
-}
-
 async function saveDoctorNote(workerId, file) {
   const workerSlug = sanitizeName(workerId);
   const stamp = Date.now();
   const fileName = `${workerSlug}_${stamp}_doctor_note.jpg`;
   const filePath = path.join(LEAVE_BASE, fileName);
-  const buffer = await compressToJpg(file.buffer);
-  fs.writeFileSync(filePath, buffer);
+  fs.writeFileSync(filePath, file.buffer);
   return {
     file: fileName,
     path: `/mobile-leave/doctor-notes/${fileName}`,

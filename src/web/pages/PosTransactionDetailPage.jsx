@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { Download, FileSpreadsheet, FileText, ArrowLeft, Save, Copy, Send, ImagePlus, X, Plus, Minus, Pencil, Trash2 } from 'lucide-react';
 import api from '@shared/utils/api.js';
+import { compressImageClient } from '@shared/utils/clientImageCompressor.js';
 import BodyPortal from '@web/components/BodyPortal.jsx';
 import { buildCustomerOrderMessage } from '@web/utils/posCustomerOrderMessage.js';
 import { buildGroupOrderMessage } from '@web/utils/posGroupOrderMessage.js';
@@ -230,6 +231,8 @@ export default function PosTransactionDetailPage() {
   const [offersSaving, setOffersSaving] = useState(false);
   const [transportFeeInput, setTransportFeeInput] = useState('');
   const [transportSaving, setTransportSaving] = useState(false);
+  const [waktuJalanInput, setWaktuJalanInput] = useState('40');
+  const [waktuJalanSaving, setWaktuJalanSaving] = useState(false);
 
   const openPhotoPreview = (src, title) => {
     if (!src) return;
@@ -425,6 +428,11 @@ export default function PosTransactionDetailPage() {
         tx.transport_fee == null || tx.transport_fee === ''
           ? ''
           : String(Number(tx.transport_fee))
+      );
+      setWaktuJalanInput(
+        tx.waktu_jalan_menit == null || tx.waktu_jalan_menit === ''
+          ? '40'
+          : String(Number(tx.waktu_jalan_menit))
       );
       setGcHoursDraft(
         tx.billing_hours == null || tx.billing_hours === ''
@@ -744,6 +752,22 @@ export default function PosTransactionDetailPage() {
       setError(err.response?.data?.message || 'Gagal menyimpan biaya transport');
     } finally {
       setTransportSaving(false);
+    }
+  };
+
+  const handleSaveWaktuJalan = async () => {
+    if (waktuJalanSaving) return;
+    setWaktuJalanSaving(true);
+    setError('');
+    try {
+      await api.patch(`/pos-transactions/${id}/waktu-jalan`, {
+        waktu_jalan_menit: waktuJalanInput === '' ? 40 : Number(waktuJalanInput),
+      });
+      await loadData();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Gagal menyimpan waktu perjalanan');
+    } finally {
+      setWaktuJalanSaving(false);
     }
   };
 
@@ -1155,8 +1179,9 @@ export default function PosTransactionDetailPage() {
     setError('');
     try {
       for (const file of toUpload) {
+        const compressedFile = await compressImageClient(file);
         const formData = new FormData();
-        formData.append('photo', file);
+        formData.append('photo', compressedFile);
         await api.post(`/pos-transactions/${id}/customer-photos`, formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
         });
@@ -1633,6 +1658,44 @@ export default function PosTransactionDetailPage() {
                   )
                 ) : (
                   <p className="text-sm text-slate-500">Tidak berlaku (Take Home)</p>
+                )}
+              </div>
+              <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs uppercase tracking-wide text-blue-900 font-bold">Waktu Perjalanan (KPI)</p>
+                  <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-1.5 py-0.5 rounded">Default 40m</span>
+                </div>
+                {String(transaction.service_mode || '') === 'home_service' ? (
+                  canEditOffers ? (
+                    <div className="flex flex-wrap items-end gap-2">
+                      <label className="block min-w-[180px] flex-1 space-y-1">
+                        <span className="text-xs text-slate-500">Durasi (Menit)</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={waktuJalanInput}
+                          onChange={(e) => setWaktuJalanInput(e.target.value)}
+                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900"
+                          placeholder="40"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        disabled={waktuJalanSaving}
+                        onClick={handleSaveWaktuJalan}
+                        className="inline-flex h-10 items-center rounded-xl bg-blue-700 px-4 text-sm font-semibold text-white hover:bg-blue-800 disabled:opacity-60 cursor-pointer"
+                      >
+                        {waktuJalanSaving ? 'Menyimpan...' : 'Simpan waktu jalan'}
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="font-semibold text-slate-900">
+                      {transaction.waktu_jalan_menit != null ? transaction.waktu_jalan_menit : 40} menit
+                    </p>
+                  )
+                ) : (
+                  <p className="text-sm text-slate-500">Tidak berlaku (0 menit untuk Take Home)</p>
                 )}
               </div>
             </div>

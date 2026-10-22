@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import multer from 'multer';
-import sharp from 'sharp';
 import { fileURLToPath } from 'url';
 import cleanoxPool from '../../shared/db/cleanox.js';
 import { formatCalendarDateKey } from '../../shared/utils/posWorkerBusy.js';
@@ -50,20 +49,11 @@ function wantsRemoveProof(value) {
   return value === true || value === 'true' || value === '1' || value === 1;
 }
 
-async function compressToJpg(buffer) {
-  return sharp(buffer)
-    .rotate()
-    .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
-    .jpeg({ quality: 82, mozjpeg: true })
-    .toBuffer();
-}
-
 async function saveProof(workerId, file) {
   const workerSlug = sanitizeName(workerId);
   const fileName = `${workerSlug}_${Date.now()}_proof.jpg`;
   const filePath = path.join(KASBON_BASE, fileName);
-  const buffer = await compressToJpg(file.buffer);
-  fs.writeFileSync(filePath, buffer);
+  fs.writeFileSync(filePath, file.buffer);
   return {
     file: fileName,
     path: `/mobile-kasbon/proofs/${fileName}`,

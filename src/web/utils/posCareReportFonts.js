@@ -12,28 +12,56 @@
  * import '@fontsource/poppins/700.css';  // Bold
  */
 
+let poppinsBinaryCache = null;
+
+async function loadFontBinary(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status} fetching ${url}`);
+  const buf = await res.arrayBuffer();
+  let binary = '';
+  const bytes = new Uint8Array(buf);
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return binary;
+}
+
 /**
  * Register Poppins font ke jsPDF document
  * Panggil SEKALI sebelum render PDF, bukan berulang kali
  *
  * @param {jsPDF} doc - jsPDF document instance
- * @returns {boolean} true jika font berhasil registered, false jika fallback ke Helvetica
+ * @returns {Promise<boolean>} true jika font berhasil registered, false jika fallback ke Helvetica
  */
-export function registerCareReportFonts(doc) {
+export async function registerCareReportFonts(doc) {
   try {
-    // Check if Poppins fonts are available
-    const fontList = doc.getFontList();
-
-    // Fallback to Helvetica if fonts not available
-    if (!fontList || !fontList.Poppins) {
-      console.warn('Poppins font not available, using Helvetica fallback');
-      return false;
+    const fontList = doc.getFontList ? doc.getFontList() : {};
+    if (fontList && fontList.Poppins) {
+      return true;
     }
 
-    // Fonts registered successfully
+    if (!poppinsBinaryCache) {
+      const [regular, medium, bold] = await Promise.all([
+        loadFontBinary('/fonts/Poppins-Regular.ttf'),
+        loadFontBinary('/fonts/Poppins-Medium.ttf'),
+        loadFontBinary('/fonts/Poppins-Bold.ttf'),
+      ]);
+      poppinsBinaryCache = { regular, medium, bold };
+    }
+
+    doc.addFileToVFS('Poppins-Regular.ttf', poppinsBinaryCache.regular);
+    doc.addFont('Poppins-Regular.ttf', 'Poppins', 'normal');
+
+    doc.addFileToVFS('Poppins-Medium.ttf', poppinsBinaryCache.medium);
+    doc.addFont('Poppins-Medium.ttf', 'Poppins', 'medium');
+
+    doc.addFileToVFS('Poppins-Bold.ttf', poppinsBinaryCache.bold);
+    doc.addFont('Poppins-Bold.ttf', 'Poppins', 'bold');
+
     return true;
   } catch (err) {
-    console.warn('Error registering fonts:', err);
+    console.warn('Poppins font embedding failed, using Helvetica fallback:', err);
     return false;
   }
 }

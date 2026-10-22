@@ -39,7 +39,7 @@ export const getMyKpi = async (req, res) => {
 
     // 1. Lookup durasi layanan dari mst_services
     const [serviceRows] = await cleanoxPool.query(
-      `SELECT id, name, durasi_cuci_menit, durasi_jemur_menit, durasi_packing_menit, durasi_blower_menit, total_durasi_kerja_menit
+      `SELECT id, name, durasi_cuci_menit, durasi_jemur_menit, durasi_packing_menit, durasi_blower_menit, total_durasi_kerja_menit, delay_time_menit
        FROM mst_services`
     );
     const serviceById = new Map();
@@ -59,6 +59,7 @@ export const getMyKpi = async (req, res) => {
         t.transaction_no,
         t.service_date,
         t.service_mode,
+        t.waktu_jalan_menit,
         ti.id AS item_id,
         ti.service_id,
         ti.qty,
@@ -67,7 +68,8 @@ export const getMyKpi = async (req, res) => {
         s.durasi_jemur_menit,
         s.durasi_packing_menit,
         s.durasi_blower_menit,
-        s.total_durasi_kerja_menit
+        s.total_durasi_kerja_menit,
+        s.delay_time_menit
        FROM tr_worker_assignments a
        INNER JOIN tr_transactions t ON t.id = a.transaction_id
        INNER JOIN tr_transaction_items ti ON ti.transaction_id = t.id
@@ -89,17 +91,25 @@ export const getMyKpi = async (req, res) => {
       if (countedItemIds.has(itemKey)) continue;
       countedItemIds.add(itemKey);
 
-      let dur = 0;
+      let standard = 0;
       if (row.total_durasi_kerja_menit != null && row.total_durasi_kerja_menit > 0) {
-        dur = Number(row.total_durasi_kerja_menit);
+        standard = Number(row.total_durasi_kerja_menit);
       } else {
         const c = Number(row.durasi_cuci_menit) || 0;
         const j = Number(row.durasi_jemur_menit) || 0;
         const p = Number(row.durasi_packing_menit) || 0;
         const b = Number(row.durasi_blower_menit) || 0;
-        dur = c + j + p + b;
+        standard = c + j + p + b;
       }
-      if (dur === 0) dur = DEFAULT_TOTAL_MENIT;
+      if (standard === 0) standard = DEFAULT_TOTAL_MENIT;
+
+      const delayMins = row.delay_time_menit != null ? Number(row.delay_time_menit) : 15;
+      const waktuJalan = row.service_mode === 'home_service' || !row.service_mode
+        ? (row.waktu_jalan_menit != null ? Number(row.waktu_jalan_menit) : 40)
+        : 0;
+
+      const qty = Number(row.qty) || 1;
+      const dur = (standard + delayMins + waktuJalan) * qty;
 
       cleanoxMinutes += dur;
     }
@@ -157,23 +167,24 @@ export const getMyKpi = async (req, res) => {
         const pPengantaran = String(row.pengantaran_by || '').toLowerCase();
         const empLower = employeeName.toLowerCase().trim();
 
+        const delayMins = s?.delay_time_menit != null ? Number(s.delay_time_menit) : 15;
         if (pPickup.includes(empLower)) {
-          waschenMinutes += DURATION_PICKUP_MENIT;
+          waschenMinutes += DURATION_PICKUP_MENIT + delayMins;
           isMatched = true;
         }
         if (pCuciJemur.includes(empLower)) {
           const cuciMenit = s?.durasi_cuci_menit != null ? Number(s.durasi_cuci_menit) : 30;
           const jemurMenit = s?.durasi_jemur_menit != null ? Number(s.durasi_jemur_menit) : 15;
-          waschenMinutes += (cuciMenit + jemurMenit) || DEFAULT_CUCI_JEMUR_MENIT;
+          waschenMinutes += ((cuciMenit + jemurMenit) || DEFAULT_CUCI_JEMUR_MENIT) + delayMins;
           isMatched = true;
         }
         if (pPacking.includes(empLower)) {
           const packingMenit = s?.durasi_packing_menit != null ? Number(s.durasi_packing_menit) : DEFAULT_PACKING_MENIT;
-          waschenMinutes += packingMenit;
+          waschenMinutes += packingMenit + delayMins;
           isMatched = true;
         }
         if (pPengantaran.includes(empLower)) {
-          waschenMinutes += DURATION_PENGANTARAN_MENIT;
+          waschenMinutes += DURATION_PENGANTARAN_MENIT + delayMins;
           isMatched = true;
         }
 

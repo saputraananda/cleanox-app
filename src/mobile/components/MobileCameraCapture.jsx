@@ -301,8 +301,17 @@ export default function MobileCameraCapture({
       return;
     }
 
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    let targetWidth = video.videoWidth || 1280;
+    let targetHeight = video.videoHeight || 720;
+    const MAX_DIM = 1600;
+    if (targetWidth > MAX_DIM || targetHeight > MAX_DIM) {
+      const ratio = Math.min(MAX_DIM / targetWidth, MAX_DIM / targetHeight);
+      targetWidth = Math.round(targetWidth * ratio);
+      targetHeight = Math.round(targetHeight * ratio);
+    }
+
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
@@ -310,7 +319,7 @@ export default function MobileCameraCapture({
       ctx.translate(canvas.width, 0);
       ctx.scale(-1, 1);
     }
-    ctx.drawImage(video, 0, 0);
+    ctx.drawImage(video, 0, 0, targetWidth, targetHeight);
     if (facingMode === 'user') {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
     }
@@ -361,7 +370,7 @@ export default function MobileCameraCapture({
         onCapture?.(file);
       },
       'image/jpeg',
-      0.9
+      0.85
     );
   };
 

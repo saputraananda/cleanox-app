@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import multer from 'multer';
-import sharp from 'sharp';
 import { fileURLToPath } from 'url';
 import cleanoxPool, { aloraPool } from '../../shared/db/cleanox.js';
 import { createPosTracking } from '../../shared/utils/posTracking.js';
@@ -109,14 +108,6 @@ function sanitizeName(value) {
     .slice(0, 80);
 }
 
-async function compressToJpg(buffer) {
-  return sharp(buffer)
-    .rotate()
-    .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
-    .jpeg({ quality: 82, mozjpeg: true })
-    .toBuffer();
-}
-
 async function saveTaskEvidencePhoto(
   employeeId,
   assignmentId,
@@ -130,8 +121,7 @@ async function saveTaskEvidencePhoto(
   const kindSlug = sanitizeName(kind);
   const fileName = `${employeeSlug}_${assignmentSlug}_${itemSlug}_${kindSlug}_${uniqueSuffix}.jpg`;
   const filePath = path.join(TASK_EVIDENCE_BASE, fileName);
-  const buffer = await compressToJpg(file.buffer);
-  fs.writeFileSync(filePath, buffer);
+  fs.writeFileSync(filePath, file.buffer);
   return {
     file: fileName,
     path: `/mobile-tasks/file/${fileName}`,

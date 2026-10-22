@@ -106,6 +106,7 @@ export default function PosHistoryTransactionCreatePage() {
     discount_id: '',
     discount_value: '',
     transport_fee: '',
+    waktu_jalan_menit: '40',
   });
   const [paymentMethods, setPaymentMethods] = useState([]);
   const [discountOptions, setDiscountOptions] = useState([]);
@@ -599,6 +600,12 @@ export default function PosHistoryTransactionCreatePage() {
             : undefined,
         transport_fee:
           form.service_mode === 'home_service' ? Number(form.transport_fee || 0) || 0 : 0,
+        waktu_jalan_menit:
+          form.service_mode === 'home_service'
+            ? form.waktu_jalan_menit !== ''
+              ? Number(form.waktu_jalan_menit)
+              : 40
+            : 0,
         worker_ids: form.service_mode === 'take_home' ? [] : form.worker_ids,
         items: form.items.map((item) => ({
           service_id: Number(item.service_id),
@@ -1079,6 +1086,29 @@ export default function PosHistoryTransactionCreatePage() {
                     setForm((prev) => ({ ...prev, transport_fee: e.target.value }))
                   }
                   placeholder="Contoh: 25000"
+                />
+              </label>
+            )}
+            {form.service_mode === 'home_service' && (
+              <label className="block space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[12px] font-semibold uppercase tracking-wide text-slate-500">
+                    Waktu Perjalanan (Menit)
+                  </span>
+                  <span className="text-[10px] text-blue-700 font-bold bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
+                    Default 40m (KPI)
+                  </span>
+                </div>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  className={inputClass}
+                  value={form.waktu_jalan_menit}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, waktu_jalan_menit: e.target.value }))
+                  }
+                  placeholder="40"
                 />
               </label>
             )}

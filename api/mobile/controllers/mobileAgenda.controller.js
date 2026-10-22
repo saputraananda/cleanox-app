@@ -2,7 +2,6 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
-import sharp from 'sharp';
 import cleanoxPool from '../../shared/db/cleanox.js';
 import {
   formatAgendaTime,
@@ -32,9 +31,6 @@ export const agendaEvidenceUploadMiddleware = multer({
   },
 }).single('photo');
 
-async function compressToJpg(buffer) {
-  return sharp(buffer).rotate().jpeg({ quality: 82 }).toBuffer();
-}
 
 function toEvidencePath(fileName) {
   return `/mobile-agenda/evidence/${path.basename(String(fileName))}`;
@@ -279,7 +275,7 @@ export const startAgendaTask = async (req, res) => {
 
     const fileName = `${agendaId}_${employeeId}_arrival_${Date.now()}.jpg`;
     const abs = path.join(ARRIVAL_BASE, fileName);
-    fs.writeFileSync(abs, await compressToJpg(file.buffer));
+    fs.writeFileSync(abs, file.buffer);
 
     await cleanoxPool.query(
       `UPDATE tr_agenda_workers
@@ -336,7 +332,7 @@ export const uploadAgendaItemPhoto = async (req, res) => {
 
     const fileName = `${agendaId}_${itemId}_${kind}_${Date.now()}.jpg`;
     const abs = path.join(EVIDENCE_BASE, fileName);
-    fs.writeFileSync(abs, await compressToJpg(file.buffer));
+    fs.writeFileSync(abs, file.buffer);
 
     const [[sortRow]] = await cleanoxPool.query(
       `SELECT COALESCE(MAX(sort_order), 0) + 1 AS next_sort

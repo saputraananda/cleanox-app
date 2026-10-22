@@ -193,6 +193,7 @@ export default function PosTransactionCreatePage() {
     discount_id: '',
     discount_value: '',
     transport_fee: '',
+    waktu_jalan_menit: '40',
   });
   const [discountOptions, setDiscountOptions] = useState([]);
   const [itemModalOpen, setItemModalOpen] = useState(false);
@@ -1145,6 +1146,12 @@ export default function PosTransactionCreatePage() {
             : undefined,
         transport_fee:
           form.service_mode === 'home_service' ? Number(form.transport_fee || 0) || 0 : 0,
+        waktu_jalan_menit:
+          form.service_mode === 'home_service'
+            ? form.waktu_jalan_menit !== ''
+              ? Number(form.waktu_jalan_menit)
+              : 40
+            : 0,
         worker_ids: form.service_mode === 'take_home' ? [] : form.worker_ids,
         customer_bundle_id: selectedCustomerBundleId
           ? Number(selectedCustomerBundleId)
@@ -1833,6 +1840,30 @@ export default function PosTransactionCreatePage() {
                         className={inputClass}
                         placeholder="Contoh: 25000"
                       />
+                    </label>
+                  )}
+                  {form.service_mode === 'home_service' && (
+                    <label className="block space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className={labelEyebrowClass}>Waktu Perjalanan (Menit)</span>
+                        <span className="text-[10px] text-blue-700 font-bold bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
+                          Default 40m (KPI)
+                        </span>
+                      </div>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={form.waktu_jalan_menit}
+                        onChange={(e) =>
+                          setForm((prev) => ({ ...prev, waktu_jalan_menit: e.target.value }))
+                        }
+                        className={inputClass}
+                        placeholder="40"
+                      />
+                      <span className="text-[10px] text-slate-500 block">
+                        Dapat disesuaikan per nota jika durasi perjalanan ke lokasi berbeda.
+                      </span>
                     </label>
                   )}
                 </div>

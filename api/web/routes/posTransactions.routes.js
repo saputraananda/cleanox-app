@@ -27,6 +27,7 @@ import {
   updatePosTransactionPayment,
   updatePosTransactionHeaderOffers,
   updatePosTransactionTransportFee,
+  updatePosTransactionWaktuJalan,
   updatePosAssignments,
   updatePosTransactionStatus,
   updatePosTransactionBillingHours,
@@ -132,6 +133,7 @@ router.patch('/:id/status', updatePosTransactionStatus);
 router.patch('/:id/payment', updatePosTransactionPayment);
 router.patch('/:id/header-offers', updatePosTransactionHeaderOffers);
 router.patch('/:id/transport-fee', updatePosTransactionTransportFee);
+router.patch('/:id/waktu-jalan', updatePosTransactionWaktuJalan);
 router.patch('/:id/billing-hours', updatePosTransactionBillingHours);
 router.patch('/:id/items/:itemId/meter', updatePosTransactionItemMeter);
 router.patch('/:id/items/:itemId', updatePosTransactionItem);

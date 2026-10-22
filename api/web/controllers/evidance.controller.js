@@ -2,7 +2,6 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
-import sharp from 'sharp';
 import cleanoxPool from '../../shared/db/cleanox.js';
 
 const TRANSAKSI_TABLE = 'tr_rekap_transaksi_reguler_waschen';
@@ -48,33 +47,6 @@ const upload = multer({
 
 export const uploadMiddleware = upload.single('file');
 
-/* ── Compress image to ≤ 2 MB ─────────────────────────── */
-async function compressImage(buffer, mimetype) {
-  const isImage = /^image\//.test(mimetype);
-  if (!isImage) return buffer; // don't compress non-images
-
-  let quality = 85;
-  let result = buffer;
-
-  // Resize if oversized
-  const meta = await sharp(buffer).metadata();
-  let sharpInst = sharp(buffer).rotate(); // auto-rotate from EXIF
-
-  // Cap dimensions at 2048
-  if (meta.width > 2048 || meta.height > 2048) {
-    sharpInst = sharpInst.resize(2048, 2048, { fit: 'inside', withoutEnlargement: true });
-  }
-
-  // Output as JPEG with progressive quality reduction until ≤ 2 MB
-  const MAX_COMPRESSED = 2 * 1024 * 1024;
-  while (quality >= 30) {
-    result = await sharpInst.jpeg({ quality, mozjpeg: true }).toBuffer();
-    if (result.length <= MAX_COMPRESSED) break;
-    quality -= 10;
-  }
-  return result;
-}
-
 /* ── Upload Evidence ──────────────────────────────────── */
 export const uploadEvidance = async (req, res) => {
   try {
@@ -92,15 +64,9 @@ export const uploadEvidance = async (req, res) => {
     );
     if (!row) return res.status(404).json({ message: 'Data tidak ditemukan' });
 
-    // Compress if image
-    let fileBuffer = req.file.buffer;
-    let ext = path.extname(req.file.originalname).toLowerCase();
-    const isImage = /^image\//.test(req.file.mimetype);
-
-    if (isImage) {
-      fileBuffer = await compressImage(fileBuffer, req.file.mimetype);
-      ext = '.jpg'; // compressed output is always JPEG
-    }
+    // File buffer is already compressed on client-side
+    const fileBuffer = req.file.buffer;
+    const ext = path.extname(req.file.originalname).toLowerCase() || '.jpg';
 
     // Helper: sanitize a string for use in filename
     const slug = (v) =>
