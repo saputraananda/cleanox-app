@@ -360,8 +360,7 @@ async function ensureTakehomeProgress(connection, transactionId) {
 async function saveTakehomeStagePhoto(transactionId, stage, file) {
   const fileName = `${transactionId}_${stage}_${Date.now()}.jpg`;
   const filePath = path.join(TAKEHOME_EVIDENCE_BASE, fileName);
-  const buffer = await compressToJpg(file.buffer);
-  fs.writeFileSync(filePath, buffer);
+  fs.writeFileSync(filePath, file.buffer);
   return {
     file: fileName,
     path: toMobileTakehomePhotoPath(fileName),

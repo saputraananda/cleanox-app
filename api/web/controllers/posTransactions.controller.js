@@ -295,8 +295,7 @@ async function saveCustomerPhotoFile(transactionId, file) {
 async function savePaymentProofFile(transactionId, file) {
   const fileName = `${transactionId}_${Date.now()}.jpg`;
   const filePath = path.join(PAYMENT_PROOF_BASE, fileName);
-  const buffer = await compressCustomerPhoto(file.buffer);
-  fs.writeFileSync(filePath, buffer);
+  fs.writeFileSync(filePath, file.buffer);
   return {
     file: fileName,
     path: toAdminPaymentProofPath(fileName),
@@ -309,7 +308,7 @@ function toAdminScheduleProofPath(photoFile) {
 }
 
 async function compressScheduleProofPhotos(files) {
-  return Promise.all(files.map((file) => compressCustomerPhoto(file.buffer)));
+  return files.map((file) => file.buffer);
 }
 
 function writeScheduleProofFiles(transactionId, actionType, buffers) {

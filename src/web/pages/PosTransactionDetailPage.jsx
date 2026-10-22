@@ -975,8 +975,9 @@ export default function PosTransactionDetailPage() {
     setError('');
     try {
       for (const file of toUpload) {
+        const compressedFile = await compressImageClient(file);
         const formData = new FormData();
-        formData.append('photo', file);
+        formData.append('photo', compressedFile);
         await api.post(`/pos-transactions/${id}/payment-proofs`, formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
         });
