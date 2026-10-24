@@ -17,12 +17,14 @@ import {
   Trash2,
   Copy,
   BadgePercent,
+  MapPin,
 } from 'lucide-react';
 import api from '@shared/utils/api.js';
 import CustomerFormFields, {
   emptyCustomerForm,
   formToPayload,
 } from '@web/components/CustomerFormFields.jsx';
+import CustomerAddressModal from '@web/components/CustomerAddressModal.jsx';
 import BodyPortal from '@web/components/BodyPortal.jsx';
 import TablePagination, { PAGE_SIZE_OPTIONS } from '@web/components/TablePagination.jsx';
 import { buildCustomerOrderMessage } from '@web/utils/posCustomerOrderMessage.js';
@@ -219,6 +221,11 @@ export default function PosTransactionCreatePage() {
   const prefillBundleId = searchParams.get('customer_bundle_id');
   const [bundlePrefillTried, setBundlePrefillTried] = useState(false);
 
+  const [customerAddresses, setCustomerAddresses] = useState([]);
+  const [selectedAddressId, setSelectedAddressId] = useState(null);
+  const [addressModalOpen, setAddressModalOpen] = useState(false);
+  const [editingAddress, setEditingAddress] = useState(null);
+
   const hasSchedule = Boolean(form.service_date);
   const isTakeHome = form.service_mode === 'take_home';
   const maxWorkers = Math.max(1, Number(form.total_people || 1));
@@ -233,6 +240,45 @@ export default function PosTransactionCreatePage() {
       : !isTakeHome && !hasWorkers
         ? 'workers'
         : 'items';
+
+  const loadCustAddresses = async (id, preferredAddressId = null) => {
+    try {
+      const { data } = await api.get(`/pos-customers/${id}/addresses`);
+      const addrs = data.addresses || [];
+      setCustomerAddresses(addrs);
+      if (addrs.length > 0) {
+        if (preferredAddressId) {
+          const match = addrs.find((a) => a.id === preferredAddressId);
+          setSelectedAddressId(match ? match.id : addrs[0].id);
+        } else {
+          const primary = addrs.find((a) => a.is_primary) || addrs[0];
+          setSelectedAddressId(primary.id);
+        }
+      } else {
+        setSelectedAddressId(null);
+      }
+      return addrs;
+    } catch (err) {
+      console.error('Failed to load customer addresses:', err);
+      setCustomerAddresses([]);
+      setSelectedAddressId(null);
+      return [];
+    }
+  };
+
+  const selectedAddress = useMemo(() => {
+    if (!customerAddresses.length) {
+      return selectedCustomer?.address
+        ? { id: null, address: selectedCustomer.address, label: 'Alamat' }
+        : null;
+    }
+    return (
+      customerAddresses.find((a) => a.id === selectedAddressId) ||
+      customerAddresses.find((a) => a.is_primary) ||
+      customerAddresses[0] ||
+      null
+    );
+  }, [customerAddresses, selectedAddressId, selectedCustomer]);
 
   const loadCustomers = async ({ search = '', page = 1, pageSize = customerModalPageSize } = {}) => {
     const safePage = Math.max(1, Number(page || 1));
@@ -258,17 +304,9 @@ export default function PosTransactionCreatePage() {
     setCustomerModalPageSize(data.pagination?.page_size || safePageSize);
   };
 
-  const applySelectedCustomer = (customer) => {
+  const applySelectedCustomer = async (customer) => {
     if (!customer?.id) {
       setError('Customer belum valid');
-      return;
-    }
-    if (isBlankAddress(customer.address)) {
-      setPendingCustomer(customer);
-      setAddressFillDraft('');
-      setAddressFillError('');
-      setAddressFillOpen(true);
-      setCustomerModalOpen(false);
       return;
     }
     setSelectedCustomer(customer);
@@ -280,6 +318,12 @@ export default function PosTransactionCreatePage() {
       .get(`/pos-bundles/customers/${customer.id}/active`)
       .then(({ data }) => setActiveBundles(data.bundles || []))
       .catch(() => setActiveBundles([]));
+
+    const addrs = await loadCustAddresses(customer.id);
+    if (!addrs.length && isBlankAddress(customer.address)) {
+      setEditingAddress(null);
+      setAddressModalOpen(true);
+    }
   };
 
   const handleSelectCustomer = async (row) => {
@@ -630,14 +674,14 @@ export default function PosTransactionCreatePage() {
     return buildCustomerOrderMessage({
       customerName: selectedCustomer?.name || '-',
       customerPhone: selectedCustomer?.phone || null,
-      customerAddress: selectedCustomer?.address || null,
+      customerAddress: selectedAddress?.address || selectedCustomer?.address || null,
       serviceDate: form.service_date,
       items: messageItems,
       totalPeople: form.total_people,
       finalAmount: selectedTotals.subtotal - selectedTotals.discount,
       pricingFinalized: false,
     });
-  }, [form.items, form.service_date, form.total_people, selectedCustomer, selectedTotals, services]);
+  }, [form.items, form.service_date, form.total_people, selectedCustomer, selectedAddress, selectedTotals, services]);
 
   const selectedWorkers = useMemo(() => {
     return form.worker_ids
@@ -687,7 +731,7 @@ export default function PosTransactionCreatePage() {
     return buildGroupOrderMessage({
       customerName: selectedCustomer?.name || '-',
       customerPhone: selectedCustomer?.phone || null,
-      customerAddress: selectedCustomer?.address || null,
+      customerAddress: selectedAddress?.address || selectedCustomer?.address || null,
       serviceDate: form.service_date,
       items: messageItems,
       totalPeople: form.total_people,
@@ -705,6 +749,7 @@ export default function PosTransactionCreatePage() {
     form.service_date,
     form.total_people,
     selectedCustomer,
+    selectedAddress,
     selectedTotals,
     selectedWorkers,
     services,
@@ -1095,8 +1140,8 @@ export default function PosTransactionCreatePage() {
       setError('Pilih customer terlebih dahulu');
       return;
     }
-    if (isBlankAddress(selectedCustomer.address)) {
-      setError('Alamat customer wajib diisi sebelum membuat transaksi');
+    if (!selectedAddress?.address && isBlankAddress(selectedCustomer.address)) {
+      setError('Alamat customer wajib dipilih atau diisi sebelum membuat transaksi');
       return;
     }
     if (!form.service_date) {
@@ -1131,7 +1176,8 @@ export default function PosTransactionCreatePage() {
         customer_id: selectedCustomer.id,
         customer_name: selectedCustomer.name,
         customer_phone: selectedCustomer.phone || null,
-        customer_address: selectedCustomer.address || null,
+        customer_address_id: selectedAddress?.id || null,
+        customer_address: selectedAddress?.address || selectedCustomer.address || null,
         service_date: form.service_date,
         total_people: Number(form.total_people || 1),
         notes: form.notes,
@@ -1266,39 +1312,133 @@ export default function PosTransactionCreatePage() {
         />
 
         {selectedCustomer ? (
-          <div className="flex items-start justify-between gap-3 rounded-[16px] border border-emerald-200 bg-emerald-50 px-4 py-3.5">
-            <div className="flex items-start gap-3 min-w-0">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[13px] font-extrabold text-white">
-                {getInitials(selectedCustomer.name) || 'C'}
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 text-[14px] font-extrabold text-emerald-800">
-                  <Check className="w-4 h-4 shrink-0" />
-                  <span className="truncate">{selectedCustomer.name}</span>
+          <div className="space-y-3">
+            <div className="flex items-start justify-between gap-3 rounded-[16px] border border-emerald-200 bg-emerald-50 px-4 py-3.5">
+              <div className="flex items-start gap-3 min-w-0">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-[13px] font-extrabold text-white">
+                  {getInitials(selectedCustomer.name) || 'C'}
                 </div>
-                <p className="mt-1 text-[11.5px] text-emerald-700">
-                  {selectedCustomer.phone || 'Tanpa telepon'}
-                </p>
-                {!isBlankAddress(selectedCustomer.address) ? (
-                  <p className="mt-1 text-[12.5px] text-emerald-700/90 line-clamp-2">
-                    {selectedCustomer.address}
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 text-[14px] font-extrabold text-emerald-800">
+                    <Check className="w-4 h-4 shrink-0" />
+                    <span className="truncate">{selectedCustomer.name}</span>
+                  </div>
+                  <p className="mt-1 text-[11.5px] text-emerald-700">
+                    {selectedCustomer.phone || 'Tanpa telepon'}
                   </p>
-                ) : (
-                  <p className="mt-1 text-[12.5px] font-semibold text-rose-600">
-                    Alamat belum diisi
-                  </p>
-                )}
+                </div>
               </div>
+              <button
+                type="button"
+                onClick={openCustomerPickerModal}
+                className="inline-flex items-center gap-2 rounded-[10px] border border-emerald-200 bg-white px-3 py-2 text-[12px] font-semibold text-emerald-700 transition duration-150 hover:bg-emerald-100 active:scale-[.98]"
+                aria-label="Ganti customer"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+                Ganti Customer
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={openCustomerPickerModal}
-              className="inline-flex items-center gap-2 rounded-[10px] border border-emerald-200 bg-white px-3 py-2 text-[12px] font-semibold text-emerald-700 transition duration-150 hover:bg-emerald-100 active:scale-[.98]"
-              aria-label="Ganti customer"
-            >
-              <Pencil className="w-3.5 h-3.5" />
-              Ganti
-            </button>
+
+            {/* Address Selection Section */}
+            <div className="rounded-[16px] border border-slate-200 bg-white p-4 shadow-sm space-y-3">
+              <div className="flex items-center justify-between">
+                <span className={labelEyebrowClass}>
+                  <MapPin className="w-3.5 h-3.5 text-blue-600" />
+                  Alamat Layanan Transaksi ({customerAddresses.length || 0})
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingAddress(null);
+                    setAddressModalOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 text-[12px] font-bold text-blue-600 hover:text-blue-800 transition"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Tambah Alamat Baru
+                </button>
+              </div>
+
+              {customerAddresses.length === 0 ? (
+                <div className="rounded-[12px] border border-dashed border-rose-200 bg-rose-50/50 p-4 text-center">
+                  <p className="text-[12.5px] font-semibold text-rose-700">
+                    Customer belum memiliki alamat tersimpan
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingAddress(null);
+                      setAddressModalOpen(true);
+                    }}
+                    className="mt-2.5 inline-flex items-center gap-1.5 rounded-[10px] bg-rose-600 px-3.5 py-2 text-[12px] font-bold text-white shadow-sm hover:bg-rose-700 transition"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Input Alamat Sekarang
+                  </button>
+                </div>
+              ) : (
+                <div className="grid gap-2.5 sm:grid-cols-2">
+                  {customerAddresses.map((addr) => {
+                    const isSelected = addr.id === selectedAddressId;
+                    return (
+                      <div
+                        key={addr.id}
+                        onClick={() => setSelectedAddressId(addr.id)}
+                        className={`relative cursor-pointer rounded-[14px] border p-3.5 transition duration-150 ${
+                          isSelected
+                            ? 'border-blue-500 bg-blue-50/70 shadow-[0_0_0_2px_rgba(59,130,246,0.18)]'
+                            : 'border-slate-200 bg-slate-50/60 hover:bg-white hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="inline-flex items-center gap-1 rounded-[8px] bg-white border border-slate-200 px-2 py-0.5 text-[11px] font-bold text-slate-700 shadow-2xs">
+                              {addr.label || 'Rumah'}
+                            </span>
+                            {addr.is_primary && (
+                              <span className="rounded-[8px] bg-emerald-100 text-emerald-800 px-2 py-0.5 text-[10px] font-extrabold">
+                                Utama
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingAddress(addr);
+                                setAddressModalOpen(true);
+                              }}
+                              className="rounded-md p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700 transition"
+                              title="Edit Alamat Ini"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <input
+                              type="radio"
+                              name="selected_customer_address"
+                              checked={isSelected}
+                              onChange={() => setSelectedAddressId(addr.id)}
+                              className="h-4 w-4 text-blue-600 focus:ring-blue-400"
+                            />
+                          </div>
+                        </div>
+
+                        {(addr.recipient_name || addr.recipient_phone) && (
+                          <p className="mt-1.5 text-[11px] font-semibold text-slate-600">
+                            Penerima: {addr.recipient_name || '-'}{addr.recipient_phone ? ` (${addr.recipient_phone})` : ''}
+                          </p>
+                        )}
+
+                        <p className="mt-1 text-[12px] text-slate-700 line-clamp-2 leading-relaxed">
+                          {addr.address}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         ) : (
           <div className="rounded-[16px] border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center">
@@ -2675,6 +2815,21 @@ export default function PosTransactionCreatePage() {
             </div>
           </div>
         </BodyPortal>
+      )}
+
+      {selectedCustomer && (
+        <CustomerAddressModal
+          isOpen={addressModalOpen}
+          onClose={() => {
+            setAddressModalOpen(false);
+            setEditingAddress(null);
+          }}
+          customerId={selectedCustomer.id}
+          addressToEdit={editingAddress}
+          onSaved={(savedAddr) => {
+            loadCustAddresses(selectedCustomer.id, savedAddr?.id);
+          }}
+        />
       )}
     </div>
   );

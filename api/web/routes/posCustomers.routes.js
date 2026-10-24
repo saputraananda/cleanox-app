@@ -2,13 +2,18 @@ import { Router } from 'express';
 import { authenticate } from '../../shared/middleware/auth.middleware.js';
 import {
   createPosCustomer,
+  createPosCustomerAddress,
+  deletePosCustomerAddress,
   ensureLegacyCustomer,
+  getPosCustomerAddresses,
   getPosCustomerDetail,
   getPosCustomers,
   getWaschenEmployees,
   getWaschenReferralBranches,
   patchPosCustomerAddress,
+  setPrimaryPosCustomerAddress,
   updatePosCustomer,
+  updatePosCustomerAddress,
 } from '../controllers/posCustomers.controller.js';
 
 const router = Router();
@@ -40,5 +45,12 @@ router.get('/:id', getPosCustomerDetail);
 router.post('/', createPosCustomer);
 router.patch('/:id/address', patchPosCustomerAddress);
 router.put('/:id', updatePosCustomer);
+
+// Customer Address Book routes
+router.get('/:id/addresses', getPosCustomerAddresses);
+router.post('/:id/addresses', createPosCustomerAddress);
+router.put('/:id/addresses/:addressId', updatePosCustomerAddress);
+router.patch('/:id/addresses/:addressId/primary', setPrimaryPosCustomerAddress);
+router.delete('/:id/addresses/:addressId', deletePosCustomerAddress);
 
 export default router;

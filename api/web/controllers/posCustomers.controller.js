@@ -740,6 +740,41 @@ export const patchPosCustomerAddress = async (req, res) => {
   }
 };
 
+export async function fetchCustomerAddresses(customerId) {
+  const [rows] = await cleanoxPool.query(
+    `SELECT
+       a.id,
+       a.customer_id,
+       a.label,
+       a.recipient_name,
+       a.recipient_phone,
+       a.province_id,
+       a.regency_id,
+       a.district_id,
+       a.village_id,
+       a.house_number,
+       a.street_detail,
+       a.address_note,
+       a.address,
+       a.is_primary,
+       a.created_at,
+       a.updated_at,
+       p.name AS province_name,
+       r.name AS regency_name,
+       d.name AS district_name,
+       v.name AS village_name
+     FROM mst_customer_addresses a
+     LEFT JOIN mst_provinces p ON p.id = a.province_id
+     LEFT JOIN mst_regencies r ON r.id = a.regency_id
+     LEFT JOIN mst_districts d ON d.id = a.district_id
+     LEFT JOIN mst_villages v ON v.id = a.village_id
+     WHERE a.customer_id = ? AND a.is_active = 1
+     ORDER BY a.is_primary DESC, a.id ASC`,
+    [customerId]
+  );
+  return rows.map((r) => ({ ...r, is_primary: Boolean(r.is_primary) }));
+}
+
 export const getPosCustomerDetail = async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -752,9 +787,17 @@ export const getPosCustomerDetail = async (req, res) => {
       return res.status(404).json({ message: 'Customer tidak ditemukan' });
     }
 
-    const { history, history_summary } = await fetchCustomerHistory(id);
+    const [addresses, historyData] = await Promise.all([
+      fetchCustomerAddresses(id),
+      fetchCustomerHistory(id),
+    ]);
 
-    return res.json({ customer, history, history_summary });
+    return res.json({
+      customer,
+      addresses,
+      history: historyData.history,
+      history_summary: historyData.history_summary,
+    });
   } catch (error) {
     console.error('[posCustomers/getPosCustomerDetail]', error.message);
     return res.status(500).json({ message: 'Gagal memuat detail customer' });
@@ -797,10 +840,32 @@ export const createPosCustomer = async (req, res) => {
       ]
     );
 
+    const newCustomerId = result.insertId;
+
+    if (payload.address) {
+      await cleanoxPool.query(
+        `INSERT INTO mst_customer_addresses
+          (customer_id, label, province_id, regency_id, district_id, village_id,
+           house_number, street_detail, address_note, address, is_primary, is_active)
+         VALUES (?, 'Rumah', ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)`,
+        [
+          newCustomerId,
+          payload.province_id,
+          payload.regency_id,
+          payload.district_id,
+          payload.village_id,
+          payload.house_number,
+          payload.street_detail,
+          payload.address_note,
+          payload.address,
+        ]
+      );
+    }
+
     return res.status(201).json({
       message: 'Customer berhasil ditambahkan',
       customer: {
-        id: result.insertId,
+        id: newCustomerId,
         ...payload,
         transaction_count: 0,
       },
@@ -875,3 +940,440 @@ export const updatePosCustomer = async (req, res) => {
     });
   }
 };
+
+export const getPosCustomerAddresses = async (req, res) => {
+  try {
+    const customerId = Number(req.params.id);
+    if (!customerId) {
+      return res.status(400).json({ message: 'ID customer tidak valid' });
+    }
+    const addresses = await fetchCustomerAddresses(customerId);
+    return res.json({ addresses });
+  } catch (error) {
+    console.error('[posCustomers/getPosCustomerAddresses]', error.message);
+    return res.status(500).json({ message: 'Gagal memuat daftar alamat customer' });
+  }
+};
+
+export const createPosCustomerAddress = async (req, res) => {
+  const connection = await cleanoxPool.getConnection();
+  try {
+    const customerId = Number(req.params.id);
+    if (!customerId) {
+      return res.status(400).json({ message: 'ID customer tidak valid' });
+    }
+
+    const [custRows] = await connection.query(
+      `SELECT id FROM mst_customers WHERE id = ? LIMIT 1`,
+      [customerId]
+    );
+    if (!custRows.length) {
+      return res.status(404).json({ message: 'Customer tidak ditemukan' });
+    }
+
+    const label = String(req.body.label || 'Rumah').trim() || 'Rumah';
+    const recipient_name = req.body.recipient_name ? String(req.body.recipient_name).trim() : null;
+    const recipient_phone = req.body.recipient_phone ? String(req.body.recipient_phone).trim() : null;
+    const province_id = toNullableInt(req.body.province_id);
+    const regency_id = toNullableInt(req.body.regency_id);
+    const district_id = toNullableInt(req.body.district_id);
+    const village_id = toNullableInt(req.body.village_id);
+    const house_number = String(req.body.house_number || '').trim() || null;
+    const street_detail = String(req.body.street_detail || '').trim() || null;
+    const address_note = String(req.body.address_note || '').trim() || null;
+    let is_primary = toBooleanFlag(req.body.is_primary);
+
+    const wilayah = await resolveWilayahNames({
+      province_id,
+      regency_id,
+      district_id,
+      village_id,
+    });
+
+    const address = buildCustomerAddressText({
+      street_detail,
+      house_number,
+      address_note,
+      ...wilayah,
+    });
+
+    if (!address) {
+      return res.status(400).json({ message: 'Detail alamat wajib diisi' });
+    }
+
+    await connection.beginTransaction();
+
+    const [existingAddrs] = await connection.query(
+      `SELECT id FROM mst_customer_addresses WHERE customer_id = ? AND is_active = 1 LIMIT 1`,
+      [customerId]
+    );
+    if (!existingAddrs.length) {
+      is_primary = 1;
+    }
+
+    if (is_primary === 1) {
+      await connection.query(
+        `UPDATE mst_customer_addresses SET is_primary = 0 WHERE customer_id = ?`,
+        [customerId]
+      );
+    }
+
+    const [result] = await connection.query(
+      `INSERT INTO mst_customer_addresses
+        (customer_id, label, recipient_name, recipient_phone, province_id, regency_id,
+         district_id, village_id, house_number, street_detail, address_note, address, is_primary, is_active)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+      [
+        customerId,
+        label,
+        recipient_name,
+        recipient_phone,
+        province_id,
+        regency_id,
+        district_id,
+        village_id,
+        house_number,
+        street_detail,
+        address_note,
+        address,
+        is_primary,
+      ]
+    );
+
+    const insertedId = result.insertId;
+
+    if (is_primary === 1) {
+      await connection.query(
+        `UPDATE mst_customers
+         SET address = ?, province_id = ?, regency_id = ?, district_id = ?, village_id = ?,
+             house_number = ?, street_detail = ?, address_note = ?, updated_at = CURRENT_TIMESTAMP(0)
+         WHERE id = ?`,
+        [
+          address,
+          province_id,
+          regency_id,
+          district_id,
+          village_id,
+          house_number,
+          street_detail,
+          address_note,
+          customerId,
+        ]
+      );
+    }
+
+    await connection.commit();
+
+    return res.status(201).json({
+      message: 'Alamat customer berhasil ditambahkan',
+      address: {
+        id: insertedId,
+        customer_id: customerId,
+        label,
+        recipient_name,
+        recipient_phone,
+        province_id,
+        regency_id,
+        district_id,
+        village_id,
+        house_number,
+        street_detail,
+        address_note,
+        address,
+        is_primary: Boolean(is_primary),
+        ...wilayah,
+      },
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[posCustomers/createPosCustomerAddress]', error.message);
+    return res.status(error.status || 500).json({
+      message: error.message || 'Gagal menambahkan alamat customer',
+    });
+  } finally {
+    connection.release();
+  }
+};
+
+export const updatePosCustomerAddress = async (req, res) => {
+  const connection = await cleanoxPool.getConnection();
+  try {
+    const customerId = Number(req.params.id);
+    const addressId = Number(req.params.addressId);
+    if (!customerId || !addressId) {
+      return res.status(400).json({ message: 'ID customer atau ID alamat tidak valid' });
+    }
+
+    const [existing] = await connection.query(
+      `SELECT * FROM mst_customer_addresses WHERE id = ? AND customer_id = ? AND is_active = 1 LIMIT 1`,
+      [addressId, customerId]
+    );
+    if (!existing.length) {
+      return res.status(404).json({ message: 'Alamat customer tidak ditemukan' });
+    }
+
+    const current = existing[0];
+    const label = req.body.label !== undefined ? (String(req.body.label).trim() || 'Rumah') : current.label;
+    const recipient_name =
+      req.body.recipient_name !== undefined
+        ? (String(req.body.recipient_name || '').trim() || null)
+        : current.recipient_name;
+    const recipient_phone =
+      req.body.recipient_phone !== undefined
+        ? (String(req.body.recipient_phone || '').trim() || null)
+        : current.recipient_phone;
+    const province_id =
+      req.body.province_id !== undefined ? toNullableInt(req.body.province_id) : current.province_id;
+    const regency_id =
+      req.body.regency_id !== undefined ? toNullableInt(req.body.regency_id) : current.regency_id;
+    const district_id =
+      req.body.district_id !== undefined ? toNullableInt(req.body.district_id) : current.district_id;
+    const village_id =
+      req.body.village_id !== undefined ? toNullableInt(req.body.village_id) : current.village_id;
+    const house_number =
+      req.body.house_number !== undefined
+        ? (String(req.body.house_number || '').trim() || null)
+        : current.house_number;
+    const street_detail =
+      req.body.street_detail !== undefined
+        ? (String(req.body.street_detail || '').trim() || null)
+        : current.street_detail;
+    const address_note =
+      req.body.address_note !== undefined
+        ? (String(req.body.address_note || '').trim() || null)
+        : current.address_note;
+    const is_primary =
+      req.body.is_primary !== undefined ? toBooleanFlag(req.body.is_primary) : current.is_primary;
+
+    const wilayah = await resolveWilayahNames({
+      province_id,
+      regency_id,
+      district_id,
+      village_id,
+    });
+
+    const address = buildCustomerAddressText({
+      street_detail,
+      house_number,
+      address_note,
+      ...wilayah,
+    });
+
+    if (!address) {
+      return res.status(400).json({ message: 'Detail alamat wajib diisi' });
+    }
+
+    await connection.beginTransaction();
+
+    if (is_primary === 1) {
+      await connection.query(
+        `UPDATE mst_customer_addresses SET is_primary = 0 WHERE customer_id = ?`,
+        [customerId]
+      );
+    }
+
+    await connection.query(
+      `UPDATE mst_customer_addresses
+       SET label = ?, recipient_name = ?, recipient_phone = ?, province_id = ?, regency_id = ?,
+           district_id = ?, village_id = ?, house_number = ?, street_detail = ?, address_note = ?,
+           address = ?, is_primary = ?, updated_at = CURRENT_TIMESTAMP(0)
+       WHERE id = ? AND customer_id = ?`,
+      [
+        label,
+        recipient_name,
+        recipient_phone,
+        province_id,
+        regency_id,
+        district_id,
+        village_id,
+        house_number,
+        street_detail,
+        address_note,
+        address,
+        is_primary,
+        addressId,
+        customerId,
+      ]
+    );
+
+    if (is_primary === 1) {
+      await connection.query(
+        `UPDATE mst_customers
+         SET address = ?, province_id = ?, regency_id = ?, district_id = ?, village_id = ?,
+             house_number = ?, street_detail = ?, address_note = ?, updated_at = CURRENT_TIMESTAMP(0)
+         WHERE id = ?`,
+        [
+          address,
+          province_id,
+          regency_id,
+          district_id,
+          village_id,
+          house_number,
+          street_detail,
+          address_note,
+          customerId,
+        ]
+      );
+    }
+
+    await connection.commit();
+
+    return res.json({
+      message: 'Alamat customer berhasil diperbarui',
+      address: {
+        id: addressId,
+        customer_id: customerId,
+        label,
+        recipient_name,
+        recipient_phone,
+        province_id,
+        regency_id,
+        district_id,
+        village_id,
+        house_number,
+        street_detail,
+        address_note,
+        address,
+        is_primary: Boolean(is_primary),
+        ...wilayah,
+      },
+    });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[posCustomers/updatePosCustomerAddress]', error.message);
+    return res.status(error.status || 500).json({
+      message: error.message || 'Gagal memperbarui alamat customer',
+    });
+  } finally {
+    connection.release();
+  }
+};
+
+export const setPrimaryPosCustomerAddress = async (req, res) => {
+  const connection = await cleanoxPool.getConnection();
+  try {
+    const customerId = Number(req.params.id);
+    const addressId = Number(req.params.addressId);
+    if (!customerId || !addressId) {
+      return res.status(400).json({ message: 'ID customer atau ID alamat tidak valid' });
+    }
+
+    const [existing] = await connection.query(
+      `SELECT * FROM mst_customer_addresses WHERE id = ? AND customer_id = ? AND is_active = 1 LIMIT 1`,
+      [addressId, customerId]
+    );
+    if (!existing.length) {
+      return res.status(404).json({ message: 'Alamat customer tidak ditemukan' });
+    }
+
+    const target = existing[0];
+    await connection.beginTransaction();
+
+    await connection.query(
+      `UPDATE mst_customer_addresses SET is_primary = 0 WHERE customer_id = ?`,
+      [customerId]
+    );
+
+    await connection.query(
+      `UPDATE mst_customer_addresses SET is_primary = 1 WHERE id = ?`,
+      [addressId]
+    );
+
+    await connection.query(
+      `UPDATE mst_customers
+       SET address = ?, province_id = ?, regency_id = ?, district_id = ?, village_id = ?,
+           house_number = ?, street_detail = ?, address_note = ?, updated_at = CURRENT_TIMESTAMP(0)
+       WHERE id = ?`,
+      [
+        target.address,
+        target.province_id,
+        target.regency_id,
+        target.district_id,
+        target.village_id,
+        target.house_number,
+        target.street_detail,
+        target.address_note,
+        customerId,
+      ]
+    );
+
+    await connection.commit();
+
+    return res.json({ message: 'Alamat utama berhasil diubah', primary_address_id: addressId });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[posCustomers/setPrimaryPosCustomerAddress]', error.message);
+    return res.status(500).json({ message: 'Gagal mengubah alamat utama' });
+  } finally {
+    connection.release();
+  }
+};
+
+export const deletePosCustomerAddress = async (req, res) => {
+  const connection = await cleanoxPool.getConnection();
+  try {
+    const customerId = Number(req.params.id);
+    const addressId = Number(req.params.addressId);
+    if (!customerId || !addressId) {
+      return res.status(400).json({ message: 'ID customer atau ID alamat tidak valid' });
+    }
+
+    const [existing] = await connection.query(
+      `SELECT id, is_primary FROM mst_customer_addresses WHERE id = ? AND customer_id = ? AND is_active = 1 LIMIT 1`,
+      [addressId, customerId]
+    );
+    if (!existing.length) {
+      return res.status(404).json({ message: 'Alamat customer tidak ditemukan' });
+    }
+
+    const wasPrimary = Boolean(existing[0].is_primary);
+
+    await connection.beginTransaction();
+
+    await connection.query(
+      `UPDATE mst_customer_addresses SET is_active = 0, is_primary = 0 WHERE id = ?`,
+      [addressId]
+    );
+
+    if (wasPrimary) {
+      const [nextRows] = await connection.query(
+        `SELECT * FROM mst_customer_addresses WHERE customer_id = ? AND is_active = 1 ORDER BY id ASC LIMIT 1`,
+        [customerId]
+      );
+      if (nextRows.length) {
+        const nextAddr = nextRows[0];
+        await connection.query(
+          `UPDATE mst_customer_addresses SET is_primary = 1 WHERE id = ?`,
+          [nextAddr.id]
+        );
+        await connection.query(
+          `UPDATE mst_customers
+           SET address = ?, province_id = ?, regency_id = ?, district_id = ?, village_id = ?,
+               house_number = ?, street_detail = ?, address_note = ?, updated_at = CURRENT_TIMESTAMP(0)
+           WHERE id = ?`,
+          [
+            nextAddr.address,
+            nextAddr.province_id,
+            nextAddr.regency_id,
+            nextAddr.district_id,
+            nextAddr.village_id,
+            nextAddr.house_number,
+            nextAddr.street_detail,
+            nextAddr.address_note,
+            customerId,
+          ]
+        );
+      }
+    }
+
+    await connection.commit();
+    return res.json({ message: 'Alamat berhasil dihapus' });
+  } catch (error) {
+    await connection.rollback();
+    console.error('[posCustomers/deletePosCustomerAddress]', error.message);
+    return res.status(500).json({ message: 'Gagal menghapus alamat customer' });
+  } finally {
+    connection.release();
+  }
+};
+

@@ -2184,7 +2184,19 @@ export const createPosTransaction = async (req, res) => {
     const customer = customerRows[0];
     const snapshotName = customer.name || customer_name;
     const snapshotPhone = customer.phone || customer_phone || null;
-    const snapshotAddress = customer.address || customer_address || null;
+
+    const customerAddressId = req.body.customer_address_id ? Number(req.body.customer_address_id) : null;
+    let chosenAddress = null;
+    if (customerAddressId) {
+      const [addrRows] = await connection.query(
+        `SELECT address FROM mst_customer_addresses WHERE id = ? AND customer_id = ? AND is_active = 1 LIMIT 1`,
+        [customerAddressId, customer.id]
+      );
+      if (addrRows.length) {
+        chosenAddress = addrRows[0].address;
+      }
+    }
+    const snapshotAddress = chosenAddress || customer_address || customer.address || null;
 
     if (!snapshotName) {
       await connection.rollback();
@@ -2644,20 +2656,21 @@ export const createPosTransaction = async (req, res) => {
 
     const [result] = await connection.query(
       `INSERT INTO tr_transactions
-        (transaction_no, customer_id, customer_name, customer_phone, customer_address, service_date, total_people,
+        (transaction_no, customer_id, customer_name, customer_phone, customer_address, customer_address_id, service_date, total_people,
          subtotal_amount, discount_amount, transport_fee, promo_id, promo_name_snapshot, promo_type_snapshot, promo_value_snapshot,
          discount_id, discount_name_snapshot, discount_type_snapshot, discount_value_snapshot,
          final_amount, billing_hours, pricing_finalized_at, notes,
          group_message_template, customer_message_template, service_mode, waktu_jalan_menit, is_history_entry,
          entry_kind, customer_bundle_id,
          payment_method_id, payment_status, payment_settled_date, status, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'service', ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'service', ?, ?, ?, ?, ?, ?, ?)`,
       [
         transactionNo,
         customer.id,
         snapshotName,
         snapshotPhone,
         snapshotAddress,
+        customerAddressId,
         resolvedServiceDate,
         totalPeopleCount,
         toMoney(subtotal),

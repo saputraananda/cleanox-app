@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Inbox, Plus, RefreshCw, Search, Pencil, X, Save } from 'lucide-react';
+import { Inbox, Plus, RefreshCw, Search, Pencil, X, Save, MapPin } from 'lucide-react';
 import api from '@shared/utils/api.js';
 import CustomerFormFields, {
   customerToForm,
@@ -10,6 +10,7 @@ import BodyPortal from '@web/components/BodyPortal.jsx';
 import TablePagination, {
   PAGE_SIZE_OPTIONS,
 } from '@web/components/TablePagination.jsx';
+import CustomerAddressListModal from '@web/components/CustomerAddressListModal.jsx';
 
 export default function PosCustomersPage() {
   const [customers, setCustomers] = useState([]);
@@ -21,6 +22,7 @@ export default function PosCustomersPage() {
   const [error, setError] = useState('');
   const [panelOpen, setPanelOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [addressListCustomer, setAddressListCustomer] = useState(null);
   const [form, setForm] = useState(emptyCustomerForm);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -278,16 +280,28 @@ export default function PosCustomersPage() {
                           {row.status || 'Aktif'}
                         </span>
                       </td>
-                      <td className="px-3 sm:px-4 py-2.5 text-right">
+                      <td className="px-3 sm:px-4 py-2.5 text-right whitespace-nowrap">
                         {canEditCustomer(row) ? (
-                          <button
-                            type="button"
-                            onClick={() => openEdit(row)}
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-[10px] border border-indigo-200 bg-indigo-50 text-indigo-600 transition duration-150 hover:-translate-y-0.5 hover:bg-indigo-100 active:scale-[.95]"
-                            aria-label="Edit customer"
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
+                          <div className="inline-flex items-center gap-1.5 justify-end">
+                            <button
+                              type="button"
+                              onClick={() => setAddressListCustomer(row)}
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-[10px] border border-blue-200 bg-blue-50 text-blue-600 transition duration-150 hover:-translate-y-0.5 hover:bg-blue-100 active:scale-[.95]"
+                              title="Buku Alamat Customer"
+                              aria-label="Buku Alamat Customer"
+                            >
+                              <MapPin className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openEdit(row)}
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-[10px] border border-indigo-200 bg-indigo-50 text-indigo-600 transition duration-150 hover:-translate-y-0.5 hover:bg-indigo-100 active:scale-[.95]"
+                              aria-label="Edit customer"
+                              title="Edit Detail Customer"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         ) : (
                           <span className="text-[11px] text-slate-400">Arsip Smartlink</span>
                         )}
@@ -363,6 +377,15 @@ export default function PosCustomersPage() {
             </div>
           </div>
         </BodyPortal>
+      )}
+
+      {addressListCustomer && (
+        <CustomerAddressListModal
+          isOpen={Boolean(addressListCustomer)}
+          onClose={() => setAddressListCustomer(null)}
+          customer={addressListCustomer}
+          onUpdated={() => loadData({ term: search, page: currentPage, size: pageSize })}
+        />
       )}
     </div>
   );
