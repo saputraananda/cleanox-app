@@ -365,6 +365,54 @@ function drawSectionHeader(doc, iconType, title, x, y) {
   doc.text(title, x + iconSize + 2.2, y + 2.2);
 }
 
+// ── HELPER: Running Header for Subsequent Pages ──────────────────────────────
+
+function renderRunningHeader(doc, { transaction, logoBase64, margin, rightEdge }) {
+  const y = 7;
+  if (logoBase64) {
+    try {
+      doc.addImage(logoBase64, 'PNG', margin, y, 22.5, 12);
+    } catch {
+      // fallback
+    }
+  }
+
+  applyFont(doc, 'bold', 10.5, 0.15);
+  doc.setTextColor(...COLOR_NAVY_CLEANOX);
+  doc.text('KONFIRMASI JADWAL', rightEdge, y + 5.5, { align: 'right' });
+  if (doc.setCharSpace) doc.setCharSpace(0);
+
+  applyFont(doc, 'normal', 6.6);
+  doc.setTextColor(...COLOR_TEXT_MUTED);
+  const notaText = `Cleanox Indonesia · No. Nota ${transaction.transaction_no || '-'} (Lanjutan)`;
+  doc.text(notaText, rightEdge, y + 10.0, { align: 'right' });
+
+  const lineY = y + 14.0;
+  doc.setDrawColor(...COLOR_NAVY_CLEANOX);
+  doc.setLineWidth(0.32);
+  doc.line(margin, lineY, rightEdge, lineY);
+
+  return lineY + 4.5;
+}
+
+function renderTableColumnsHeader(doc, { margin, rightEdge, y, colItemX, colQtyX, colQtyW, colHrgX, colHrgW }) {
+  doc.setDrawColor(...COLOR_LINE);
+  doc.setLineWidth(0.25);
+  doc.line(margin, y, rightEdge, y);
+
+  applyFont(doc, 'normal', 6.2, 0.1);
+  doc.setTextColor(...COLOR_TEXT_MUTED);
+  doc.text('ITEM', colItemX + 1, y + 3.8);
+  doc.text('QTY', colQtyX + colQtyW / 2, y + 3.8, { align: 'center' });
+  doc.text('HARGA', colHrgX + colHrgW - 1, y + 3.8, { align: 'right' });
+  doc.text('SUBTOTAL', rightEdge - 1, y + 3.8, { align: 'right' });
+  if (doc.setCharSpace) doc.setCharSpace(0);
+
+  const nextY = y + 5.2;
+  doc.line(margin, nextY, rightEdge, nextY);
+  return nextY;
+}
+
 // ── MAIN EXPORT: downloadPosOrderFormPdf ─────────────────────────────────────
 
 /**
@@ -582,21 +630,7 @@ export async function downloadPosOrderFormPdf({
   const colHrgX  = colQtyX + colQtyW;
   const colSubX  = colHrgX + colHrgW;
 
-  // Table Header Line: #E3E8EE
-  doc.setDrawColor(...COLOR_LINE);
-  doc.setLineWidth(0.25);
-  doc.line(margin, y, rightEdge, y);
-
-  applyFont(doc, 'normal', 6.2, 0.1);
-  doc.setTextColor(...COLOR_TEXT_MUTED);
-  doc.text('ITEM', colItemX + 1, y + 3.8);
-  doc.text('QTY', colQtyX + colQtyW / 2, y + 3.8, { align: 'center' });
-  doc.text('HARGA', colHrgX + colHrgW - 1, y + 3.8, { align: 'right' });
-  doc.text('SUBTOTAL', rightEdge - 1, y + 3.8, { align: 'right' });
-  if (doc.setCharSpace) doc.setCharSpace(0);
-
-  y += 5.2;
-  doc.line(margin, y, rightEdge, y);
+  y = renderTableColumnsHeader(doc, { margin, rightEdge, y, colItemX, colQtyX, colQtyW, colHrgX, colHrgW });
 
   // Table Rows: Poppins Regular 7.4 pt, #1F2A37
   applyFont(doc, 'normal', 7.4);
@@ -604,6 +638,15 @@ export async function downloadPosOrderFormPdf({
 
   const rowBaseHeight = 6.0;
   let computedSubtotalSum = 0;
+
+  const ensurePageSpace = (neededHeight) => {
+    if (y + neededHeight > 184) {
+      doc.addPage();
+      y = renderRunningHeader(doc, { transaction, logoBase64, margin, rightEdge });
+      return true;
+    }
+    return false;
+  };
 
   itemRows.forEach((item) => {
     const isGcPending = pendingGc && isGeneralCleaningCategory(item.category_name);
@@ -625,6 +668,17 @@ export async function downloadPosOrderFormPdf({
     const wrappedName = wrap(doc, itemName, colItemW - 3, 7.4);
     const isMultiLine = wrappedName.length > 1;
     const currentRowH = isMultiLine ? 8.5 : rowBaseHeight;
+
+    // Cek batas bawah sebelum merender baris item
+    if (y + currentRowH > 184) {
+      doc.addPage();
+      y = renderRunningHeader(doc, { transaction, logoBase64, margin, rightEdge });
+      drawSectionHeader(doc, 'dollar', 'Rincian Layanan & Harga (Lanjutan)', margin, y);
+      y += 5.5;
+      y = renderTableColumnsHeader(doc, { margin, rightEdge, y, colItemX, colQtyX, colQtyW, colHrgX, colHrgW });
+      applyFont(doc, 'normal', 7.4);
+      doc.setTextColor(...COLOR_TEXT_MAIN);
+    }
 
     y += currentRowH;
 
@@ -670,6 +724,14 @@ export async function downloadPosOrderFormPdf({
   const transportAmount = Number(transaction.shipping_cost || transaction.transport_fee || 0);
   const discountAmount = Number(transaction.discount_total || transaction.discount_amount || 0);
 
+  // Pastikan ada ruang cukup untuk ringkasan Totals
+  const totalBoxH = 7.8;
+  let totalsNeededH = totalBoxH + 3.2;
+  if (transportAmount > 0 || discountAmount > 0) totalsNeededH += 4.5;
+  if (transportAmount > 0) totalsNeededH += 4.5;
+  if (discountAmount > 0) totalsNeededH += 4.5;
+  ensurePageSpace(totalsNeededH);
+
   // Subtotal row
   if (transportAmount > 0 || discountAmount > 0) {
     applyFont(doc, 'normal', 7.4);
@@ -702,7 +764,6 @@ export async function downloadPosOrderFormPdf({
   }
 
   // Baris TOTAL: Poppins Bold 8.8 pt, #02416C, latar #EEF4FA
-  const totalBoxH = 7.8;
   doc.setFillColor(...COLOR_TOTAL_BG);
   doc.roundedRect(margin, y + 1, contentW, totalBoxH, 1.8, 1.8, 'F');
 
@@ -715,6 +776,8 @@ export async function downloadPosOrderFormPdf({
 
   // ── 5. KOTAK CATATAN HARGA (Spesifikasi Baris 16) ──────────────────────────
   const disclaimerH = 9.2;
+  ensurePageSpace(disclaimerH + 3.8);
+
   doc.setFillColor(...COLOR_AMBER_BG);
   doc.setDrawColor(...COLOR_AMBER_BORDER);
   doc.setLineWidth(0.25);
@@ -731,6 +794,7 @@ export async function downloadPosOrderFormPdf({
   y += disclaimerH + 3.8;
 
   // ── 6. PERSIAPAN SEBELUM TIM DATANG (Spesifikasi Baris 17-18) ──────────────
+  ensurePageSpace(5.2 + 9.5 + 4.0);
   drawSectionHeader(doc, 'check', 'Persiapan Sebelum Tim Datang', margin, y);
   y += 5.2;
 
@@ -760,12 +824,16 @@ export async function downloadPosOrderFormPdf({
   y += 9.5;
 
   // ── 7. TIM TEKNISI YANG AKAN DATANG (Spesifikasi Baris 19-22) ──────────────
-  drawSectionHeader(doc, 'shield', 'Tim Teknisi yang Akan Datang', margin, y);
-  y += 4.8;
-
   const techCardW = 64.8;
   const techCardH = 20.4;
   const techCardGap = 2.4;
+
+  const techRows = Math.ceil(activeAssignments.length / 2);
+  const techNeededH = 4.8 + (techRows > 0 ? techRows * (techCardH + 2.5) : 15) + 6.0;
+  ensurePageSpace(techNeededH);
+
+  drawSectionHeader(doc, 'shield', 'Tim Teknisi yang Akan Datang', margin, y);
+  y += 4.8;
 
   if (activeAssignments.length === 0) {
     doc.setFillColor(248, 250, 252);
@@ -860,9 +928,15 @@ export async function downloadPosOrderFormPdf({
   doc.text('Jumlah teknisi 2–4 orang sesuai order. Mohon cocokkan nama & foto saat tim tiba.', margin, y + 2.2);
 
   // ── 8. FOOTER / KONTAK WHATSAPP (Spesifikasi Baris 23-24) ──────────────────
-  const footerY = Math.max(189, y + 4.5);
+  const footerNeededH = 20.0;
+  if (y + footerNeededH > 206) {
+    doc.addPage();
+    y = renderRunningHeader(doc, { transaction, logoBase64, margin, rightEdge });
+  }
 
-  // QR WhatsApp: x=9, y=189, w=15, h=15 mm
+  const footerY = Math.max(186, y + 3.5);
+
+  // QR WhatsApp: x=9, y=footerY, w=15, h=15 mm
   const qrSize = 15.0;
   if (qrBase64) {
     try {
@@ -872,7 +946,7 @@ export async function downloadPosOrderFormPdf({
     }
   }
 
-  // Teks footer (100% Poppins): x=28, y=189, w=112, h=15 mm
+  // Teks footer (100% Poppins): x=28, y=footerY, w=112, h=15 mm
   const contactX = 28;
 
   // Baris 1: Poppins Bold 7.6 pt, #02416C
@@ -891,7 +965,19 @@ export async function downloadPosOrderFormPdf({
   doc.setTextColor(...COLOR_NAVY_CLEANOX);
   doc.text(DEFAULT_WA_NUMBER, contactX + promptW, footerY + 9.5);
 
+  // ── 9. PENOMORAN HALAMAN (Jika Multi-Page) ─────────────────────────────────
+  const totalPages = doc.internal.getNumberOfPages();
+  if (totalPages > 1) {
+    for (let i = 1; i <= totalPages; i += 1) {
+      doc.setPage(i);
+      applyFont(doc, 'normal', 6.0);
+      doc.setTextColor(...COLOR_TEXT_MUTED);
+      doc.text(`Halaman ${i} dari ${totalPages}`, rightEdge, 206, { align: 'right' });
+    }
+  }
+
   // Simpan File PDF
   const filename = `Konfirmasi_Jadwal_Cleanox_${transaction.transaction_no || transaction.id || 'order'}.pdf`;
   doc.save(filename);
+  return doc;
 }
