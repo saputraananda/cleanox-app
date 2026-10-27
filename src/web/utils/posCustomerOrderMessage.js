@@ -163,16 +163,170 @@ export function formatCustomerTotalLine(items = [], finalAmount, { pricingFinali
   return `📌Total = ${formatIdr(finalAmount)}`;
 }
 
+export function resolveTakeHomeDays(item) {
+  if (item?.takehome_days != null && Number(item.takehome_days) > 0) {
+    return Number(item.takehome_days);
+  }
+  if (item?.sla_hari != null && Number(item.sla_hari) > 0) {
+    return Number(item.sla_hari);
+  }
+  if (String(item?.duration_unit || '').toLowerCase() === 'hari' && Number(item?.duration_value) > 0) {
+    return Number(item.duration_value);
+  }
+  return null;
+}
+
+export function getMaxTakeHomeDays(items = []) {
+  let maxDays = 0;
+  for (const it of items || []) {
+    const d = resolveTakeHomeDays(it);
+    if (d != null && d > maxDays) {
+      maxDays = d;
+    }
+  }
+  return maxDays;
+}
+
+export function formatCompletionDate(serviceDate, days) {
+  if (!days || days <= 0) return '-';
+  const d = parseServiceDate(serviceDate);
+  if (!d) return '-';
+  const target = new Date(d);
+  target.setDate(target.getDate() + Number(days));
+  return target.toLocaleDateString('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
+export function formatShortCompletionDate(serviceDate, days) {
+  if (!days || days <= 0) return '-';
+  const d = parseServiceDate(serviceDate);
+  if (!d) return '-';
+  const target = new Date(d);
+  target.setDate(target.getDate() + Number(days));
+  return target.toLocaleDateString('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  });
+}
+
+export function parseItemMeterDimensions(item) {
+  let length = item?.meter_length != null && item?.meter_length !== '' ? Number(item.meter_length) : null;
+  let width = item?.meter_width != null && item?.meter_width !== '' ? Number(item.meter_width) : null;
+  if ((length == null || width == null) && item?.unit_label) {
+    const match = String(item.unit_label).match(/P\s*([\d,.]+)\s*m?\s*[×x*]\s*L\s*([\d,.]+)/i);
+    if (match) {
+      length = Number(match[1].replace(',', '.'));
+      width = Number(match[2].replace(',', '.'));
+    }
+  }
+  return {
+    length: Number.isFinite(length) && length > 0 ? length : null,
+    width: Number.isFinite(width) && width > 0 ? width : null,
+  };
+}
+
+export function formatDimensionDecimal(val) {
+  if (val == null || !Number.isFinite(Number(val))) return '-';
+  const n = Number(val);
+  return n.toLocaleString('id-ID', { maximumFractionDigits: 2, minimumFractionDigits: 0 });
+}
+
+export function formatTakeHomeCustomerItemLine(item, index) {
+  const serviceName = item?.service_name || '-';
+  const finalPrice = toNumber(item?.final_price_per_unit ?? item?.base_price ?? 0);
+  const lineTotal = toNumber(item?.line_total ?? 0);
+  const { length, width } = parseItemMeterDimensions(item);
+  const meterVal =
+    item?.meter != null && Number(item.meter) > 0
+      ? Number(item.meter)
+      : length && width
+        ? length * width
+        : null;
+
+  if (length && width && meterVal) {
+    const pStr = formatDimensionDecimal(length);
+    const lStr = formatDimensionDecimal(width);
+    const luasStr = formatDimensionDecimal(meterVal);
+    return `${index + 1}. ${serviceName} — P ${pStr} m × L ${lStr} m = ${luasStr} m² × ${formatIdr(finalPrice)} = ${formatIdr(lineTotal)}`;
+  } else if (meterVal) {
+    const luasStr = formatDimensionDecimal(meterVal);
+    return `${index + 1}. ${serviceName} — ${luasStr} m² × ${formatIdr(finalPrice)} = ${formatIdr(lineTotal)}`;
+  }
+
+  const qty = Math.max(1, toNumber(item?.qty || 1));
+  const unit = item?.satuan_name || item?.unit_label || 'pcs';
+  return `${index + 1}. ${serviceName} — ${qty} ${unit} × ${formatIdr(finalPrice)} = ${formatIdr(lineTotal)}`;
+}
+
 export function buildCustomerOrderMessage({
   customerName,
   customerPhone,
   customerAddress,
   serviceDate,
+  serviceMode = 'home_service',
+  transactionNo = '-',
   items = [],
   totalPeople,
   finalAmount,
+  subtotalAmount,
+  discountAmount,
+  transportFee,
+  paymentStatus = 'belum_lunas',
   pricingFinalized = false,
 }) {
+  if (serviceMode === 'take_home') {
+    const { dateLine } = formatServiceDateParts(serviceDate);
+    const maxDays = getMaxTakeHomeDays(items);
+    const estDateLine = formatCompletionDate(serviceDate, maxDays);
+    const itemLines = (items || []).map((it, idx) => formatTakeHomeCustomerItemLine(it, idx));
+    const subtotal =
+      subtotalAmount != null
+        ? toNumber(subtotalAmount)
+        : (items || []).reduce((acc, it) => acc + toNumber(it.line_total || 0), 0);
+    const diskon = discountAmount != null ? toNumber(discountAmount) : 0;
+    const transport = transportFee != null ? toNumber(transportFee) : 0;
+    const total = finalAmount != null ? toNumber(finalAmount) : subtotal - diskon + transport;
+    const isPaid = String(paymentStatus || '').toLowerCase() === 'lunas';
+    const statusText = isPaid ? 'LUNAS' : 'BELUM LUNAS';
+
+    return [
+      `Halo Kak ${customerName || '-'} 👋`,
+      'Terima kasih sudah menggunakan layanan Cleanox 💙',
+      '',
+      'Berikut nota pesanan Kakak:',
+      '',
+      `🧾 No. Transaksi: ${transactionNo || '-'}`,
+      '📦 Layanan: Take Home (Pickup & Antar)',
+      `📅 Tanggal Pickup: ${dateLine}`,
+      `✅ Estimasi Selesai: ${estDateLine}`,
+      `📍 Alamat Pickup & Antar: ${customerAddress || '-'}`,
+      '',
+      'Rincian Item:',
+      ...(itemLines.length ? itemLines : ['-']),
+      '',
+      `Subtotal: ${formatIdr(subtotal)}`,
+      `Diskon: ${formatIdr(diskon)}`,
+      `Biaya Antar-Jemput: ${formatIdr(transport)}`,
+      `TOTAL: ${formatIdr(total)}`,
+      `Status: ${statusText}`,
+      '',
+      '📌 Catatan:',
+      '* Barang akan diantar kembali setelah semua item selesai. Admin akan menghubungi Kakak untuk konfirmasi jadwal antar.',
+      '* Estimasi dapat bertambah jika cuaca ekstrem / hujan terus-menerus.',
+      '',
+      '------------------------------------------------',
+      'Cleanox Indonesia',
+      'Total Care For Happy Life',
+    ].join('\n');
+  }
+
   const { dateLine, timeLine } = formatServiceDateParts(serviceDate);
   const addressLines = formatAddressLines(customerAddress);
   const itemLines = (items || []).map((item) => formatItemLine(item, totalPeople));

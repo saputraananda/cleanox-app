@@ -1,17 +1,15 @@
 import {
-
   formatIdr,
-
   formatPhoneDisplay,
-
   formatServiceDateParts,
-
   formatAddressLines,
-
   formatPromoPart,
-
   formatBasePricePart,
-
+  resolveTakeHomeDays,
+  getMaxTakeHomeDays,
+  formatCompletionDate,
+  parseItemMeterDimensions,
+  formatDimensionDecimal,
 } from './posCustomerOrderMessage.js';
 
 import { isGeneralCleaningCategory, transactionHasGeneralCleaning } from './posGeneralCleaningBilling.js';
@@ -184,84 +182,126 @@ export function formatGroupItemLines(items = [], totalPeople) {
 
 
 
+export function formatTakeHomeInternalItemLine(item, index) {
+  const serviceName = item?.service_name || '-';
+  const { length, width } = parseItemMeterDimensions(item);
+  const meterVal =
+    item?.meter != null && Number(item.meter) > 0
+      ? Number(item.meter)
+      : length && width
+        ? length * width
+        : null;
+
+  if (length && width && meterVal) {
+    const pStr = formatDimensionDecimal(length);
+    const lStr = formatDimensionDecimal(width);
+    const luasStr = formatDimensionDecimal(meterVal);
+    const qty = Math.max(1, Number(item?.qty || 1));
+    return `${index + 1}. ${serviceName} – ${qty} lembar, P ${pStr} m × L ${lStr} m (${luasStr} m²)`;
+  } else if (meterVal) {
+    const luasStr = formatDimensionDecimal(meterVal);
+    const qty = Math.max(1, Number(item?.qty || 1));
+    return `${index + 1}. ${serviceName} – ${qty} lembar (${luasStr} m²)`;
+  }
+
+  const qty = Math.max(1, Number(item?.qty || 1));
+  const unit = item?.satuan_name || item?.unit_label || 'pcs';
+  return `${index + 1}. ${serviceName} – ${qty} ${unit}`;
+}
+
 export function buildGroupOrderMessage({
-
   customerName,
-
   customerPhone,
-
   customerAddress,
-
   serviceDate,
-
+  serviceMode = 'home_service',
+  transactionNo = '-',
   items = [],
-
   totalPeople,
-
   notes,
-
   workers = [],
-
   finalAmount,
-
+  paymentStatus = 'belum_lunas',
   pricingFinalized = false,
-
 }) {
+  if (serviceMode === 'take_home') {
+    const { dateLine, timeLine } = formatServiceDateParts(serviceDate);
+    const maxDays = getMaxTakeHomeDays(items);
+    const estDateLine = formatCompletionDate(serviceDate, maxDays);
+    const itemLines = (items || []).map((it, idx) => formatTakeHomeInternalItemLine(it, idx));
+    const mapsUrl =
+      customerAddress && String(customerAddress).trim() && String(customerAddress).trim() !== '-'
+        ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(customerAddress)}`
+        : '-';
+    const isPaid = String(paymentStatus || '').toLowerCase() === 'lunas';
+    const statusText = isPaid ? 'LUNAS' : 'BELUM LUNAS';
+    const total = finalAmount != null ? Number(finalAmount || 0) : 0;
+    const jamText =
+      timeLine && timeLine !== '-' && timeLine !== '00.00'
+        ? timeLine
+        : 'sesuai janji dgn customer';
+    const teknisiNames =
+      (workers || []).map((w) => w.full_name || w.name).filter(Boolean).join(', ') || '-';
+    const noteText = notes && String(notes).trim() ? String(notes).trim() : '-';
+
+    return [
+      'CLEANOX TAKE HOME',
+      '',
+      `No. Transaksi: ${transactionNo || '-'}`,
+      `Tanggal Pickup: ${dateLine}`,
+      `Perkiraan Jam: ${jamText}`,
+      `Estimasi Selesai: ${estDateLine}`,
+      '',
+      '👤 Customer',
+      `Nama: ${customerName || '-'}`,
+      `No. HP: ${customerPhone || '-'}`,
+      `Alamat: ${customerAddress || '-'}`,
+      `Maps: ${mapsUrl}`,
+      '',
+      `📦 Item yang Diambil (${items.length} item)`,
+      ...(itemLines.length ? itemLines : ['-']),
+      '',
+      `📝 Catatan Customer: ${noteText}`,
+      '',
+      '✅ Checklist',
+      '* Cocokkan jumlah & jenis item dengan daftar di atas',
+      '* Ukur ulang karpet (P × L) dan infokan ke admin',
+      '* Update foto dan progress di Dashboard Cleanox',
+      '* Beri marker di setiap barang sesuai nomor nota',
+      '',
+      `Status Pembayaran: ${statusText} – ${formatIdr(total)}`,
+      '',
+      `👨🏼🔧: ${teknisiNames}`,
+    ].join('\n');
+  }
 
   const { dateLine, timeLine } = formatServiceDateParts(serviceDate);
-
   const addressLines = formatAddressLines(customerAddress);
-
   const itemLines = formatGroupItemLines(items, totalPeople);
-
   const noteContent = notes && String(notes).trim() ? String(notes).trim() : '-';
 
-
-
   return [
-
     'Cleanox Order',
-
     '',
-
     dateLine,
-
     timeLine,
-
     '',
-
     customerName || '-',
-
     formatPhoneDisplay(customerPhone),
-
     '',
-
     'Alamat: ',
-
     ...addressLines,
-
     '',
-
     'Berikut layanan yang dipilih:',
-
     ...itemLines,
-
     '',
-
     formatGroupTotalLine(items, finalAmount, { pricingFinalized }),
-
     '',
-
     'Note: ',
-
     noteContent,
-
     '',
-
     formatWorkerMentions(workers),
-
   ].join('\n');
-
 }
 
 

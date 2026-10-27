@@ -919,6 +919,10 @@ export const getPosTransactionDetail = async (req, res) => {
         i.*,
         s.name AS service_name,
         s.satuan_name,
+        s.takehome_days,
+        s.sla_hari,
+        s.duration_value,
+        s.duration_unit,
         s.total_durasi_kerja_menit,
         s.delay_time_menit,
         c.name AS category_name
@@ -2493,11 +2497,20 @@ export const createPosTransaction = async (req, res) => {
       subtotal += basePrice * billable;
       hasAnyRegularBillable = true;
 
+      let resolvedUnitLabel = item.unit_label || service.satuan_name || null;
+      if (needsMeter) {
+        const lengthVal = item.meter_length ?? item.length;
+        const widthVal = item.meter_width ?? item.width;
+        if (lengthVal && widthVal) {
+          resolvedUnitLabel = `P ${lengthVal} m × L ${widthVal} m`;
+        }
+      }
+
       return {
         service_id: service.id,
         qty,
         meter,
-        unit_label: item.unit_label || service.satuan_name || null,
+        unit_label: resolvedUnitLabel,
         base_price_snapshot: toMoney(basePrice),
         original_price_snapshot: originalPriceSnapshot,
         promo_name_snapshot: null,
@@ -2603,14 +2616,21 @@ export const createPosTransaction = async (req, res) => {
       }
     }
 
-    const messageItems = normalizedItems.map((item) => {
+    const messageItems = normalizedItems.map((item, idx) => {
+      const rawItem = items[idx] || {};
       const service = servicesMap.get(item.service_id);
       return {
         service_name: service?.name || `Service #${item.service_id}`,
         qty: item.qty,
         meter: item.meter,
+        meter_length: rawItem.meter_length ?? rawItem.length ?? null,
+        meter_width: rawItem.meter_width ?? rawItem.width ?? null,
         satuan_name: service?.satuan_name || null,
         unit_label: item.unit_label || null,
+        takehome_days: service?.takehome_days ?? null,
+        sla_hari: service?.sla_hari ?? null,
+        duration_value: service?.duration_value ?? null,
+        duration_unit: service?.duration_unit ?? null,
         base_price: item.base_price_snapshot,
         original_price: item.original_price_snapshot,
         final_price_per_unit: item.final_price_snapshot,
@@ -2626,10 +2646,16 @@ export const createPosTransaction = async (req, res) => {
       customerPhone: snapshotPhone,
       customerAddress: snapshotAddress,
       serviceDate: resolvedServiceDate,
+      serviceMode: service_mode,
+      transactionNo,
       items: messageItems,
       totalPeople: totalPeopleCount,
       notes: notes || null,
       finalAmount,
+      subtotalAmount: toMoney(subtotal),
+      discountAmount: toMoney(discount),
+      transportFee,
+      paymentStatus: 'belum_lunas',
       pricingFinalized: Boolean(pricingFinalizedAtCreate),
       workers: assignedWorkers.map((worker) => ({
         full_name: worker.full_name,
@@ -2642,9 +2668,15 @@ export const createPosTransaction = async (req, res) => {
       customerPhone: snapshotPhone,
       customerAddress: snapshotAddress,
       serviceDate: resolvedServiceDate,
+      serviceMode: service_mode,
+      transactionNo,
       items: messageItems,
       totalPeople: totalPeopleCount,
       finalAmount,
+      subtotalAmount: toMoney(subtotal),
+      discountAmount: toMoney(discount),
+      transportFee,
+      paymentStatus: 'belum_lunas',
       pricingFinalized: Boolean(pricingFinalizedAtCreate),
     });
 

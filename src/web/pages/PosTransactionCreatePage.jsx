@@ -18,6 +18,7 @@ import {
   Copy,
   BadgePercent,
   MapPin,
+  Truck,
 } from 'lucide-react';
 import api from '@shared/utils/api.js';
 import CustomerFormFields, {
@@ -667,6 +668,12 @@ export default function PosTransactionCreatePage() {
           promo_type: null,
           promo_value: null,
           category_name: service.category_name || null,
+          takehome_days: service.takehome_days,
+          sla_hari: service.sla_hari,
+          duration_value: service.duration_value,
+          duration_unit: service.duration_unit,
+          meter_length: item.meter_length,
+          meter_width: item.meter_width,
         };
       })
       .filter(Boolean);
@@ -678,10 +685,26 @@ export default function PosTransactionCreatePage() {
       serviceDate: form.service_date,
       items: messageItems,
       totalPeople: form.total_people,
-      finalAmount: selectedTotals.subtotal - selectedTotals.discount,
+      finalAmount: selectedTotals.subtotal - selectedTotals.discount + (Number(form.transport_fee) || 0),
       pricingFinalized: false,
+      serviceMode: form.service_mode,
+      transactionNo: 'DRAFT',
+      subtotalAmount: selectedTotals.subtotal,
+      discountAmount: selectedTotals.discount,
+      transportFee: Number(form.transport_fee || 0),
+      paymentStatus: 'unpaid',
     });
-  }, [form.items, form.service_date, form.total_people, selectedCustomer, selectedAddress, selectedTotals, services]);
+  }, [
+    form.items,
+    form.service_date,
+    form.service_mode,
+    form.total_people,
+    form.transport_fee,
+    selectedCustomer,
+    selectedAddress,
+    selectedTotals,
+    services,
+  ]);
 
   const selectedWorkers = useMemo(() => {
     return form.worker_ids
@@ -724,6 +747,12 @@ export default function PosTransactionCreatePage() {
           promo_type: null,
           promo_value: null,
           category_name: service.category_name || null,
+          takehome_days: service.takehome_days,
+          sla_hari: service.sla_hari,
+          duration_value: service.duration_value,
+          duration_unit: service.duration_unit,
+          meter_length: item.meter_length,
+          meter_width: item.meter_width,
         };
       })
       .filter(Boolean);
@@ -736,8 +765,11 @@ export default function PosTransactionCreatePage() {
       items: messageItems,
       totalPeople: form.total_people,
       notes: form.notes,
-      finalAmount: selectedTotals.subtotal - selectedTotals.discount,
+      finalAmount: selectedTotals.subtotal - selectedTotals.discount + (Number(form.transport_fee) || 0),
       pricingFinalized: false,
+      serviceMode: form.service_mode,
+      transactionNo: 'DRAFT',
+      paymentStatus: 'unpaid',
       workers: selectedWorkers.map((worker) => ({
         full_name: worker.full_name,
         phone_number: worker.phone_number,
@@ -747,7 +779,9 @@ export default function PosTransactionCreatePage() {
     form.items,
     form.notes,
     form.service_date,
+    form.service_mode,
     form.total_people,
+    form.transport_fee,
     selectedCustomer,
     selectedAddress,
     selectedTotals,
@@ -986,11 +1020,82 @@ export default function PosTransactionCreatePage() {
     }));
   };
 
-  const syncServiceDate = (date, time) => {
+  const syncServiceDate = (date, time, mode = form.service_mode) => {
+    if (mode === 'take_home') {
+      setForm((prev) => ({
+        ...prev,
+        service_date: date ? `${date} 00:00:00` : '',
+      }));
+      return;
+    }
     setForm((prev) => ({
       ...prev,
       service_date: date && isValidTime(time) ? combineServiceDate(date, time) : '',
     }));
+  };
+
+  const takeHomeMaxDaysInfo = useMemo(() => {
+    let maxDays = 0;
+    let longestService = null;
+    for (const it of form.items) {
+      const srv = services.find((s) => Number(s.id) === Number(it.service_id));
+      const days =
+        srv?.takehome_days != null && Number(srv.takehome_days) > 0
+          ? Number(srv.takehome_days)
+          : srv?.sla_hari != null && Number(srv.sla_hari) > 0
+            ? Number(srv.sla_hari)
+            : String(srv?.duration_unit || '').toLowerCase() === 'hari' &&
+                Number(srv?.duration_value) > 0
+              ? Number(srv.duration_value)
+              : 0;
+      if (days > maxDays) {
+        maxDays = days;
+        longestService = srv;
+      }
+    }
+
+    let estDateFormatted = '-';
+    if (maxDays > 0 && scheduleDate) {
+      const d = new Date(`${scheduleDate}T00:00:00`);
+      if (!Number.isNaN(d.getTime())) {
+        d.setDate(d.getDate() + maxDays);
+        estDateFormatted = d.toLocaleDateString('id-ID', {
+          weekday: 'long',
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric',
+        });
+      }
+    }
+
+    return {
+      maxDays,
+      longestServiceName: longestService?.name || null,
+      estDateFormatted,
+    };
+  }, [form.items, services, scheduleDate]);
+
+  const handleInlineMeterChange = (index, field, rawVal) => {
+    const sanitizedVal = rawVal.replace(',', '.');
+    setForm((prev) => {
+      const nextItems = [...prev.items];
+      const item = { ...nextItems[index], [field]: rawVal };
+      const service = services.find((s) => Number(s.id) === Number(item.service_id));
+      const lengthVal = field === 'meter_length' ? sanitizedVal : String(item.meter_length || '').replace(',', '.');
+      const widthVal = field === 'meter_width' ? sanitizedVal : String(item.meter_width || '').replace(',', '.');
+      const meterVal = resolveMeterFromDimensions({
+        satuanName: service?.satuan_name,
+        length: lengthVal,
+        width: widthVal,
+      });
+      item.meter = meterVal;
+      if (lengthVal && widthVal) {
+        item.meter_length = lengthVal;
+        item.meter_width = widthVal;
+      }
+      nextItems[index] = item;
+      return { ...prev, items: nextItems };
+    });
   };
 
   const handleScheduleDateChange = (value) => {
@@ -1504,14 +1609,23 @@ export default function PosTransactionCreatePage() {
                     <button
                       key={option.value}
                       type="button"
-                      onClick={() =>
+                      onClick={() => {
+                        const nextMode = option.value;
                         setForm((prev) => ({
                           ...prev,
-                          service_mode: option.value,
-                          transport_fee: option.value === 'home_service' ? prev.transport_fee : '',
-                          worker_ids: option.value === 'take_home' ? [] : prev.worker_ids,
-                        }))
-                      }
+                          service_mode: nextMode,
+                          transport_fee: nextMode === 'home_service' ? prev.transport_fee : '',
+                          worker_ids: nextMode === 'take_home' ? [] : prev.worker_ids,
+                          service_date:
+                            nextMode === 'take_home'
+                              ? scheduleDate
+                                ? `${scheduleDate} 00:00:00`
+                                : ''
+                              : scheduleDate && isValidTime(scheduleTime)
+                                ? combineServiceDate(scheduleDate, scheduleTime)
+                                : '',
+                        }));
+                      }}
                       className={`rounded-[14px] border px-3.5 py-3 text-left transition ${
                         active
                           ? 'border-blue-400 bg-blue-50 shadow-[0_0_0_1px_rgba(59,130,246,.25)]'
@@ -1529,88 +1643,133 @@ export default function PosTransactionCreatePage() {
                 })}
               </div>
             </div>
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_320px] lg:items-start">
-              <div className="space-y-1.5">
-                <span className={labelEyebrowClass}>Tanggal layanan</span>
-                <div className="rounded-[16px] border border-slate-200 bg-white p-3 shadow-[0_0_0_1px_rgba(0,0,0,.02)]">
-                  <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_180px]">
-                  <label className="space-y-1.5">
-                    <span className="text-[11.5px] font-semibold text-slate-500">Tanggal</span>
-                    <input
-                      type="date"
-                      required
-                      value={scheduleDate}
-                      onChange={(e) => handleScheduleDateChange(e.target.value)}
-                      className={inputClass}
-                    />
-                  </label>
-                  <label className="space-y-1.5">
-                    <span className="text-[11.5px] font-semibold text-slate-500">Jam</span>
+            {isTakeHome ? (
+              <div className="space-y-4">
+                <div className="grid gap-4 sm:grid-cols-2 sm:items-start">
+                  <div className="space-y-1.5">
+                    <span className={labelEyebrowClass}>TANGGAL PICKUP</span>
+                    <div className="rounded-[16px] border border-slate-200 bg-white p-3 shadow-[0_0_0_1px_rgba(0,0,0,.02)]">
+                      <label className="block space-y-1.5">
+                        <span className="text-[11.5px] font-semibold text-slate-500">
+                          Tanggal barang diambil
+                        </span>
+                        <input
+                          type="date"
+                          required
+                          value={scheduleDate}
+                          onChange={(e) => handleScheduleDateChange(e.target.value)}
+                          className={inputClass}
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <span className={labelEyebrowClass}>ESTIMASI SELESAI (OTOMATIS)</span>
+                    <div className="flex min-h-[76px] flex-col justify-center rounded-[16px] border border-lime-300 bg-lime-50/70 p-3.5 shadow-[0_0_0_1px_rgba(132,204,22,.15)]">
+                      <p className="text-[15px] font-extrabold tracking-[-0.01em] text-slate-900">
+                        {takeHomeMaxDaysInfo.estDateFormatted}
+                      </p>
+                      <p className="mt-1 text-[11.5px] font-medium text-lime-800">
+                        {takeHomeMaxDaysInfo.maxDays > 0
+                          ? `Tanggal pickup + ${takeHomeMaxDaysInfo.maxDays} hari, mengikuti item terlama: ${takeHomeMaxDaysInfo.longestServiceName}`
+                          : 'Belum ada estimasi hari pengerjaan'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2.5 rounded-[14px] border border-blue-200 bg-blue-50/70 p-3 text-[12px] text-blue-800">
+                  <Truck className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
+                  <p className="leading-relaxed">
+                    Take Home tidak memakai jam layanan & pilihan teknisi. Barang dikerjakan di workshop Cleanox, jadwal antar dikonfirmasi admin via WhatsApp setelah semua item selesai.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_320px] lg:items-start">
+                <div className="space-y-1.5">
+                  <span className={labelEyebrowClass}>Tanggal layanan</span>
+                  <div className="rounded-[16px] border border-slate-200 bg-white p-3 shadow-[0_0_0_1px_rgba(0,0,0,.02)]">
+                    <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_180px]">
+                    <label className="space-y-1.5">
+                      <span className="text-[11.5px] font-semibold text-slate-500">Tanggal</span>
+                      <input
+                        type="date"
+                        required
+                        value={scheduleDate}
+                        onChange={(e) => handleScheduleDateChange(e.target.value)}
+                        className={inputClass}
+                      />
+                    </label>
+                    <label className="space-y-1.5">
+                      <span className="text-[11.5px] font-semibold text-slate-500">Jam</span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="09:00"
+                        value={scheduleTime}
+                        onChange={(e) => handleScheduleTimeChange(e.target.value)}
+                        onBlur={handleScheduleTimeBlur}
+                        maxLength={5}
+                        className={`${inputClass} text-[15px] font-bold tracking-[-0.01em] ${
+                          isValidTime(scheduleTime)
+                            ? 'border-blue-300 bg-blue-50 text-blue-800'
+                            : scheduleTime
+                              ? 'border-amber-300 bg-amber-50 text-amber-800'
+                              : ''
+                        }`}
+                        aria-label="Jam layanan"
+                      />
+                    </label>
+                    </div>
+                  </div>
+                  <p className="text-[11.5px] text-slate-400">
+                    Ketik jam layanan, contoh: 1230 jadi 12:30.
+                  </p>
+                </div>
+                <label className="space-y-1.5">
+                  <span className={labelEyebrowClass}>Jumlah orang</span>
+                  <div className="rounded-[16px] border border-slate-200 bg-white p-3 shadow-[0_0_0_1px_rgba(0,0,0,.02)]">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handlePeopleChange(Number(form.total_people || 1) - 1)}
+                      disabled={gcCrewInfo.hasGc || Number(form.total_people || 1) <= 1}
+                      className="inline-flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[12px] border border-slate-200 bg-slate-50 text-slate-700 transition duration-150 hover:-translate-y-0.5 hover:bg-white hover:border-blue-300 active:scale-[.95] disabled:opacity-40 disabled:hover:translate-y-0 disabled:hover:bg-slate-50 disabled:hover:border-slate-200"
+                      aria-label="Kurangi jumlah orang"
+                    >
+                      <Minus className="w-[18px] h-[18px]" strokeWidth={2} />
+                    </button>
                     <input
                       type="text"
                       inputMode="numeric"
-                      placeholder="09:00"
-                      value={scheduleTime}
-                      onChange={(e) => handleScheduleTimeChange(e.target.value)}
-                      onBlur={handleScheduleTimeBlur}
-                      maxLength={5}
-                      className={`${inputClass} text-[15px] font-bold tracking-[-0.01em] ${
-                        isValidTime(scheduleTime)
-                          ? 'border-blue-300 bg-blue-50 text-blue-800'
-                          : scheduleTime
-                            ? 'border-amber-300 bg-amber-50 text-amber-800'
-                            : ''
-                      }`}
-                      aria-label="Jam layanan"
+                      readOnly
+                      value={form.total_people}
+                      className="w-full rounded-[12px] border border-slate-200 bg-slate-50 px-3 py-2.5 text-center font-sans text-[16px] font-bold tracking-[-0.01em] text-slate-800"
+                      aria-label="Jumlah orang"
                     />
-                  </label>
+                    <button
+                      type="button"
+                      onClick={() => handlePeopleChange(Number(form.total_people || 1) + 1)}
+                      disabled={gcCrewInfo.hasGc}
+                      className="inline-flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[12px] text-white transition duration-150 hover:-translate-y-0.5 active:scale-[.95] disabled:opacity-40"
+                      style={primaryBtnStyle}
+                      aria-label="Tambah jumlah orang"
+                    >
+                      <Plus className="w-[18px] h-[18px]" strokeWidth={2} />
+                    </button>
                   </div>
-                </div>
-                <p className="text-[11.5px] text-slate-400">
-                  Ketik jam layanan, contoh: 1230 jadi 12:30.
-                </p>
+                  </div>
+                  <p className="text-[11.5px] text-slate-400">
+                    {gcCrewInfo.hasGc
+                      ? 'Jumlah teknisi mengikuti paket General Cleaning'
+                      : `Maksimal pekerja yang bisa dipilih: ${maxWorkers}`}
+                  </p>
+                </label>
               </div>
-              <label className="space-y-1.5">
-                <span className={labelEyebrowClass}>Jumlah orang</span>
-                <div className="rounded-[16px] border border-slate-200 bg-white p-3 shadow-[0_0_0_1px_rgba(0,0,0,.02)]">
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handlePeopleChange(Number(form.total_people || 1) - 1)}
-                    disabled={gcCrewInfo.hasGc || Number(form.total_people || 1) <= 1}
-                    className="inline-flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[12px] border border-slate-200 bg-slate-50 text-slate-700 transition duration-150 hover:-translate-y-0.5 hover:bg-white hover:border-blue-300 active:scale-[.95] disabled:opacity-40 disabled:hover:translate-y-0 disabled:hover:bg-slate-50 disabled:hover:border-slate-200"
-                    aria-label="Kurangi jumlah orang"
-                  >
-                    <Minus className="w-[18px] h-[18px]" strokeWidth={2} />
-                  </button>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    readOnly
-                    value={form.total_people}
-                    className="w-full rounded-[12px] border border-slate-200 bg-slate-50 px-3 py-2.5 text-center font-sans text-[16px] font-bold tracking-[-0.01em] text-slate-800"
-                    aria-label="Jumlah orang"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => handlePeopleChange(Number(form.total_people || 1) + 1)}
-                    disabled={gcCrewInfo.hasGc}
-                    className="inline-flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[12px] text-white transition duration-150 hover:-translate-y-0.5 active:scale-[.95] disabled:opacity-40"
-                    style={primaryBtnStyle}
-                    aria-label="Tambah jumlah orang"
-                  >
-                    <Plus className="w-[18px] h-[18px]" strokeWidth={2} />
-                  </button>
-                </div>
-                </div>
-                <p className="text-[11.5px] text-slate-400">
-                  {gcCrewInfo.hasGc
-                    ? 'Jumlah teknisi mengikuti paket General Cleaning'
-                    : `Maksimal pekerja yang bisa dipilih: ${maxWorkers}`}
-                </p>
-              </label>
-            </div>
-            {!hasSchedule && (
+            )}
+            {!isTakeHome && !hasSchedule && (
               <p className="rounded-[12px] border border-blue-100 bg-blue-50 px-3 py-2.5 text-[12.5px] text-blue-700">
                 Isi tanggal layanan untuk membuka pemilihan pekerja.
               </p>
@@ -1618,20 +1777,7 @@ export default function PosTransactionCreatePage() {
           </section>
 
           {/* Step 3: Workers (home service only) */}
-          {isTakeHome ? (
-            <section className={`${sectionCardClass} transition duration-150`}>
-              <SectionHeader
-                step="Langkah 3"
-                icon={UserCheck}
-                title="Shared pool Take Home"
-                hint="Tanpa penugasan individu — semua mobile worker melihat order ini"
-              />
-              <p className="rounded-[12px] border border-emerald-100 bg-emerald-50 px-3 py-2.5 text-[12.5px] text-emerald-800">
-                Order Take Home langsung masuk tab Terjadwal di Mobile Worker. Siapa saja yang login
-                bisa Ambil (sekali) lalu mengisi stage bersama.
-              </p>
-            </section>
-          ) : !canShowWorkers ? (
+          {isTakeHome ? null : !canShowWorkers ? (
             <LockedStep
               icon={UserCheck}
               title="Pilih pekerja menunggu jadwal"
@@ -1813,6 +1959,30 @@ export default function PosTransactionCreatePage() {
                           });
                       const lineTotal = isGc ? 0 : rateFinal * billable;
 
+                      const isMeterPriced = isMeterPricedService({ satuanName: service?.satuan_name });
+                      const itemDays =
+                        service?.takehome_days != null && Number(service.takehome_days) > 0
+                          ? Number(service.takehome_days)
+                          : service?.sla_hari != null && Number(service.sla_hari) > 0
+                            ? Number(service.sla_hari)
+                            : String(service?.duration_unit || '').toLowerCase() === 'hari' &&
+                                Number(service?.duration_value) > 0
+                              ? Number(service.duration_value)
+                              : null;
+
+                      let itemEstDate = '-';
+                      if (itemDays != null && scheduleDate) {
+                        const d = new Date(`${scheduleDate}T00:00:00`);
+                        if (!Number.isNaN(d.getTime())) {
+                          d.setDate(d.getDate() + itemDays);
+                          itemEstDate = d.toLocaleDateString('id-ID', {
+                            weekday: 'short',
+                            day: 'numeric',
+                            month: 'short',
+                          });
+                        }
+                      }
+
                       return (
                         <div
                           key={`${item.service_id}-${index}`}
@@ -1828,6 +1998,11 @@ export default function PosTransactionCreatePage() {
                                   General Cleaning
                                 </span>
                               )}
+                              {isTakeHome && (
+                                <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[10px] font-semibold text-blue-700">
+                                  Take Home
+                                </span>
+                              )}
                             </div>
                             <p className="mt-2 text-[14px] font-bold tracking-[-0.01em] text-slate-900 truncate">
                               {service?.name || 'Service tidak ditemukan'}
@@ -1840,7 +2015,7 @@ export default function PosTransactionCreatePage() {
                                       <>
                                         Qty {qty}
                                         {(() => {
-                                          if (isMeterPricedService({ satuanName: service.satuan_name }) && meterValue == null) {
+                                          if (isMeterPriced && meterValue == null) {
                                             return ' · Pending meter';
                                           }
                                           const dimLabel = formatMeterDimensionsLabel({
@@ -1856,14 +2031,67 @@ export default function PosTransactionCreatePage() {
                                           </span>
                                         )}
                                         Rp {base.toLocaleString('id-ID')} / unit
-                                        {isMeterPricedService({ satuanName: service.satuan_name }) && meterValue == null
+                                        {isMeterPriced && meterValue == null
                                           ? ' (pending)'
                                           : ''}
                                       </>
                                     )
                                   : `Qty ${qty}`}
                             </p>
-                            <p className="mt-1 font-sans text-[13px] font-semibold text-slate-800">
+
+                            {/* Inline meter dimensions inputs */}
+                            {isMeterPriced && (
+                              <div className="mt-2.5 flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-2 text-xs shadow-2xs">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[11px] font-semibold text-slate-500">P (m):</span>
+                                  <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    placeholder="0.0"
+                                    value={item.meter_length ?? ''}
+                                    onChange={(e) => handleInlineMeterChange(index, 'meter_length', e.target.value)}
+                                    className="w-14 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-center font-bold text-slate-800 focus:border-blue-500 focus:bg-white focus:outline-none"
+                                  />
+                                </div>
+                                <span className="font-bold text-slate-300">×</span>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[11px] font-semibold text-slate-500">L (m):</span>
+                                  <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    placeholder="0.0"
+                                    value={item.meter_width ?? ''}
+                                    onChange={(e) => handleInlineMeterChange(index, 'meter_width', e.target.value)}
+                                    className="w-14 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-center font-bold text-slate-800 focus:border-blue-500 focus:bg-white focus:outline-none"
+                                  />
+                                </div>
+                                {meterValue != null ? (
+                                  <span className="ml-1 text-[11.5px] font-bold text-blue-700">
+                                    = {Number(meterValue).toLocaleString('id-ID', { maximumFractionDigits: 2 })} m² × Rp {rateFinal.toLocaleString('id-ID')}
+                                  </span>
+                                ) : (
+                                  <span className="ml-1 text-[11px] text-amber-600 font-medium">
+                                    (isi P & L untuk hitung luas)
+                                  </span>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Estimasi Selesai per item for Take Home */}
+                            {isTakeHome && (
+                              <div className="mt-2 flex items-center gap-2 text-[11.5px]">
+                                <span className="font-semibold text-slate-500">Estimasi Selesai:</span>
+                                {itemDays != null ? (
+                                  <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-bold text-emerald-800">
+                                    {itemEstDate} ({itemDays} hari)
+                                  </span>
+                                ) : (
+                                  <span className="font-bold text-slate-400">-</span>
+                                )}
+                              </div>
+                            )}
+
+                            <p className="mt-2 font-sans text-[13px] font-semibold text-slate-800">
                               {isGc
                                 ? 'Menyesuaikan total jam pengerjaan'
                                 : `Rp ${lineTotal.toLocaleString('id-ID')}`}
