@@ -83,17 +83,17 @@ export const getAvailablePeriods = async (_req, res) => {
     const [rows] = await cleanoxPool.query(
       `SELECT DISTINCT
          CASE
-           WHEN DAY(service_date) >= 26 THEN
-             CASE WHEN MONTH(service_date) = 12 THEN YEAR(service_date) + 1 ELSE YEAR(service_date) END
-           ELSE YEAR(service_date)
+           WHEN DAY(DATE(COALESCE(payment_settled_date, service_date))) >= 26 THEN
+             CASE WHEN MONTH(DATE(COALESCE(payment_settled_date, service_date))) = 12 THEN YEAR(DATE(COALESCE(payment_settled_date, service_date))) + 1 ELSE YEAR(DATE(COALESCE(payment_settled_date, service_date))) END
+           ELSE YEAR(DATE(COALESCE(payment_settled_date, service_date)))
          END AS yr,
          CASE
-           WHEN DAY(service_date) >= 26 THEN
-             CASE WHEN MONTH(service_date) = 12 THEN 1 ELSE MONTH(service_date) + 1 END
-           ELSE MONTH(service_date)
+           WHEN DAY(DATE(COALESCE(payment_settled_date, service_date))) >= 26 THEN
+             CASE WHEN MONTH(DATE(COALESCE(payment_settled_date, service_date))) = 12 THEN 1 ELSE MONTH(DATE(COALESCE(payment_settled_date, service_date))) + 1 END
+           ELSE MONTH(DATE(COALESCE(payment_settled_date, service_date)))
          END AS mo
        FROM tr_transactions
-       WHERE service_date IS NOT NULL
+       WHERE (payment_settled_date IS NOT NULL OR service_date IS NOT NULL)
          AND status <> 'Cancelled'
        ORDER BY yr DESC, mo DESC`
     );
@@ -135,17 +135,20 @@ export const getDashboardData = async (req, res) => {
       `SELECT
         COUNT(*) AS total_transactions,
         SUM(CASE WHEN status <> 'Cancelled' THEN final_amount ELSE 0 END) AS total_revenue,
+        SUM(CASE WHEN status <> 'Cancelled' AND payment_status = 'lunas' THEN final_amount ELSE 0 END) AS lunas_revenue,
+        SUM(CASE WHEN status <> 'Cancelled' AND (payment_status = 'belum_lunas' OR payment_status IS NULL OR payment_status = '') THEN final_amount ELSE 0 END) AS belum_lunas_revenue,
         SUM(CASE WHEN status = 'Scheduled' THEN 1 ELSE 0 END) AS incoming_transactions,
         SUM(CASE WHEN status = 'In_Progress' THEN 1 ELSE 0 END) AS active_transactions,
         SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) AS completed_transactions,
         SUM(CASE WHEN status = 'Cancelled' THEN 1 ELSE 0 END) AS cancelled_transactions
        FROM tr_transactions
-       WHERE DATE(service_date) BETWEEN ? AND ?`,
+       WHERE DATE(COALESCE(payment_settled_date, service_date)) BETWEEN ? AND ?`,
       [date_start, date_end]
     );
 
     const summaryRow = summaryRows[0] || {};
     const totalRevenue = Number(summaryRow.total_revenue || 0);
+    const lunasRevenue = Number(summaryRow.lunas_revenue || 0);
     const nonCancelledCount =
       Number(summaryRow.total_transactions || 0) - Number(summaryRow.cancelled_transactions || 0);
     const avgPerTransaction =
@@ -153,14 +156,14 @@ export const getDashboardData = async (req, res) => {
 
     const [trendRows] = await cleanoxPool.query(
       `SELECT
-        DATE(service_date) AS tanggal,
+        DATE(COALESCE(payment_settled_date, service_date)) AS tanggal,
         SUM(final_amount) AS sales,
         COUNT(*) AS count
        FROM tr_transactions
-       WHERE DATE(service_date) BETWEEN ? AND ?
+       WHERE DATE(COALESCE(payment_settled_date, service_date)) BETWEEN ? AND ?
          AND status <> 'Cancelled'
          AND COALESCE(payment_status, 'belum_lunas') = 'lunas'
-       GROUP BY DATE(service_date)
+       GROUP BY DATE(COALESCE(payment_settled_date, service_date))
        ORDER BY tanggal`,
       [date_start, date_end]
     );
@@ -171,7 +174,7 @@ export const getDashboardData = async (req, res) => {
         COUNT(*) AS total,
         SUM(final_amount) AS revenue
        FROM tr_transactions
-       WHERE DATE(service_date) BETWEEN ? AND ?
+       WHERE DATE(COALESCE(payment_settled_date, service_date)) BETWEEN ? AND ?
        GROUP BY status
        ORDER BY total DESC`,
       [date_start, date_end]
@@ -187,7 +190,7 @@ export const getDashboardData = async (req, res) => {
        INNER JOIN mst_services s ON s.id = i.service_id
        LEFT JOIN mst_category c ON c.id = s.category_id
        WHERE t.status <> 'Cancelled'
-         AND DATE(t.service_date) BETWEEN ? AND ?
+         AND DATE(COALESCE(t.payment_settled_date, t.service_date)) BETWEEN ? AND ?
        GROUP BY COALESCE(c.name, 'Lainnya')
        ORDER BY revenue DESC`,
       [date_start, date_end]
@@ -200,6 +203,8 @@ export const getDashboardData = async (req, res) => {
         t.customer_name,
         t.customer_phone,
         t.service_date,
+        t.payment_settled_date,
+        DATE(COALESCE(t.payment_settled_date, t.service_date)) AS omzet_date,
         t.status,
         t.final_amount,
         t.payment_method_id,
@@ -223,20 +228,21 @@ export const getDashboardData = async (req, res) => {
        LEFT JOIN tr_transaction_items i ON i.transaction_id = t.id
        LEFT JOIN mst_services s ON s.id = i.service_id
        LEFT JOIN tr_worker_assignments a ON a.transaction_id = t.id
-       WHERE DATE(t.service_date) BETWEEN ? AND ?
+       WHERE DATE(COALESCE(t.payment_settled_date, t.service_date)) BETWEEN ? AND ?
        GROUP BY
          t.id,
          t.transaction_no,
          t.customer_name,
          t.customer_phone,
          t.service_date,
+         t.payment_settled_date,
          t.status,
          t.final_amount,
          t.payment_method_id,
          t.payment_status,
          pm.label,
          pm.\`group\`
-       ORDER BY t.service_date DESC, t.id DESC`,
+       ORDER BY DATE(COALESCE(t.payment_settled_date, t.service_date)) DESC, t.id DESC`,
       [date_start, date_end]
     );
 
@@ -253,7 +259,7 @@ export const getDashboardData = async (req, res) => {
          FROM tr_transactions t
          LEFT JOIN mst_payment_method pm ON pm.id = t.payment_method_id
          WHERE t.status <> 'Cancelled'
-           AND DATE(t.service_date) BETWEEN ? AND ?
+           AND DATE(COALESCE(t.payment_settled_date, t.service_date)) BETWEEN ? AND ?
          GROUP BY COALESCE(pm.\`group\`, 'Belum diisi')
        ) AS payment_method_agg
        ORDER BY FIELD(method_group, 'Tunai', 'Transfer Bank', 'EDC', 'QRIS', 'E-Payment', 'Collaboration', 'Belum diisi'), method_group`,
@@ -267,7 +273,7 @@ export const getDashboardData = async (req, res) => {
         SUM(t.final_amount) AS revenue
        FROM tr_transactions t
        WHERE t.status <> 'Cancelled'
-         AND DATE(t.service_date) BETWEEN ? AND ?
+         AND DATE(COALESCE(t.payment_settled_date, t.service_date)) BETWEEN ? AND ?
        GROUP BY COALESCE(t.payment_status, 'belum_lunas')`,
       [date_start, date_end]
     );
@@ -295,8 +301,10 @@ export const getDashboardData = async (req, res) => {
       console.warn('[posDashboard/target-query-warn]', targetErr.message);
     }
 
+    // Realisasi target bulanan menggunakan omzet lunas kas (selaras SuperApp)
+    const realisasiRevenue = lunasRevenue;
     const targetPct =
-      targetNominal > 0 ? Number(((totalRevenue / targetNominal) * 100).toFixed(2)) : 0;
+      targetNominal > 0 ? Number(((realisasiRevenue / targetNominal) * 100).toFixed(2)) : 0;
 
     return res.json({
       period: {
@@ -307,6 +315,8 @@ export const getDashboardData = async (req, res) => {
       summary: {
         total_transactions: Number(summaryRow.total_transactions || 0),
         total_revenue: totalRevenue,
+        lunas_revenue: lunasRevenue,
+        belum_lunas_revenue: Number(summaryRow.belum_lunas_revenue || 0),
         incoming_transactions: Number(summaryRow.incoming_transactions || 0),
         active_transactions: Number(summaryRow.active_transactions || 0),
         completed_transactions: Number(summaryRow.completed_transactions || 0),
@@ -340,7 +350,7 @@ export const getDashboardData = async (req, res) => {
       })),
       target: {
         target_nominal: targetNominal,
-        realisasi: totalRevenue,
+        realisasi: realisasiRevenue,
         persen: targetPct,
       },
       details: detailRows.map((row) => ({
@@ -349,6 +359,8 @@ export const getDashboardData = async (req, res) => {
         customer_name: row.customer_name,
         customer_phone: row.customer_phone || null,
         service_date: row.service_date,
+        payment_settled_date: row.payment_settled_date ? String(row.payment_settled_date).slice(0, 10) : null,
+        omzet_date: row.omzet_date ? String(row.omzet_date).slice(0, 10) : null,
         status: row.status,
         final_amount: Number(row.final_amount || 0),
         daftar_item: row.daftar_item || '—',

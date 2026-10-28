@@ -90,7 +90,7 @@ define(['./workbox-7e5eb42b'], (function (workbox) { 'use strict';
     "revision": "1680140e482a035f2843838ddc5b5dfc"
   }, {
     "url": "index.html",
-    "revision": "e308b0bb1471f9781f6e46bb4cca57a1"
+    "revision": "0d743bda0ddcd76cd64eb3e820064d51"
   }, {
     "url": "cleanox.png",
     "revision": "08f731ee9eb2f1d25464091426a14645"
@@ -101,13 +101,13 @@ define(['./workbox-7e5eb42b'], (function (workbox) { 'use strict';
     "url": "assets/purify.es-DP5U8-sc.js",
     "revision": null
   }, {
-    "url": "assets/index.es-DSqZeoUu.js",
+    "url": "assets/index.es-B-VGX7qp.js",
     "revision": null
   }, {
     "url": "assets/index-CVD5Cq8I.css",
     "revision": null
   }, {
-    "url": "assets/index-CBiUNpkL.js",
+    "url": "assets/index-C0vaJY2d.js",
     "revision": null
   }, {
     "url": "assets/html2canvas.esm-ezMWrafe.js",

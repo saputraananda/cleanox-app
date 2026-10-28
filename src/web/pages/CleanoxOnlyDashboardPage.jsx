@@ -468,7 +468,7 @@ export default function CleanoxOnlyDashboardPage() {
             <Sparkles className="w-5 h-5 text-indigo-500" />
             Grafik Analitik Revenue
           </h2>
-          <p className="text-xs text-slate-500 mt-0.5">Data berdasarkan tanggal layanan transaksi.</p>
+          <p className="text-xs text-slate-500 mt-0.5">Data omzet berdasarkan tanggal pelunasan transaksi (omzet kas lunas).</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-4">
@@ -688,7 +688,7 @@ export default function CleanoxOnlyDashboardPage() {
             <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
               <h3 className="text-sm font-bold text-slate-800">Trend Omzet Harian</h3>
               <p className="text-[11px] text-slate-400 mt-0.5 mb-4">
-                Omzet harian yang sudah lunas saja (per tanggal layanan, exclude cancelled)
+                Omzet harian yang sudah lunas saja (per tanggal pelunasan, exclude cancelled)
               </p>
               <div className="h-64">
                 {trendChartData.length === 0 ? (
@@ -909,7 +909,7 @@ export default function CleanoxOnlyDashboardPage() {
                   <tr className="bg-slate-50 border-b border-slate-100 text-[12px] font-bold text-slate-400 uppercase tracking-wider">
                     <th className="px-4 py-2.5 text-left">No Transaksi</th>
                     <th className="px-4 py-2.5 text-left">Customer</th>
-                    <th className="px-4 py-2.5 text-left">Tanggal Layanan</th>
+                    <th className="px-4 py-2.5 text-left">Tgl Layanan / Pelunasan</th>
                     <th className="px-4 py-2.5 text-left">Status</th>
                     <th className="px-4 py-2.5 text-left">Pembayaran</th>
                     <th className="px-4 py-2.5 text-left">Metode</th>
@@ -951,7 +951,14 @@ export default function CleanoxOnlyDashboardPage() {
                           </Link>
                         </td>
                         <td className="px-4 py-2.5 font-semibold text-slate-700">{row.customer_name || '—'}</td>
-                        <td className="px-4 py-2.5 text-slate-500">{formatDateTime(row.service_date)}</td>
+                        <td className="px-4 py-2.5 text-slate-500">
+                          <div>{formatDateTime(row.service_date)}</div>
+                          {row.payment_settled_date && (
+                            <div className="text-[10px] text-emerald-600 font-medium">
+                              Lunas: {row.payment_settled_date}
+                            </div>
+                          )}
+                        </td>
                         <td className="px-4 py-2.5">
                           <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-bold border ${STATUS_STYLE[row.status] || STATUS_STYLE.Draft}`}>
                             {String(row.status || '').replace(/_/g, ' ')}
